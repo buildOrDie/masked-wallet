@@ -1,9 +1,9 @@
 // Background worker for the private Shielded check. The wallet runs several of these (one per CPU core)
 // and splits each block's transactions between them. Keys stay in this extension's memory only.
-import SECP_WASM from '../node_modules/tiny-secp256k1/lib/secp256k1.wasm';
+import SECP_WASM from '../../node_modules/tiny-secp256k1/lib/secp256k1.wasm';
 import { hexToBytes } from '@noble/hashes/utils';
-import { initFast, fastScanOutputs } from './sp-fast.mjs';
-import * as sp from './sp-core.mjs';
+import { initFast, fastScanOutputs } from '../crypto/sp-fast.mjs';
+import * as sp from '../crypto/sp-core.mjs';
 
 const ready = initFast(SECP_WASM);
 let K = null;

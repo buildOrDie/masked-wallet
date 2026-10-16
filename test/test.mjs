@@ -1,5 +1,5 @@
 import fs from 'fs';
-import * as sp from '../src/sp-core.mjs';
+import * as sp from '../src/crypto/sp-core.mjs';
 const { fromHex, toHex, util } = sp;
 const V = JSON.parse(fs.readFileSync(new URL('./vectors.json', import.meta.url)));
 let pass = 0, fail = 0;

@@ -1,0 +1,78 @@
+import { esc, fmtBtc, short, sumSats } from '../../core/format.mjs';
+import { View } from '../View.mjs';
+import { btcLogo, copyBtn, head, headWith, rowKV, shieldLogo, sideLogo } from '../html.mjs';
+
+/** Send bitcoin, or Shield (Public → Shielded): form → review → done. */
+export class SendView extends View {
+  /** @param {import('../../app/MaskedApp.mjs').MaskedApp} app */
+  constructor(app, mode) {
+    super(app);
+    this.mode = mode; // 'send' | 'shield'
+  }
+
+  render() {
+    const st = this.state.send;
+    if (st.stage === 'review' && st.built) return this.review(st.built);
+    if (st.stage === 'done' && st.built) {
+      const b = st.built;
+      return this.done(b.toSelf ? 'Shielded!' : 'Sent!', `${fmtBtc(b.amount)} ${this.unit}${b.toSelf ? ' moved to your Shielded balance.' : ' is on its way.'}`, b.txid, b.toSelf ? 'It shows up as pending until the next block.' : '');
+    }
+    return this.form();
+  }
+
+  form() {
+    const { app, unit } = this;
+    const shield = this.mode === 'shield';
+    const from = shield ? 'public' : this.f.sendFrom;
+    const bal = sumSats(app.coins.spendable(from));
+    const k = this.account.codec.kind(this.f.sendTo);
+    const to = shield
+      ? `<div class="flow"><div class="flow-end">${btcLogo}<span><b>Public</b><small>${fmtBtc(bal)} ${unit}</small></span></div><span class="flow-arrow">→</span><div class="flow-end">${shieldLogo}<span><b>Shielded</b><small>${fmtBtc(sumSats(app.coins.shielded))} ${unit}</small></span></div></div>`
+      : `<label class="field"><span class="lbl">To</span><input id="sendTo" data-bind="sendTo" class="mono" spellcheck="false" autocomplete="off" value="${esc(this.f.sendTo)}" placeholder="Paste a Bitcoin or shielded address">
+          <span class="addr-kind k-${k.kind}" id="sendKind">${SendView.kindNote(k)}</span></label>`;
+    return `
+    ${head(shield ? 'Shield' : 'Send')}
+    ${shield ? `<section class="explain">${shieldLogo}<p><b>Shielding</b> moves coins from your Public balance into your Shielded balance. After that, your coins can't be traced to your public address.</p></section>` : ''}
+    <section class="card form">
+      ${shield ? '' : `<div class="field"><span class="lbl">From</span>${this.fromSeg('sendFrom')}</div>`}
+      ${to}
+      <label class="field"><span class="lbl">Amount <span class="lbl-r">Available ${fmtBtc(bal)} ${unit}</span></span>
+        <div class="amount"><input id="sendAmount" data-bind="sendAmount" inputmode="decimal" autocomplete="off" value="${esc(this.f.sendAmount)}" placeholder="0.00"><span class="unit">${unit}</span><button class="max" data-max="${from}">MAX</button></div>
+      </label>
+      <div class="field"><span class="lbl">Network fee</span>${this.feeChips()}</div>
+      ${this.statusLine('send')}
+      <button class="btn primary wide" id="btnReviewSend">${shield ? 'Review shield' : 'Review'}</button>
+    </section>`;
+  }
+
+  /** Under the To field: what kind of address it is, or a shortcut to your own Shielded address. */
+  static kindNote(k) {
+    return k.kind === 'empty' ? '<button class="link" data-fillself>Send to my own Shielded address</button>' : esc(k.text);
+  }
+
+  review(b) {
+    const { unit } = this;
+    const busy = this.state.busy;
+    const toTxt = b.toSelf ? `${shieldLogo}<b>My Shielded balance</b>` : `<span class="mono">${esc(short(b.recipient, 10))}</span>`;
+    return `
+    ${headWith('data-reviewback', 'Confirm')}
+    <section class="card review">
+      <p class="hero-label">${b.toSelf ? 'You are shielding' : 'You are sending'}</p>
+      <p class="hero-bal">${fmtBtc(b.amount)} <small>${unit}</small></p>
+      <div class="kv">
+        ${rowKV('From', sideLogo(b.from))}
+        ${rowKV('To', toTxt)}
+        ${b.toSelf ? '' : rowKV('Privacy', b.kind === 'shielded' ? '<span class="good">Private — recipient address is hidden</span>' : '<span class="meh">Public address</span>')}
+        ${rowKV('Network fee', `${fmtBtc(b.fee)} ${unit}`)}
+        ${rowKV('Total', `<b>${fmtBtc(b.amount + b.fee)} ${unit}</b>`)}
+      </div>
+      ${this.statusLine('send')}
+      <button class="btn primary wide" id="btnConfirmSend" ${busy ? 'disabled' : ''}>${busy ? 'Sending…' : b.toSelf ? 'Confirm & shield' : 'Confirm & send'}</button>
+      <details class="adv"><summary>Transaction details</summary>
+        <div class="kv small">${rowKV('Txid', `<span class="mono">${short(b.txid, 8)}</span>`)}${rowKV('Coin used', `<span class="mono">${short(b.coin.txid, 6)}:${b.coin.vout}</span>`)}</div>
+        <textarea rows="3" class="mono" readonly>${b.hex}</textarea>${copyBtn(b.hex, 'Copy raw tx')}
+      </details>
+    </section>`;
+  }
+}
+

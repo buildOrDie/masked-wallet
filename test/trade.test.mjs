@@ -2,8 +2,8 @@
 import * as btc from '@scure/btc-signer';
 import { hex } from '@scure/base';
 import { schnorr } from '@noble/curves/secp256k1';
-import * as sp from '../src/sp-core.mjs';
-import { tradeKey, signKeyPathInputs, buildShieldedPay, buildReturnToShielded, TRADE_PADDING } from '../src/trade-core.mjs';
+import * as sp from '../src/crypto/sp-core.mjs';
+import { tradeKey, buildShieldedPay, buildReturnToShielded, TRADE_PADDING } from '../src/trade/trade-core.mjs';
 
 const { util, toHex, fromHex } = sp;
 let pass = 0, fail = 0;

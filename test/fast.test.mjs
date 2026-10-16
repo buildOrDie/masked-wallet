@@ -1,7 +1,7 @@
 // The WebAssembly scanner must give exactly the same results as sp-core on the official BIP 352 vectors.
 import fs from 'fs';
-import * as sp from '../src/sp-core.mjs';
-import { initFast, fastScanOutputs } from '../src/sp-fast.mjs';
+import * as sp from '../src/crypto/sp-core.mjs';
+import { initFast, fastScanOutputs } from '../src/crypto/sp-fast.mjs';
 const { fromHex, toHex, util } = sp;
 const wasm = fs.readFileSync(new URL('../node_modules/tiny-secp256k1/lib/secp256k1.wasm', import.meta.url));
 if (!(await initFast(wasm))) { console.log('FAIL WebAssembly init'); process.exit(1); }

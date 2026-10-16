@@ -21,7 +21,7 @@ export async function initFast(bytes) {
       './rand.js': { generateInt32: () => crypto.getRandomValues(new Int32Array(1))[0] },
       './validate_error.js': { throwError: (code) => { throw new Error(`secp256k1 error ${code}`); } },
     });
-    W = instance.exports; M = null;
+    W = /** @type {any} */ (instance.exports); M = null;
     W.initializeContext();
     // self-test against the pure-JS implementation before trusting it
     const k = fromHex('6e5f2a4d1c3b8a7f9e0d1c2b3a4f5e6d7c8b9a0f1e2d3c4b5a69788796a5b4c3');

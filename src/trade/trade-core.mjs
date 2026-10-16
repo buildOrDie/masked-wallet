@@ -9,7 +9,7 @@
 // Only the spend key can derive it: a scan key alone (or a scan server) never sees trade addresses.
 import * as btc from '@scure/btc-signer';
 import { schnorr, secp256k1 } from '@noble/curves/secp256k1';
-import * as sp from './sp-core.mjs';
+import * as sp from '../crypto/sp-core.mjs';
 
 const { toHex, fromHex, util } = sp;
 const { b2n, n2b, mulG } = util;
@@ -85,7 +85,7 @@ export function buildShieldedPay({ coins, outputs, changeAddress, feeRate }) {
   }
   if (!done) {
     const est = Math.ceil(vsizeOf(Math.max(1, pool.length), outputs.length + 1) * feeRate);
-    const err = new Error(`Not enough Shielded bitcoin. This needs about ${need + est} sats.`); err.short = need + est - have; throw err;
+    throw Object.assign(new Error(`Not enough Shielded bitcoin. This needs about ${need + est} sats.`), { short: need + est - have });
   }
   const tx = new btc.Transaction({ allowUnknownOutputs: false });
   for (const c of pick) tx.addInput({ txid: c.txid, index: c.vout, sequence: RBF_SEQ, witnessUtxo: { script: btc.OutScript.encode({ type: 'tr', pubkey: util.xOnly(mulG(b2n(fromHex(c.priv)))) }), amount: BigInt(c.value) } });
