@@ -1,6 +1,6 @@
 {
   "name": "masked-wallet",
-  "version": "2.12.9",
+  "version": "2.13.0",
   "private": true,
   "type": "module",
   "description": "MASKED: open-source Bitcoin wallet for Chrome with a Shielded balance (BIP 352 silent payments), BRC-20 / BRC2.0 and a UniSat-compatible window.masked provider",

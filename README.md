@@ -32,11 +32,11 @@ Node 20+:
 
 ```sh
 npm ci
-npm test        # BIP 352 vectors, the fast scanner, private trading and wallet checks
+npm run check   # lint, type check, and the tests (BIP 352 vectors, fast scanner, private trading, wallet services)
 npm run build   # rebuilds extension/ from src/
 ```
 
-The build is reproducible: `extension/` built from this source is byte-for-byte the code published on the Chrome Web Store (the store package only drops the manifest `key`).
+The build is reproducible: the same source always gives the same `extension/`. The Chrome Web Store has version 2.12.9, built byte-for-byte from the tag [`v2.12.9`](../../tree/v2.12.9) (the store package only drops the manifest `key`). `main` is 2.13.0: the same wallet, rewritten into classes and modules (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)); it comes to the store with the next update.
 
 ## Use it from your website: `window.masked`
 
@@ -87,13 +87,17 @@ maskedwallet.com can trade from the Shielded balance: `getTradeAccount()`, `fund
 
 ## How it works
 
-| File | What it does |
+The wallet is a set of small classes wired together by one composition root (`src/app/MaskedApp.mjs`). Full map: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+| Folder | What it does |
 |---|---|
-| `src/sp-core.mjs` | BIP 352 silent payments: addresses, sending, scanning. Pure, checked against the official test vectors. |
-| `src/sp-fast.mjs`, `src/scan-worker.mjs` | Fast scanning (libsecp256k1 in WebAssembly, one worker per CPU core). |
-| `src/trade-core.mjs` | Private trading: trade addresses from the spend key, moves between Shielded and a trade address. |
-| `src/app.mjs` | The wallet: vault, sync, sending, inscriptions, BRC-20 / BRC2.0, approvals. |
-| `src/provider/` | `inpage.js` (`window.masked`), `content.js` (bridge), `background.js` (routing and approvals, never holds keys). |
+| `src/crypto/` | BIP 352 silent payments (`sp-core.mjs`, pure, checked against the official vectors) and the WebAssembly scanner. |
+| `src/bitcoin/`, `src/ordinals/` | Addresses, taproot, hand-built transactions and signatures; inscription envelopes and BRC-20 / BRC2.0 rules. |
+| `src/wallet/` | Keys, coins and their protection, sends and inscriptions, the encrypted vault. |
+| `src/scan/` | Finding Shielded payments: the private check, worker threads, and syncing with the chain. |
+| `src/tokens/`, `src/trade/` | Token balances and transactions; private trading from Shielded. |
+| `src/dapp/`, `src/provider/` | `window.masked`: approvals and PSBT signing in the wallet; `inpage.js`, `content.js` and `background.js` (routing, never holds keys). |
+| `src/ui/` | One class per screen, a renderer and one input controller. |
 | `extension-template/` | Manifest assets: page shell, icons. |
 
 Keys stay in the browser: the recovery phrase is stored only as an AES-256-GCM vault (PBKDF2, 600,000 iterations). The background script and websites never see keys. Shielded scanning downloads public block data and never sends the scan key anywhere.

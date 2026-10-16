@@ -101,7 +101,7 @@ Inscribes a BRC-20 / BRC2.0 **transfer** of `amount` on the Public address (two 
 
 Sites can trade from the user's Shielded balance without ever seeing the Public or Shielded address. Available on **maskedwallet.com** for now; other origins get `4200`.
 
-- **Trade address:** a plain `bc1p…` made from the spend key (`src/trade-core.mjs`), not linked to the Public or Shielded address.
+- **Trade address:** a plain `bc1p…` made from the spend key (`src/trade/trade-core.mjs`), not linked to the Public or Shielded address.
 - **Shielded listings (2.12.5+):** tokens are listed straight from the Shielded coin that holds them, from that coin's one-time address.
 
 ### `getTradeAccount(): Promise<TradeAccount>` 🔐 (first time per site)

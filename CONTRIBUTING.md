@@ -6,7 +6,7 @@ Thanks for helping! A few ground rules keep a wallet codebase safe.
 
 ```sh
 npm ci
-npm test         # must stay: pass 2468 fail 0
+npm run check    # lint + type check + tests; must pass (BIP 352 vectors: pass 2468 fail 0)
 npm run build    # rebuild extension/ (the installable extension)
 ```
 
@@ -22,8 +22,12 @@ Load the folder as an unpacked extension (see README) and use **Signet** for man
 
 ## Code layout
 
-- `src/sp-core.mjs`: pure BIP 352 logic, covered by the official vectors. Keep it dependency-light and side-effect free.
-- `src/app.mjs`: the wallet UI and transaction building.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). In short:
+
+- `src/crypto/`, `src/bitcoin/`, `src/ordinals/`, `src/core/` are pure (no state, no network). Keep them that way and test them in Node.
+- Services are classes that take the app (`constructor(app)`) and reach other services as `this.app.<name>`. Add new ones in `src/app/MaskedApp.mjs`.
+- A new screen is a class extending `View` (`src/ui/View.mjs`) with a `render()`; register it in `src/ui/Screen.mjs` and handle its buttons in `src/ui/Controller.mjs`.
+- Never rename a storage key: existing wallets read them (`wren.*`, per-wallet ids `net:Bscan:Bspend`).
 - `src/provider/*`: the dApp provider (page, bridge, background). The background must never handle keys.
 
 ## Reporting bugs
