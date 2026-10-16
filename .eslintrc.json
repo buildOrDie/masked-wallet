@@ -1,0 +1,21 @@
+{
+  "root": true,
+  "parserOptions": { "ecmaVersion": 2022, "sourceType": "module" },
+  "env": { "browser": true, "es2022": true },
+  "globals": { "chrome": "readonly" },
+  "plugins": ["import"],
+  "settings": { "import/resolver": { "node": { "extensions": [".mjs", ".js", ".json"] } } },
+  "rules": {
+    "no-undef": "error",
+    "no-unused-vars": ["error", { "args": "none", "varsIgnorePattern": "^_", "ignoreRestSiblings": true }],
+    "no-dupe-class-members": "error",
+    "no-unreachable": "error",
+    "no-self-assign": "error",
+    "import/named": "error",
+    "import/no-unresolved": ["error", { "ignore": ["\\.wasm$"] }]
+  },
+  "overrides": [
+    { "files": ["test/**/*.mjs", "scripts/**/*.mjs"], "env": { "node": true, "browser": false } },
+    { "files": ["src/scan/scan-worker.mjs"], "env": { "worker": true } }
+  ]
+}
