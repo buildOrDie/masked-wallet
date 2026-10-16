@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/img/banner.png" alt="MASKED: a Bitcoin wallet with a private side"></p>
+
 # MASKED
 
 **A Bitcoin wallet with a private side.** MASKED is an open-source Chrome extension with two balances:
@@ -9,13 +11,15 @@ It mints, inscribes and sends BRC-20 and BRC2.0 tokens, and gives websites a Uni
 
 [**Add to Chrome**](https://chromewebstore.google.com/detail/masked-wallet/pojmpfcbdmacabhckemelcbkmckhaoig) · [maskedwallet.com](https://maskedwallet.com) · [@masked_wallet](https://x.com/masked_wallet)
 
-<p>
-  <img src="docs/img/screenshot-1-home.png" width="260" alt="Home: Public and Shielded balances">
-  <img src="docs/img/screenshot-2-token.png" width="260" alt="A BRC2.0 token">
-  <img src="docs/img/screenshot-3-inscribe.png" width="260" alt="Inscribing a transfer">
-</p>
-
 > Experimental, unaudited software. Use small amounts. Read [SECURITY.md](SECURITY.md).
+
+## Screenshots
+
+| Public | Shielded | Shielded token |
+|:-:|:-:|:-:|
+| <img src="docs/img/home-public.png" width="250" alt="Home on the Public side"> | <img src="docs/img/home-shielded.png" width="250" alt="Home on the Shielded side"> | <img src="docs/img/token-shielded.png" width="250" alt="A BRC2.0 token held in Shielded"> |
+| **Receive privately** | **Trade from Shielded** | **List straight from Shielded** |
+| <img src="docs/img/receive-shielded.png" width="250" alt="Shielded receive address"> | <img src="docs/img/approve-trade.png" width="250" alt="Approval to trade from Shielded"> | <img src="docs/img/approve-list.png" width="250" alt="Approval to inscribe a transfer on a Shielded coin"> |
 
 ## Install
 
