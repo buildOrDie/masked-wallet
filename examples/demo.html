@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>window.masked demo</title>
+<style>
+  :root { --bg: #0b0b0c; --card: #17171a; --line: #2a2a30; --fg: #f4f4f5; --muted: #8b8b94; --btc: #f7931a; --ok: #3fd68f; --err: #ff6b6b; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 Inter, system-ui, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; display: grid; gap: 16px; }
+  h1 { margin: 0; font-size: 24px; } h2 { margin: 0 0 8px; font-size: 15px; }
+  p { margin: 0; color: var(--muted); }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: grid; gap: 10px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  button { font: inherit; font-weight: 700; border: 0; border-radius: 10px; padding: 9px 14px; background: #26262c; color: var(--fg); cursor: pointer; }
+  button.primary { background: linear-gradient(135deg, #ffb547, var(--btc)); color: #141414; }
+  input, textarea, select { font: 13px ui-monospace, Menlo, monospace; color: var(--fg); background: #0f0f12; border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; width: 100%; }
+  #log { font: 12px/1.6 ui-monospace, Menlo, monospace; white-space: pre-wrap; word-break: break-all; max-height: 360px; overflow: auto; background: #0f0f12; border-radius: 10px; padding: 10px; margin: 0; }
+  .ok { color: var(--ok); } .err { color: var(--err); }
+  code { color: var(--btc); }
+</style>
+</head>
+<body>
+<main>
+  <div><h1>window.masked demo dApp</h1><p>Open this page over http(s) with the MASKED extension installed. Every call is logged below.</p></div>
+  <section>
+    <h2>Status</h2>
+    <p id="status">Looking for <code>window.masked</code>…</p>
+    <div class="row">
+      <button class="primary" id="connect">Connect</button>
+      <button data-call="getAccounts">getAccounts</button>
+      <button data-call="getNetwork">getNetwork</button>
+      <button data-call="getChain">getChain</button>
+      <button data-call="getPublicKey">getPublicKey</button>
+      <button data-call="getBalance">getBalance</button>
+      <button data-call="getShieldedAddress">getShieldedAddress</button>
+      <button data-call="disconnect">disconnect</button>
+    </div>
+  </section>
+  <section>
+    <h2>Sign a message</h2>
+    <input id="msg" value="Hello from a MASKED dApp">
+    <div class="row"><button id="signEcdsa">signMessage (ecdsa)</button><button id="signBip322">signMessage (bip322-simple)</button></div>
+  </section>
+  <section>
+    <h2>Send bitcoin</h2>
+    <input id="to" placeholder="tb1… / bc1… or a shielded tsp1… / sp1… address">
+    <div class="row"><input id="sats" value="1000" style="width:140px"><span>sats</span><input id="rate" placeholder="fee rate (optional)" style="width:180px"><button id="send">sendBitcoin</button></div>
+  </section>
+  <section>
+    <h2>Sign a PSBT</h2>
+    <textarea id="psbt" rows="3" placeholder="PSBT hex"></textarea>
+    <div class="row"><button id="signPsbt">signPsbt</button><button id="pushPsbt">pushPsbt</button></div>
+  </section>
+  <section>
+    <h2>Network</h2>
+    <div class="row"><select id="netSel" style="width:auto"><option>signet</option><option>livenet</option></select><button id="switchNet">switchNetwork</button></div>
+  </section>
+  <section><h2>Log</h2><pre id="log"></pre></section>
+</main>
+<script>
+  const $ = (s) => document.querySelector(s);
+  const log = (label, v, cls = '') => {
+    const line = document.createElement('div');
+    line.className = cls;
+    line.textContent = `${new Date().toLocaleTimeString()}  ${label}  ${typeof v === 'string' ? v : JSON.stringify(v)}`;
+    $('#log').prepend(line);
+  };
+  async function call(name, ...args) {
+    const p = window.masked;
+    if (!p) return log(name, 'window.masked not found — is the extension installed?', 'err');
+    try { const r = await p[name](...args); log(name, r, 'ok'); return r; }
+    catch (e) { log(name, `${e.code ?? ''} ${e.message}`, 'err'); }
+  }
+  function ready() {
+    $('#status').textContent = 'window.masked found ✓ (isMasked=' + window.masked.isMasked + ')';
+    window.masked.on('accountsChanged', (a) => log('event accountsChanged', a));
+    window.masked.on('networkChanged', (n) => log('event networkChanged', n));
+  }
+  if (window.masked) ready(); else window.addEventListener('masked#initialized', ready, { once: true });
+
+  $('#connect').onclick = () => call('requestAccounts');
+  document.querySelectorAll('[data-call]').forEach((b) => (b.onclick = () => call(b.dataset.call)));
+  $('#signEcdsa').onclick = () => call('signMessage', $('#msg').value, 'ecdsa');
+  $('#signBip322').onclick = () => call('signMessage', $('#msg').value, 'bip322-simple');
+  $('#send').onclick = () => call('sendBitcoin', $('#to').value.trim(), Number($('#sats').value), $('#rate').value ? { feeRate: Number($('#rate').value) } : {});
+  $('#signPsbt').onclick = async () => { const r = await call('signPsbt', $('#psbt').value.trim()); if (r) $('#psbt').value = r; };
+  $('#pushPsbt').onclick = () => call('pushPsbt', $('#psbt').value.trim());
+  $('#switchNet').onclick = () => call('switchNetwork', $('#netSel').value);
+</script>
+</body>
+</html>

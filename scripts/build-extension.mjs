@@ -1,0 +1,14 @@
+import { build } from 'esbuild';
+import { cp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
+const out=resolve(process.argv[2] || resolve(root,'dist/extension'));
+await mkdir(out,{recursive:true});
+await cp(resolve(root,'extension-template'),out,{recursive:true});
+const common={bundle:true,minify:true,platform:'browser',format:'iife',loader:{'.wasm':'binary'}};
+await build({...common,entryPoints:[resolve(root,'src/app.mjs')],outfile:resolve(out,'app.bundle.js')});
+await build({...common,entryPoints:[resolve(root,'src/scan-worker.mjs')],outfile:resolve(out,'scan-worker.js')});
+for(const [name,source] of [['background.js','background'],['content.js','content'],['inpage.js','inpage']])await build({...common,entryPoints:[resolve(root,`src/provider/${source}.js`)],outfile:resolve(out,name)});
+await writeFile(resolve(out,'manifest.json'),await readFile(resolve(root,'src/manifest.json')));
+console.log('Extension built at '+out);

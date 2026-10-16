@@ -1,0 +1,73 @@
+{
+  "manifest_version": 3,
+  "name": "MASKED Wallet",
+  "version": "2.12.9",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzGyPzJEarjSiLK0MEsxK4BMde4kYt82B12d7QkjdTYxqnHJ7f/kfTiRlzuJz7+gwPLJVPAcy6mEbYsm3KD6ydbipktJkqSvgjcSaoZ9v8XYqwO+RNXsMggFnInglG/H3uP58GxqpXE7ooTs/OxyMWVkb2xV8UyqsvamQsOhLywf9QLwKTUf8JsXahA3afceciX2kD0ovLDh0ejCxB9LpIAX9xI07qQADyfg003878QaT8nQnFoG9hcvZOzdWU9+6BgpOs7x5zABfFUWmVh334wFm57ExbozCt1Sy8cvos8fqKZphm1EsaF+YzExqr1nTql/YD2RvGAl8YLorNtFPnQIDAQAB",
+  "description": "Bitcoin wallet with a Public and a Shielded (silent payments) balance. Mint, deploy and trade BRC-20 and BRC2.0. Self-custody.",
+  "action": {
+    "default_title": "MASKED",
+    "default_popup": "masked.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "host_permissions": [
+    "https://mempool.space/*",
+    "https://blockstream.info/*",
+    "https://ordinals.com/*",
+    "https://signet.ordinals.com/*",
+    "https://scan.maskedwallet.com/*",
+    "https://tokens.maskedwallet.com/*"
+  ],
+  "permissions": [
+    "storage",
+    "sidePanel"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": false
+    },
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "inpage.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": false,
+      "world": "MAIN"
+    }
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ],
+  "side_panel": {
+    "default_path": "masked.html?panel=1"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  }
+}
