@@ -2,6 +2,7 @@ import { generateMnemonic } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english';
 import { SignetWallet } from './SignetWallet.mjs';
 import { loadRgbSdk } from './load-sdk.mjs';
+import { esc, fmtBtc } from '../core/format.mjs';
 import { baseUnits, testFee } from './config.mjs';
 const service = new SignetWallet({ loadSdk: loadRgbSdk, storage: localStorage });
 const $ = id => /** @type {any} */ (document.getElementById(id));
@@ -12,6 +13,7 @@ function controls() {
   document.querySelectorAll('[data-wallet]').forEach(el => { /** @type {HTMLButtonElement} */ (el).disabled = !ready; });
   $('open').textContent = service.exists ? 'Unlock test wallet' : 'Create test wallet';
   $('password').value = '';
+  $('backup-state').textContent = service.backupRequired ? 'Required' : 'Saved';
   $('backup-note').textContent = service.backupRequired ? 'Export an encrypted backup before the next transaction.' : 'Keep your latest encrypted backup and password.';
 }
 async function refresh() {
@@ -19,6 +21,10 @@ async function refresh() {
   $('address').textContent = data.address;
   $('assets').textContent = json(data.groups);
   $('balance').textContent = json(data.btc);
+  const settled = Number(data.btc?.vanilla?.settled || 0) + Number(data.btc?.colored?.settled || 0);
+  $('btc-amount').textContent = fmtBtc(settled);
+  const assets = Object.values(data.groups || {}).flat().filter(asset => asset && typeof asset === 'object');
+  $('asset-list').innerHTML = assets.length ? assets.map(asset => `<div class="asset-row"><span class="asset-icon">R</span><span><b>${esc(asset.ticker || asset.name || 'RGB asset')}</b><small>Test asset · ${esc(String(asset.assetId || '').slice(0, 16))}…</small></span><span class="asset-value">${esc(String(asset.balance?.settled ?? '—'))}</span></div>`).join('') : '<p class="muted small">No test assets received yet.</p>';
   $('history').textContent = json(data.transfers);
   controls();
 }
@@ -86,3 +92,10 @@ else navigator.locks.request('masked-rgb-signet-v1', { ifAvailable: true }, asyn
 window.addEventListener('pagehide', () => { ready = false; pending = null; service.close(); releaseLock?.(); });
 for (const event of ['pointerdown', 'keydown']) document.addEventListener(event, () => { activity = Date.now(); });
 setInterval(() => { if (ready && Date.now() - activity > 5 * 60 * 1000 && !service.busy) { service.close().finally(() => location.reload()); } }, 10000);
+
+for (const button of document.querySelectorAll('[data-section]')) button.addEventListener('click', () => {
+  document.getElementById(/** @type {HTMLElement} */ (button).dataset.section)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+new ResizeObserver(() => {
+  if (window.parent !== window) window.parent.postMessage({ type: 'masked:rgb-height', height: Math.ceil(document.body.getBoundingClientRect().height) }, location.origin);
+}).observe(document.body);

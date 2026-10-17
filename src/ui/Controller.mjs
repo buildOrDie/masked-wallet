@@ -254,7 +254,8 @@ export class Controller {
         state.status.scansrv = [`Using ${EsploraPool.hostOf(app.scanServer.defaultUrl)}.`, 'ok']; this.render();
         sync.run(4); break;
       case 'btnScanOff': await app.scanServer.save(''); state.status.scansrv = ['Scan server off.', 'ok']; this.render(); break;
-      case 'btnRgbSignet': window.open(new URL('rgb-signet.html', location.href).href, '_blank', 'noopener'); break;
+      case 'btnRgbSignet': state.view = 'rgb'; this.render(); break;
+      case 'btnRgbTab': window.open(new URL('masked.html?screen=rgb', location.href).href, '_blank', 'noopener'); break;
       case 'btnPanel': await app.platform.openSidePanel(); break;
       case 'btnOnboard': await app.lock.onboard(); break;
       case 'btnMigrate': await app.lock.migrate(); break;

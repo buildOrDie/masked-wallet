@@ -170,6 +170,14 @@ export class MaskedApp {
     this.side.set(this.side.get()); // Send, Receive and Mint start on the side picked on Home
     const v = this.store.get('wren.view');
     if (NAV.some(([k]) => k === v)) state.view = v;
+    if (new URLSearchParams(location.search).get('screen') === 'rgb') state.view = 'rgb';
+    window.addEventListener('message', event => {
+      const frame = document.getElementById('rgbFrame');
+      if (!(frame instanceof HTMLIFrameElement) || event.source !== frame.contentWindow) return;
+      if (event.data?.type !== 'masked:rgb-height') return;
+      const height = Number(event.data.height);
+      if (Number.isFinite(height)) frame.style.height = `${Math.max(420, Math.min(5000, height))}px`;
+    });
     return this.lock.boot();
   }
 }

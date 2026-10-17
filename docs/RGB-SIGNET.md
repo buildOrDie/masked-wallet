@@ -1,6 +1,6 @@
 # RGB Signet lab
 
-Open **Settings → RGB Signet lab** in the rebuilt extension. It opens a full extension tab so the SDK is not interrupted when the normal popup closes. This is an experimental, on-chain RGB test integration on Utexo Signet. It does not provide real USDT, mainnet RGB, Lightning channels or DEX trading.
+Open **Wallet → RGB Signet** or **Settings → RGB Signet lab** in the rebuilt extension. The lab uses the existing MASKED shell and wallet styles. Public and Shielded BTC remain in their original wallet view; RGB has a separate test account. Use **Open full wallet tab** before a transfer so closing the popup does not interrupt the SDK. This is an experimental, on-chain RGB test integration on Utexo Signet. It does not provide real USDT, mainnet RGB, Lightning channels or DEX trading.
 
 ## First run
 

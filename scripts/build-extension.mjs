@@ -36,4 +36,7 @@ const chunkSize=Math.ceil(rlnBytes.length/4);
 for(let i=0;i<4;i++)await writeFile(resolve(out,`rln-wasm-${i}.bin`),rlnBytes.subarray(i*chunkSize,(i+1)*chunkSize));
 await cp(resolve(bdkDir,'bitcoindevkit_bg.wasm'),resolve(out,'bitcoindevkit_bg.wasm'));
 await cp(resolve(root,'src/rgb/signet.html'),resolve(out,'rgb-signet.html'));
-await cp(resolve(root,'src/rgb/signet.css'),resolve(out,'rgb-signet.css'));
+const shell=await readFile(resolve(root,'src/shell.html'),'utf8');
+const walletCss=shell.match(/<style>([\s\S]*?)<\/style>/)?.[1];
+if(!walletCss)throw new Error('Wallet design stylesheet not found');
+await writeFile(resolve(out,'rgb-signet.css'),walletCss+'\n'+await readFile(resolve(root,'src/rgb/signet.css'),'utf8'));

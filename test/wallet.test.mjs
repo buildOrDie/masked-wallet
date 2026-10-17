@@ -191,3 +191,20 @@ test('token pages say how far a balance was checked', () => {
   app.tokens.idx.validation.worldx = 'matched';
   assert.match(view.indexerLine('worldx'), /OPI \+ UniSat balance match/);
 });
+
+// The RGB entry retains both existing BTC modes and uses a separate runtime.
+test('RGB navigation preserves Public and Shielded wallet designs', () => {
+  const app = walletApp(keys());
+  for (const side of ['public', 'shielded']) {
+    app.side.set(side);
+    const html = app.ui.views.home.render();
+    assert.match(html, /data-side="public"/);
+    assert.match(html, /data-side="shielded"/);
+    assert.match(html, /data-go="rgb"/);
+    assert.match(html, side === 'shielded' ? /Shielded balance/ : /Public balance/);
+  }
+  const rgb = app.ui.views.rgb.render();
+  assert.match(rgb, /src="rgb-signet.html"/);
+  assert.match(rgb, /id="btnRgbTab"/);
+  assert.equal(app.ui.navOf('rgb'), 'home');
+});
