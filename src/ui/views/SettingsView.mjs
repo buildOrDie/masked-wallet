@@ -1,3 +1,4 @@
+import { RgbPanel } from '../RgbPanel.mjs';
 import { esc, short } from '../../core/format.mjs';
 import { toHex } from '../../core/bytes.mjs';
 import * as sp from '../../crypto/sp-core.mjs';
@@ -50,6 +51,7 @@ export class SettingsView extends View {
           ${state.net === 'main' ? '<p class="muted small">Mainnet blocks are large, so long ranges take a while on public servers. Your own server (below) is much faster.</p>' : ''}
         </div></details>
     </section>
+    ${RgbPanel.settings(app)}
     ${this.security(hasVault)}
     ${this.statusLine('wallet')}
     ${this.sites()}

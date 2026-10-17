@@ -1,3 +1,4 @@
+import { RgbPanel } from '../RgbPanel.mjs';
 import { esc } from '../../core/format.mjs';
 import { View } from '../View.mjs';
 import { I, addrChunks, btcLogo, head, qrSvg, seg, shieldLogo } from '../html.mjs';
@@ -5,6 +6,7 @@ import { I, addrChunks, btcLogo, head, qrSvg, seg, shieldLogo } from '../html.mj
 /** Receive: the Public or Shielded address as text and QR code. */
 export class ReceiveView extends View {
   render() {
+    if (this.app.rgb.available && this.app.rgb.mode === 'receive') return RgbPanel.form(this.app, 'receive');
     const { account } = this;
     const kind = this.f.recvKind;
     const a = kind === 'shielded' ? account.shieldAddr() : account.pubAddr();

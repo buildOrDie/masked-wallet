@@ -109,3 +109,7 @@ Pull requests are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Please report
 ## License
 
 [MIT](LICENSE)
+
+## RGB Signet prototype
+
+On **Signet**, Settings → **RGB** enables RGB test assets in the existing Wallet, Receive and Send screens, with encrypted RGB backup/restore. Utexo custom Signet funding remains separate from public Bitcoin Signet. Test assets only; no real USDT. See [the setup and manual test guide](docs/RGB-SIGNET.md).

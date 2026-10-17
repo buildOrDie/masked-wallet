@@ -191,3 +191,45 @@ test('token pages say how far a balance was checked', () => {
   app.tokens.idx.validation.worldx = 'matched';
   assert.match(view.indexerLine('worldx'), /OPI \+ UniSat balance match/);
 });
+
+// RGB shares existing views and never changes BTC balances or addresses.
+test('RGB is integrated into Signet Home, Send, Receive and Settings', () => {
+  const app = walletApp(keys(), 'signet');
+  app.state.lockState = 'open';
+  for (const side of ['public', 'shielded']) {
+    app.side.set(side);
+    const html = app.ui.views.home.render();
+    assert.match(html, /data-side="public"/);
+    assert.match(html, /data-side="shielded"/);
+    assert.match(html, /RGB assets/);
+    assert.doesNotMatch(html, /iframe|data-go="rgb"/);
+    assert.match(html, side === 'shielded' ? /Shielded balance/ : /Public balance/);
+  }
+  const address = app.account.pubAddr();
+  app.rgb.ready = true;
+  app.rgb.data = { groups: { nia: [{ ticker: '<unsafe>', assetId: 'test-id', balance: { settled: 123 } }] } };
+  app.rgb.service = { backupRequired: true };
+  assert.match(app.ui.views.home.render(), /&lt;unsafe&gt;/);
+  assert.match(app.ui.views.home.render(), /data-rgb-go="send"/);
+  app.rgb.mode = 'receive';
+  assert.match(app.ui.views.receive.render(), /Create blinded RGB invoice/);
+  app.rgb.mode = 'send';
+  assert.match(app.ui.views.send.render(), /integer base units/);
+  app.rgb.mode = '';
+  assert.match(app.ui.views.receive.render(), /Shielded address|Public address/);
+  assert.equal(app.account.pubAddr(), address);
+  assert.match(app.ui.views.settings.render(), /different chain/);
+  app.state.net = 'main';
+  assert.doesNotMatch(app.ui.views.home.render(), /RGB assets/);
+  assert.doesNotMatch(app.ui.views.settings.render(), /Enable RGB/);
+  app.rgb.mode = 'send';
+  assert.doesNotMatch(app.ui.views.send.render(), /integer base units/);
+});
+
+test('RGB actions reject mainnet and locked wallets before calling the SDK', async () => {
+  const app = walletApp(keys());
+  await assert.rejects(app.rgb.action('confirm'), /Signet first/);
+  app.state.net = 'signet'; app.state.lockState = 'locked';
+  await assert.rejects(app.rgb.action('confirm'), /Signet first/);
+  assert.equal(app.rgb.service, null);
+});
