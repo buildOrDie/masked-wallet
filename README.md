@@ -109,3 +109,7 @@ Pull requests are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Please report
 ## License
 
 [MIT](LICENSE)
+
+## RGB Signet prototype
+
+Settings → **RGB Signet lab** opens an isolated test wallet for on-chain RGB receive/send and encrypted backup/restore. Test assets only; no real USDT. See [the setup and manual test guide](docs/RGB-SIGNET.md).
