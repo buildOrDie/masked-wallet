@@ -37,6 +37,8 @@ export class Controller {
 
   // ---- typing: update the bound field and the hints next to it, without a full render ----
   onInput(e) {
+    const rgbField = e.target.dataset?.rgbField;
+    if (rgbField) { this.app.rgb.fields[rgbField] = e.target.value; this.app.rgb.pending = null; return; }
     const b = e.target.dataset?.bind;
     if (!b) return;
     const { state, f } = this, codec = this.app.account.codec;
@@ -94,6 +96,13 @@ export class Controller {
       try { state.mint = { stage: 'review', built: await build() }; state.status.mint = null; } catch (err) { state.status.mint = [friendly(err.message), 'err']; }
       this.render();
     };
+    if (d.rgb) { await app.rgb.action(d.rgb); return true; }
+    if (d.rgbGo) {
+      app.rgb.mode = d.rgbGo === 'btc' ? '' : d.rgbGo;
+      app.rgb.pending = null;
+      app.rgb.fields.asset = d.asset || '';
+      state.view = d.rgbGo === 'btc' ? 'home' : d.rgbGo; this.render(); return true;
+    }
     if (t.id === 'netChip') { state.view = 'settings'; this.render(); return true; }
     if (t.hasAttribute('data-rbfinfo')) { e.preventDefault(); f.rbfInfo = !f.rbfInfo; this.render(); return true; }
     if (d.side) { app.side.set(d.side); this.render(); return true; }
@@ -166,6 +175,7 @@ export class Controller {
   /** data-go: open another view (with the extra data-* that come with it). */
   go(t) {
     const { app, state, f } = this, d = t.dataset;
+    if (['send', 'receive', 'shield', 'home'].includes(d.go)) { app.rgb.mode = ''; app.rgb.pending = null; }
     if (d.recv) f.recvKind = d.recv;
     if (d.filter) f.coinFilter = d.filter;
     if (d.reset || ['send', 'shield'].includes(d.go)) { state.send = { stage: 'form' }; state.status.send = null; }
@@ -254,8 +264,6 @@ export class Controller {
         state.status.scansrv = [`Using ${EsploraPool.hostOf(app.scanServer.defaultUrl)}.`, 'ok']; this.render();
         sync.run(4); break;
       case 'btnScanOff': await app.scanServer.save(''); state.status.scansrv = ['Scan server off.', 'ok']; this.render(); break;
-      case 'btnRgbSignet': state.view = 'rgb'; this.render(); break;
-      case 'btnRgbTab': window.open(new URL('masked.html?screen=rgb', location.href).href, '_blank', 'noopener'); break;
       case 'btnPanel': await app.platform.openSidePanel(); break;
       case 'btnOnboard': await app.lock.onboard(); break;
       case 'btnMigrate': await app.lock.migrate(); break;

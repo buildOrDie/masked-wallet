@@ -1,5 +1,5 @@
 import { build } from 'esbuild';
-import { cp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
@@ -13,7 +13,7 @@ for(const [name,source] of [['background.js','background'],['content.js','conten
 await writeFile(resolve(out,'manifest.json'),await readFile(resolve(root,'src/manifest.json')));
 console.log('Extension built at '+out);
 
-// The RGB lab is a separate ESM page: loading WASM never touches the normal wallet popup.
+// The native wallet lazily imports this packaged ESM runtime when RGB is enabled.
 const wasmDir=resolve(root,'node_modules/@utexo/rln-wasm');
 const bdkDir=resolve(root,'node_modules/@bitcoindevkit/bdk-wallet-web');
 const bdkBytes=await readFile(resolve(bdkDir,'bitcoindevkit_bg.wasm'));
@@ -21,7 +21,7 @@ const bdkModule=new WebAssembly.Module(bdkBytes);
 const bdkExports=WebAssembly.Module.exports(bdkModule).map(e=>e.name);
 await build({
   bundle:true,minify:true,platform:'browser',format:'esm',target:'es2022',
-  entryPoints:[resolve(root,'src/rgb/page.mjs')],outfile:resolve(out,'rgb-signet.mjs'),
+  entryPoints:[resolve(root,'src/rgb/runtime.mjs')],outfile:resolve(out,'rgb-runtime.mjs'),
   inject:[resolve(root,'src/rgb/buffer.mjs')],
   plugins:[{name:'bdk-wasm',setup(build){
     build.onLoad({filter:/bitcoindevkit_bg\.wasm$/},()=>({loader:'js',resolveDir:bdkDir,contents:
@@ -35,8 +35,4 @@ const rlnBytes=await readFile(resolve(wasmDir,'rln_wasm_sdk_bg.wasm'));
 const chunkSize=Math.ceil(rlnBytes.length/4);
 for(let i=0;i<4;i++)await writeFile(resolve(out,`rln-wasm-${i}.bin`),rlnBytes.subarray(i*chunkSize,(i+1)*chunkSize));
 await cp(resolve(bdkDir,'bitcoindevkit_bg.wasm'),resolve(out,'bitcoindevkit_bg.wasm'));
-await cp(resolve(root,'src/rgb/signet.html'),resolve(out,'rgb-signet.html'));
-const shell=await readFile(resolve(root,'src/shell.html'),'utf8');
-const walletCss=shell.match(/<style>([\s\S]*?)<\/style>/)?.[1];
-if(!walletCss)throw new Error('Wallet design stylesheet not found');
-await writeFile(resolve(out,'rgb-signet.css'),walletCss+'\n'+await readFile(resolve(root,'src/rgb/signet.css'),'utf8'));
+for(const file of ['rgb-signet.html','rgb-signet.css','rgb-signet.mjs'])await rm(resolve(out,file),{force:true});

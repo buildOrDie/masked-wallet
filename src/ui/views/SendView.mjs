@@ -1,3 +1,4 @@
+import { RgbPanel } from '../RgbPanel.mjs';
 import { esc, fmtBtc, short, sumSats } from '../../core/format.mjs';
 import { View } from '../View.mjs';
 import { btcLogo, copyBtn, head, headWith, rowKV, shieldLogo, sideLogo } from '../html.mjs';
@@ -11,6 +12,7 @@ export class SendView extends View {
   }
 
   render() {
+    if (this.app.rgb.available && this.app.rgb.mode === 'send' && this.mode === 'send') return RgbPanel.form(this.app, 'send');
     const st = this.state.send;
     if (st.stage === 'review' && st.built) return this.review(st.built);
     if (st.stage === 'done' && st.built) {

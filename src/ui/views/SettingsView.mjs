@@ -1,3 +1,4 @@
+import { RgbPanel } from '../RgbPanel.mjs';
 import { esc, short } from '../../core/format.mjs';
 import { toHex } from '../../core/bytes.mjs';
 import * as sp from '../../crypto/sp-core.mjs';
@@ -50,7 +51,7 @@ export class SettingsView extends View {
           ${state.net === 'main' ? '<p class="muted small">Mainnet blocks are large, so long ranges take a while on public servers. Your own server (below) is much faster.</p>' : ''}
         </div></details>
     </section>
-    <section class="card menu"><button class="menu-row" id="btnRgbSignet"><span>${I.list}<b>RGB Signet lab</b></span><span class="small muted">Separate test wallet ›</span></button></section>
+    ${RgbPanel.settings(app)}
     ${this.security(hasVault)}
     ${this.statusLine('wallet')}
     ${this.sites()}

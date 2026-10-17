@@ -1,5 +1,6 @@
 // The composition root: builds every service once, wires them to each other through `app`, and starts
 // the wallet. Services reach their neighbours as `this.app.<name>`; nothing else is global.
+import { WalletRgb } from '../rgb/WalletRgb.mjs';
 import { BROADCAST } from '../bitcoin/networks.mjs';
 import { TxPolicy, broadcastHex } from '../bitcoin/RawTransaction.mjs';
 import { localStore } from '../core/LocalStore.mjs';
@@ -53,6 +54,7 @@ export class MaskedApp {
     this.sync = new ChainSync(this);
     this.builder = new TxBuilder(this);
     this.vault = new Vault(store);
+    this.rgb = new WalletRgb(this);
 
     // tokens
     this.deploys = new DeployRegistry(this);
@@ -138,6 +140,7 @@ export class MaskedApp {
   setNet(n) {
     const state = this.state, keys = state.wallet;
     state.net = n;
+    this.rgb.mode = ''; this.rgb.pending = null;
     this.inscriptions.reset();
     if (keys?.source === 'mnemonic') {
       const next = Keyring.fromMnemonic(keys.mnemonic, keys.passphrase, n);
@@ -170,14 +173,6 @@ export class MaskedApp {
     this.side.set(this.side.get()); // Send, Receive and Mint start on the side picked on Home
     const v = this.store.get('wren.view');
     if (NAV.some(([k]) => k === v)) state.view = v;
-    if (new URLSearchParams(location.search).get('screen') === 'rgb') state.view = 'rgb';
-    window.addEventListener('message', event => {
-      const frame = document.getElementById('rgbFrame');
-      if (!(frame instanceof HTMLIFrameElement) || event.source !== frame.contentWindow) return;
-      if (event.data?.type !== 'masked:rgb-height') return;
-      const height = Number(event.data.height);
-      if (Number.isFinite(height)) frame.style.height = `${Math.max(420, Math.min(5000, height))}px`;
-    });
     return this.lock.boot();
   }
 }

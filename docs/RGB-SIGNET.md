@@ -1,16 +1,20 @@
 # RGB Signet lab
 
-Open **Wallet → RGB Signet** or **Settings → RGB Signet lab** in the rebuilt extension. The lab uses the existing MASKED shell and wallet styles. Public and Shielded BTC remain in their original wallet view; RGB has a separate test account. Use **Open full wallet tab** before a transfer so closing the popup does not interrupt the SDK. This is an experimental, on-chain RGB test integration on Utexo Signet. It does not provide real USDT, mainnet RGB, Lightning channels or DEX trading.
+Select **Signet** in the existing MASKED network settings. Enable **RGB** in Settings. RGB assets appear on the existing Wallet home screen alongside the normal Public/Shielded BTC wallet. Their Receive and Send actions use the existing Receive and Send screens; there is no second wallet page or iframe.
+
+**Network distinction:** MASKED's BTC Signet uses public Bitcoin Signet (`mempool.space/signet`). The SDK's `utexo` network is Utexo's custom Signet (`signetcustom` in the SDK). UI integration does not merge those chains or their coins. RGB funding uses its explicitly labelled Utexo address, independent encrypted test keys, RGB state and backup. Public and BIP352 Shielded BTC balances and address generation stay unchanged. RGB assets are not BIP352-shielded.
+
+Use the existing full extension tab or side panel for long-running operations; closing a popup destroys its runtime.
 
 ## First run
 
 1. Run `npm ci`, `npm run check`, and `npm run build`; load/reload `extension/` as an unpacked Chrome extension.
-2. Open the lab and create a test wallet with a password of at least 12 characters. A new recovery phrase is generated locally, independent of the normal MASKED wallet.
+2. Select Signet, open Settings → RGB and enable test assets with a password of at least 12 characters. A new recovery phrase is generated locally, independent of the normal MASKED wallet.
 3. Export the encrypted backup and confirm you saved it. Keep the password separately.
 4. Send `/getbtc` plus the displayed address to [Utexo's Signet faucet](https://t.me/Utexo_RLN_bot). Wait for confirmation, then Refresh.
 5. Export a fresh backup if requested, create RGB outputs (spends test BTC), and export another backup.
 6. Create a blinded receive invoice; asset ID may be left blank for the first receive. Export a backup. Request a test asset with `/getasset` and the full invoice, then Refresh.
-7. Read the received asset's exact ID and precision from the Assets response. The send form uses **integer base units**, not displayed token units. Review and confirm the transfer explicitly, then export a new backup.
+7. Use an RGB asset’s Send action on Wallet home, or Receive RGB for the first receive. Read the asset ID from your RGB invoice/asset data. The send form uses **integer base units**, not displayed token units. Review and confirm the transfer explicitly, then export a new backup.
 
 A token's ticker does not certify authentic USDT. No production USDT identifier is hardcoded.
 
@@ -20,13 +24,13 @@ Use a clean Chrome profile with the same unpacked extension. Select your latest 
 
 The file contains both the test mnemonic and RGB backup bytes inside a password-encrypted AES-GCM envelope. The normal MASKED vault (`wren.vault`), wallet network and BTC/inscription accounts are not modified. No seed-only recovery is offered, because the RGB state must also be restored. VSS cloud backup is explicitly disabled in this first integration.
 
-The page uses a Web Lock to prevent two simultaneous writers in the same extension origin, serializes WASM calls, and auto-locks after five minutes of inactivity. It does not coordinate independent Chrome profiles/devices; use the recovery procedure above.
+The wallet uses a Web Lock to prevent two simultaneous writers in the same extension origin, serializes WASM calls, and uses the existing MASKED lock and auto-lock lifecycle. It does not coordinate independent Chrome profiles/devices; use the recovery procedure above.
 
 ## Dependencies and build
 
 - `@utexo/rgb-sdk-web` is pinned to `1.0.0-beta.12`. This is a new, beta runtime dependency, included for the requested Utexo integration; it needs review before merge/release.
 - `buffer@6.0.3` supplies browser compatibility for the SDK's bitcoinjs dependency. Existing MASKED cryptography dependencies remain pinned and unchanged.
-- RGB runs locally with packaged `@utexo/rln-wasm` (four binary chunks reassembled locally) and BDK WASM assets. No remote JavaScript or WASM is loaded. The on-chain page is a separate ESM bundle; the existing popup remains an IIFE.
+- RGB runs locally with packaged `@utexo/rln-wasm` (four binary chunks reassembled locally) and BDK WASM assets. No remote JavaScript or WASM is loaded. The SDK runtime is a lazily imported packaged ESM module; the existing wallet remains an IIFE and owns all UI and navigation.
 - Two host permissions are added: `https://esplora-api.utexo.com/*` and `https://rgb-proxy.utexo.com/*`. No LSP, Lightning or cloud-backup endpoints are used.
 - The SDK adds approximately 26 MiB of WASM plus the lab bundle. Generated extension files must be committed as required by CONTRIBUTING.md.
 

@@ -112,4 +112,4 @@ Pull requests are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Please report
 
 ## RGB Signet prototype
 
-Settings → **RGB Signet lab** opens an isolated test wallet for on-chain RGB receive/send and encrypted backup/restore. Test assets only; no real USDT. See [the setup and manual test guide](docs/RGB-SIGNET.md).
+On **Signet**, Settings → **RGB** enables RGB test assets in the existing Wallet, Receive and Send screens, with encrypted RGB backup/restore. Utexo custom Signet funding remains separate from public Bitcoin Signet. Test assets only; no real USDT. See [the setup and manual test guide](docs/RGB-SIGNET.md).

@@ -1,3 +1,4 @@
+import { RgbPanel } from '../RgbPanel.mjs';
 import { esc, fmtBtc, sumSats } from '../../core/format.mjs';
 import { INSCRIPTION_MAX } from '../../ordinals/envelope.mjs';
 import { View } from '../View.mjs';
@@ -52,7 +53,7 @@ export class HomeView extends View {
         <span class="bal-amt"><b>${fmtBtc(sh)}</b><span>${usd(sh) || unit}</span></span>
       </button>
     </section>
-    <section class="card menu"><button class="menu-row" data-go="rgb"><span>${I.list}<b>RGB Signet</b></span><span class="small muted">Test assets ›</span></button></section>
+    ${RgbPanel.home(app)}
     ${app.ui.tokens.home(side)}`;
   }
 }
