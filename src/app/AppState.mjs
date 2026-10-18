@@ -7,7 +7,7 @@ export const FORM_DEFAULTS = {
   mintTick: '', mintAmt: '', mintTo: 'self', mintOther: '', mintFrom: 'public', mintMode: 'mint',
   depTick: '', depMax: '21000000', depLim: '1000', depFrom: 'public', depResTo: 'shielded', depWho: 'self', recTick: '', recSalt: '',
   tsTick: '', tsTo: '', tsAmt: '', tsFrom: 'public', trTick: '', trAmt: '', trFrom: 'public',
-  coinFilter: 'all', scanText: '', calcRecips: '',
+  coinFilter: 'all', scanText: '', calcRecips: '', lnAmount: '',
   // set by the screens that use them
   homeTok: 'all', tokTab: 'history', obMode: 'create', backed: false, apRisk: false, rbfInfo: false,
 };
@@ -28,6 +28,7 @@ export class AppState {
     this.status = {};                // status line per area: [text, cls]
     this.send = { stage: 'form' };   // form | review | done, with the built transaction
     this.mint = { stage: 'form' };
+    this.lnId = null;                // the Lightning receive on show (Receive → Lightning)
     this.busy = false;
     this.reveal = false;             // recovery phrase on show in Settings
     this.calc = null;                // output calculator result

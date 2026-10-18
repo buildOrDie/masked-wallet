@@ -13,6 +13,7 @@ import { ShieldedScanner } from '../scan/ShieldedScanner.mjs';
 import { DeployRegistry, MintLog, PendingTransfers, TransferLog } from '../tokens/records.mjs';
 import { TokenBook } from '../tokens/TokenBook.mjs';
 import { TokenTx } from '../tokens/TokenTx.mjs';
+import { LightningReceive } from '../lightning/LightningReceive.mjs';
 import { TradeAccount } from '../trade/TradeAccount.mjs';
 import { ApprovalController } from '../dapp/ApprovalController.mjs';
 import { PsbtSigner } from '../dapp/PsbtSigner.mjs';
@@ -62,6 +63,9 @@ export class MaskedApp {
     this.tokens = new TokenBook(this);
     this.tokenTx = new TokenTx(this);
 
+    // Lightning → Shielded (Boltz reverse swaps, Mainnet)
+    this.lightning = new LightningReceive(this);
+
     // dApps and private trading
     this.trade = new TradeAccount(this);
     this.psbt = new PsbtSigner(this);
@@ -109,6 +113,7 @@ export class MaskedApp {
       () => this.inscriptions.readCoins(this.coins.publicThenShielded()),
       () => this.trade.recoverShieldedTransfers(),
       () => this.fees.refreshPrice(),
+      () => this.lightning.tick(),
     ];
   }
 
@@ -160,6 +165,7 @@ export class MaskedApp {
     initFast(secpWasm).then((ok) => { this.scanner.fast = ok; });
     this.controller.attach(document);
     setInterval(() => this.sync.watchdog(), 10000);
+    setInterval(() => this.lightning.tick(), 10000); // open Lightning receives only; otherwise a no-op
     if (platform.isApp || (!platform.hasExt && matchMedia('(max-width: 560px)').matches)) document.documentElement.classList.add('app');
     // Android back button: go back to the wallet home, and leave the app from there
     if (platform.isApp) window.Capacitor.Plugins?.App?.addListener?.('backButton', () => {

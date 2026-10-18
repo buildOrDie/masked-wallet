@@ -35,6 +35,7 @@ flowchart TD
 | `src/scan/` | Finding Shielded payments: the private check (`ShieldedScanner`), worker threads, and `ChainSync` (balance, new blocks, history). |
 | `src/wallet/` | `Keyring` (keys), `Account` (the open wallet on the current network), `CoinStore` (coins and protection), `InscriptionIndex`, `TxBuilder` (sends and inscriptions), `Vault` (encryption and session). |
 | `src/tokens/` | `TokenBook` (balances, history, token-server checks), `TokenTx` (mints, deploys, sends, transfer inscriptions) and the records kept per wallet. |
+| `src/lightning/` | Lightning to Shielded: `bolt11.mjs`, `reverse-swap.mjs` (pure: checks Boltz's reply, builds and signs the claim as a silent payment to ourselves) and `LightningReceive` (records and the claim loop). See [LIGHTNING.md](LIGHTNING.md). |
 | `src/trade/` | Private trading: `trade-core.mjs` (pure) and `TradeAccount` (trade address, Shielded listings, holders). |
 | `src/dapp/` | `window.masked` requests: the approval window, PSBT analysis and signing, what connected sites may see. |
 | `src/ui/` | `Screen` renders the current `View`; `Controller` handles input; `views/` has one class per screen. |

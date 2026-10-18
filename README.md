@@ -7,6 +7,8 @@
 - **Public**: a normal taproot address (`bc1p…`) for exchanges, marketplaces and dApps.
 - **Shielded**: a reusable [silent payment](https://github.com/bitcoin/bips/blob/master/bip-0352.mediawiki) address (`sp1…`, BIP 352). Every payment lands on a new one-time output, so nobody can look up what you hold or link your payments.
 
+- **Lightning to Shielded**: get paid from any Lightning wallet and receive the bitcoin as a silent payment, through a [Boltz](https://boltz.exchange) swap that never holds your money. See [docs/LIGHTNING.md](docs/LIGHTNING.md).
+
 It mints, inscribes and sends BRC-20 and BRC2.0 tokens, and gives websites a UniSat-compatible provider, `window.masked`.
 
 [**Add to Chrome**](https://chromewebstore.google.com/detail/masked-wallet/pojmpfcbdmacabhckemelcbkmckhaoig) · [maskedwallet.com](https://maskedwallet.com) · [@masked_wallet](https://x.com/masked_wallet)
@@ -95,6 +97,7 @@ The wallet is a set of small classes wired together by one composition root (`sr
 | `src/bitcoin/`, `src/ordinals/` | Addresses, taproot, hand-built transactions and signatures; inscription envelopes and BRC-20 / BRC2.0 rules. |
 | `src/wallet/` | Keys, coins and their protection, sends and inscriptions, the encrypted vault. |
 | `src/scan/` | Finding Shielded payments: the private check, worker threads, and syncing with the chain. |
+| `src/lightning/` | Lightning to Shielded: BOLT 11 decoding, Boltz reverse swaps (checked, MuSig2 claim with a script-path fallback) and the receive records. |
 | `src/tokens/`, `src/trade/` | Token balances and transactions; private trading from Shielded. |
 | `src/dapp/`, `src/provider/` | `window.masked`: approvals and PSBT signing in the wallet; `inpage.js`, `content.js` and `background.js` (routing, never holds keys). |
 | `src/ui/` | One class per screen, a renderer and one input controller. |

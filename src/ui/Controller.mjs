@@ -15,7 +15,7 @@ import { $, $$ } from './dom.mjs';
 const { b2n } = sp.util;
 
 /** Which status line an error goes to, by view. */
-const ERROR_SLOT = { send: 'send', shield: 'send', mint: 'mint', settings: 'wallet', activity: 'scan' };
+const ERROR_SLOT = { send: 'send', shield: 'send', mint: 'mint', settings: 'wallet', activity: 'scan', receive: 'ln' };
 
 export class Controller {
   /** @param {import('../app/MaskedApp.mjs').MaskedApp} app */
@@ -50,6 +50,7 @@ export class Controller {
     if (b === 'mintTick') { clearTimeout(this.tickTimer); this.tickTimer = setTimeout(() => { if (state.view === 'mint') this.render(); }, 450); }
     if (b === 'mintOther') { const k = codec.kind(e.target.value), el = $('#mintKind'); if (el) { el.className = `addr-kind k-${k.kind}`; el.textContent = k.text || ''; } }
     if (b === 'feeCustom') this.customFeeHint(e.target.value);
+    if (b === 'lnAmount') { clearTimeout(this.lnTimer); this.lnTimer = setTimeout(() => { if (state.view === 'receive') this.render(); }, 350); }
     if (state.status.send) state.status.send = null;
   }
 
@@ -120,6 +121,8 @@ export class Controller {
     if (t.hasAttribute('data-approve')) { app.approvals.approve(); return true; }
     if (t.hasAttribute('data-reject')) { app.approvals.reject(); return true; }
     if (d.unsite) { await app.sites.disconnect(d.unsite); this.render(); return true; }
+    if (t.hasAttribute('data-lnnew')) { state.lnId = null; state.status.ln = null; this.render(); return true; }
+    if (d.lnopen) { state.lnId = d.lnopen; this.render(); return true; }
     if (d.mintall) {
       const dep = deploys.find(d.mintall);
       f.mintMode = 'mint'; f.mintTick = dep.tick; f.mintAmt = String(Number(dep.max) - tokens.mintedSoFar(dep.tick)); f.mintTo = 'self';
@@ -216,6 +219,7 @@ export class Controller {
         break;
       }
       case 'btnConfirmSend': await this.confirmSend(); break;
+      case 'btnLnCreate': await this.createInvoice(); break;
       case 'btnReviewMint': {
         const recipient = f.mintTo === 'self' ? account.shieldAddr() : f.mintOther.trim();
         await review('mint', () => app.tokenTx.mint({ from: f.mintFrom, tick: f.mintTick, amt: f.mintAmt, recipient, rate: app.feeRate() }));
@@ -266,6 +270,18 @@ export class Controller {
       case 'btnCalc': { try { state.calc = { out: this.computeOutputs() }; } catch (err) { state.calc = { err: err.message }; } this.render(); break; }
       default: break;
     }
+  }
+
+  /** Receive → Lightning → Create invoice. */
+  async createInvoice() {
+    const { app, state, f } = this;
+    const amount = Number(String(f.lnAmount || '').replace(/[^\d]/g, ''));
+    state.busy = true; state.status.ln = null; this.render();
+    try {
+      const rec = await app.lightning.create(amount);
+      state.lnId = rec.id; f.lnAmount = '';
+    } catch (err) { state.status.ln = [friendly(err.message), 'err']; }
+    finally { state.busy = false; this.render(); }
   }
 
   async confirmSend() {

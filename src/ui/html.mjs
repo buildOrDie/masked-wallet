@@ -22,6 +22,7 @@ export const I = {
   lock: '<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9.5" rx="2.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>',
   unlock: '<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9.5" rx="2.5"/><path d="M8 11V8a4 4 0 0 1 7.5-2"/></svg>',
   eye: '<svg viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/></svg>',
+  bolt: '<svg viewBox="0 0 24 24"><path d="M13 3 5 13.5h6L10 21l8-10.5h-6L13 3Z"/></svg>',
 };
 
 export const btcLogo = '<span class="coin btc">₿</span>';
@@ -47,7 +48,7 @@ export const addrChunks = (a) => a.match(/.{1,4}/g).map((c, i) => `<span class="
 /** QR code as SVG (addresses in upper case: alphanumeric mode, a smaller code). */
 export function qrSvg(text) {
   const q = qrcode(0, 'M');
-  const addr = /^t?sp1|^(bc|tb)1/i.test(text);
+  const addr = /^t?sp1|^(bc|tb)1|^lightning:ln|^ln(bc|tbs?)/i.test(text);
   q.addData(addr ? text.toUpperCase() : text, addr ? 'Alphanumeric' : 'Byte');
   q.make();
   const n = q.getModuleCount(), m = 2;
