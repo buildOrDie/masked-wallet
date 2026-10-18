@@ -16,6 +16,7 @@ import { parseTx } from '../src/lightning/reverse-swap.mjs';
 
 const hex = (b) => Buffer.from(b).toString('hex');
 const TIP = 920_000;
+const tip = { h: TIP };
 const PAIR = { hash: 'pairhash', rate: 1, limits: { minimal: 25_000, maximal: 25_000_000 }, fees: { percentage: 0.25, minerFees: { lockup: 231, claim: 150 } } };
 
 function makeInvoice(sats, paymentHash) {
@@ -87,7 +88,7 @@ function chain(boltz) {
   const seen = new Map(); // txid → hex
   const confirmed = new Set();
   const calls = mockFetch(async (url, init) => {
-    if (url.endsWith('blocks/tip/height')) return String(TIP);
+    if (url.endsWith('blocks/tip/height')) return String(tip.h);
     if (url.includes('v1/fees')) return { fastestFee: 6, halfHourFee: 4, hourFee: 3, economyFee: 2, minimumFee: 1 };
     if (init?.method === 'POST' && url.endsWith('/api/tx')) { const h = String(init.body); const id = parseTx(h).txid; seen.set(id, h); return id; }
     let m = url.match(/tx\/([0-9a-f]{64})\/status$/);
@@ -121,6 +122,7 @@ function esploraJson(h, boltz) {
 
 function setup(opts) {
   globalThis.localStorage.clear();
+  tip.h = TIP;
   const app = walletApp(testKeys({ bSpend: 0xabcdef0123n * 7919n, fundingPriv: '11'.repeat(32) }), 'main');
   app.state.lockState = 'open';
   const boltz = new FakeBoltz(opts);
@@ -160,7 +162,8 @@ for (const cooperate of [true, false]) {
     assert.equal(done.state, 'claimed');
     assert.equal(done.path, cooperate ? 'key' : 'script');
     assert.ok(net.seen.has(done.claimTxid), 'claim broadcast');
-    assert.equal(done.received, s.onchain - ln.claimFee());
+    // slow rate (hourFee 3 sat/vB here), priced for the path actually used
+    assert.equal(done.received, s.onchain - (cooperate ? 111 : 152) * 3);
 
     // the ordinary Shielded scan found the coin, with a key that spends it
     const coin = app.coins.shielded.find((c) => c.txid === done.claimTxid);
@@ -196,4 +199,45 @@ test('expired invoices close', async () => {
   boltz.swaps.get(rec.id).status = 'swap.expired';
   await app.lightning.tick();
   assert.equal(app.lightning.get(rec.id).state, 'expired');
+});
+
+test('the Faster option prices the claim at the Avg rate', async () => {
+  const { app } = setup();
+  await app.lightning.loadPair(true);
+  await app.fees.refresh();
+  const slow = app.lightning.estimate(100_000, 'slow'), fast = app.lightning.estimate(100_000, 'fast');
+  assert.equal(slow.claimFee, 111 * 3);
+  assert.equal(fast.claimFee, 111 * 4);
+  const rec = await app.lightning.create(100_000, 'fast');
+  assert.equal(rec.speed, 'fast');
+});
+
+test('a cheap claim still waiting near the time lock is replaced at the Fast rate', async () => {
+  const { app, boltz, net } = setup();
+  const ln = app.lightning;
+  const rec = await ln.create(100_000);
+  const s = boltz.pay(rec.id);
+  s.status = 'transaction.confirmed'; net.confirmed.add(s.lockupTxid);
+  await ln.tick();
+  const first = ln.get(rec.id);
+  assert.equal(first.state, 'claimed');
+
+  await ln.tick();
+  assert.equal(ln.get(rec.id).claimTxid, first.claimTxid, 'not replaced while there is time');
+
+  tip.h = first.timeout - 70;
+  await ln.tick();
+  const bumped = ln.get(rec.id);
+  assert.notEqual(bumped.claimTxid, first.claimTxid);
+  assert.equal(bumped.bumped, first.claimTxid);
+  assert.equal(bumped.path, 'script');
+  assert.ok(bumped.claimFee >= 152 * 6 && bumped.claimFee > first.claimFee + 152, `fee ${bumped.claimFee}`);
+  // same lockup input, same Shielded output: a valid replacement
+  const a = parseTx(net.seen.get(first.claimTxid)), b = parseTx(net.seen.get(bumped.claimTxid));
+  assert.equal(toHex(a.outputs[0].script), toHex(b.outputs[0].script));
+  assert.ok(app.coins.shielded.some((c) => c.txid === bumped.claimTxid), 'new coin read back');
+  assert.ok(!app.coins.shielded.some((c) => c.txid === first.claimTxid), 'replaced coin dropped');
+
+  await ln.tick();
+  assert.equal(ln.get(rec.id).claimTxid, bumped.claimTxid, 'replaced once only');
 });

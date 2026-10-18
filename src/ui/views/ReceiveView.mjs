@@ -60,7 +60,8 @@ export class ReceiveView extends View {
     const ln = this.app.lightning;
     if (!ln.pair && !ln.pairErr) ln.loadPair();
     const amt = Number(String(this.f.lnAmount || '').replace(/[^\d]/g, ''));
-    const est = ln.estimate(amt);
+    const speed = this.f.lnSpeed === 'fast' ? 'fast' : 'slow';
+    const est = ln.estimate(amt, speed);
     const limits = ln.pair ? `${ln.pair.limits.minimal.toLocaleString()} to ${ln.pair.limits.maximal.toLocaleString()} sats` : '';
     const outOfRange = est && (amt < est.min || amt > est.max);
     return `
@@ -71,11 +72,13 @@ export class ReceiveView extends View {
         <div class="amount"><input data-bind="lnAmount" type="text" inputmode="numeric" placeholder="${ln.pair ? ln.pair.limits.minimal : '25000'}" value="${esc(this.f.lnAmount || '')}" autocomplete="off"><span class="unit">sats</span></div>
       </label>
       ${ln.pairErr ? `<p class="msg err">${esc(ln.pairErr)}</p>` : limits ? `<p class="muted small">From ${limits}.</p>` : '<p class="muted small">Loading fees…</p>'}
+      <div class="field wide"><span class="lbl">Arrival</span>${seg('lnSpeed', speed, [['slow', 'Cheapest'], ['fast', 'Faster']])}</div>
       ${est && !outOfRange ? `<div class="kv small wide">
         ${rowKV('Boltz fee', sats(est.boltzFee))}
         ${rowKV('Network fees', sats(est.lockupFee + est.claimFee))}
         ${rowKV('You receive about', `<b class="good">${sats(est.receive)}</b>`)}
-      </div>` : ''}
+      </div>
+      <p class="muted small">${speed === 'fast' ? 'Uses the average network fee: usually lands within an hour of payment.' : 'Uses the lowest network fee that still confirms. On a busy day it can take a few hours; MASKED speeds it up if it gets close to the deadline.'}</p>` : ''}
       ${this.statusLine('ln')}
       <button class="btn primary wide" id="btnLnCreate" ${this.state.busy || !est || outOfRange || est.receive <= 0 ? 'disabled' : ''}>${I.bolt}<span>${this.state.busy ? 'Creating invoice…' : 'Create invoice'}</span></button>
       <p class="info">The swap runs through <b>Boltz</b> and never holds your money: if the payment doesn't complete, the payer is refunded by Lightning. Keep MASKED open (the side panel works) until it arrives.</p>

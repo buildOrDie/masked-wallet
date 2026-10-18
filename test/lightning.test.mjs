@@ -112,7 +112,7 @@ test('claim output is a silent payment the wallet scanner finds', () => {
   const lockup = rs.findLockup(lockupTx(out.spk, onchain), out.spk, onchain);
   assert.equal(lockup.vout, 1);
   const so = rs.selfSilentOutput({ bScan: w.bScan, Bspend: w.Bspend, outpoint: { txid: lockup.txid, vout: lockup.vout }, inputX: out.outputX });
-  const tx = rs.claimTx({ lockup, spk: out.spk, outputX: so.outputX, fee: rs.CLAIM_VSIZE * 2 });
+  const tx = rs.claimTx({ lockup, spk: out.spk, outputX: so.outputX, fee: rs.SCRIPT_VSIZE * 2 });
   assert.equal(tx.outputs[0].value, onchain - 304);
 
   for (const witness of [rs.scriptPathWitness(tx, out, s.claimPriv, s.preimage), [new Uint8Array(64)]]) {
@@ -141,7 +141,7 @@ test('script-path claim: preimage, claim script and a valid signature', () => {
   assert.ok(schnorr.verify(wit[0], tx.sighash(0, { leafHash: out.claimLeafHash }), s.claimPub.slice(1)));
   const raw = tx.toHex([wit]);
   const vsize = Math.ceil((raw.length / 2 + 3 * (tx.toHex().length / 2)) / 4);
-  assert.ok(vsize <= rs.CLAIM_VSIZE, `claim is ${vsize} vB`);
+  assert.ok(vsize <= rs.SCRIPT_VSIZE, `claim is ${vsize} vB`);
 });
 
 test('cooperative claim with Boltz (MuSig2 key path)', () => {
@@ -159,6 +159,9 @@ test('cooperative claim with Boltz (MuSig2 key path)', () => {
   const reply = { pubNonce: hex(signed.publicNonce), partialSignature: hex(signed.ourPartialSignature) };
   const [sig] = coop.finish(reply);
   assert.ok(schnorr.verify(sig, msg, fromHex(out.outputX)));
+  const raw = tx.toHex([[sig]]);
+  const vsize = Math.ceil((raw.length / 2 + 3 * (tx.toHex().length / 2)) / 4);
+  assert.ok(vsize <= rs.KEY_VSIZE && vsize >= rs.KEY_VSIZE - 1, `key-path claim is ${vsize} vB`);
 
   // a wrong partial signature is caught before anything is broadcast
   const coop2 = rs.cooperativeClaim(tx, out, s.claimPriv, s.claimPub);

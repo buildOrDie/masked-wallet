@@ -278,7 +278,7 @@ export class Controller {
     const amount = Number(String(f.lnAmount || '').replace(/[^\d]/g, ''));
     state.busy = true; state.status.ln = null; this.render();
     try {
-      const rec = await app.lightning.create(amount);
+      const rec = await app.lightning.create(amount, f.lnSpeed === 'fast' ? 'fast' : 'slow');
       state.lnId = rec.id; f.lnAmount = '';
     } catch (err) { state.status.ln = [friendly(err.message), 'err']; }
     finally { state.busy = false; this.render(); }

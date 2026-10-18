@@ -13,6 +13,8 @@ import * as rs from './reverse-swap.mjs';
 /** Open states (the ones `tick` still works on). */
 const OPEN = new Set(['created', 'paid', 'claimed']);
 const PAIR_TTL_MS = 60_000;
+/** Replace a waiting claim once this close to the time lock (blocks). */
+const LATE_BLOCKS = 72;
 const FINAL_FAIL = new Set(['swap.expired', 'invoice.expired', 'transaction.failed', 'transaction.refunded']);
 
 /**
@@ -35,6 +37,12 @@ const FINAL_FAIL = new Set(['swap.expired', 'invoice.expired', 'transaction.fail
  * @property {number} [received] sats that landed in Shielded
  * @property {'key'|'script'} [path]  how the claim was signed
  * @property {string} [coopError]      why Boltz did not co-sign (script path)
+ * @property {'slow'|'fast'} [speed]   claim fee rate picked when the invoice was made
+ * @property {number} [lockupVout]
+ * @property {number} [lockupValue]
+ * @property {string} [outputX]        our silent-payment output (the same for every version of the claim)
+ * @property {number} [claimFee]
+ * @property {string} [bumped]         txid of the claim this one replaced
  * @property {string} [error]
  */
 
@@ -80,21 +88,46 @@ export class LightningReceive {
     return this.pair;
   }
 
-  /** The network fee our claim will pay at the current Avg rate. */
-  claimFee() { return Math.ceil(rs.CLAIM_VSIZE * Math.max(1, this.app.fees.rates.normal)); }
+  /**
+   * Fee rate for the claim. Nothing is urgent (the swap gives about a day), so the default is the cheapest
+   * rate that still confirms ('slow', at least 1 sat/vB); 'fast' uses Avg. A claim that is still waiting
+   * close to the time lock is replaced at the Fast rate (see `bumpIfLate`).
+   * @param {'slow'|'fast'} [speed]
+   */
+  claimRate(speed = 'slow') {
+    const r = this.app.fees.rates;
+    return speed === 'fast' ? Math.max(1, r.normal) : Math.max(1, r.slow);
+  }
 
-  /** What arrives in Shielded for an invoice of `sats`, or null without fees yet. */
-  estimate(sats) {
+  /**
+   * Network fee of our claim: the key path (signed with Boltz) unless `path` says otherwise.
+   * @param {'slow'|'fast'} [speed]
+   * @param {'key'|'script'} [path]
+   */
+  claimFee(speed = 'slow', path = 'key') {
+    return Math.ceil((path === 'script' ? rs.SCRIPT_VSIZE : rs.KEY_VSIZE) * this.claimRate(speed));
+  }
+
+  /**
+   * What arrives in Shielded for an invoice of `sats`, or null without fees yet.
+   * @param {number} sats
+   * @param {'slow'|'fast'} [speed]
+   */
+  estimate(sats, speed = 'slow') {
     if (!this.pair || !(sats > 0)) return null;
     const q = rs.quote(this.pair, sats);
-    const claim = this.claimFee();
+    const claim = this.claimFee(speed);
     return { ...q, claimFee: claim, receive: q.onchain - claim, min: this.pair.limits.minimal, max: this.pair.limits.maximal };
   }
 
   // ---- creating an invoice ----
 
-  /** Ask Boltz for an invoice of `sats`, check everything it answers, and keep the record. */
-  async create(sats) {
+  /**
+   * Ask Boltz for an invoice of `sats`, check everything it answers, and keep the record.
+   * @param {number} sats
+   * @param {'slow'|'fast'} [speed]
+   */
+  async create(sats, speed = 'slow') {
     if (!this.available) throw new Error('Lightning receive needs a Mainnet wallet with its recovery phrase.');
     if (!Number.isInteger(sats) || sats <= 0) throw new Error('Enter an amount in sats.');
     await this.app.fees.refresh().catch(() => {});
@@ -103,7 +136,7 @@ export class LightningReceive {
     const { minimal, maximal } = pair.limits;
     if (sats < minimal) throw new Error(`The smallest Lightning receive is ${minimal.toLocaleString()} sats.`);
     if (sats > maximal) throw new Error(`The largest Lightning receive is ${maximal.toLocaleString()} sats.`);
-    const est = this.estimate(sats);
+    const est = this.estimate(sats, speed);
     if (est.receive < rs.DUST * 2) throw new Error('Too small: fees would take most of it. Try a larger amount.');
 
     const keys = this.account.keys;
@@ -119,7 +152,7 @@ export class LightningReceive {
     const rec = {
       id: res.id, nonce, sats, onchain: out.onchain, invoice: res.invoice, lockupAddress: res.lockupAddress,
       refundPublicKey: res.refundPublicKey, timeout: out.timeout, created: Date.now(),
-      expiresAt: (out.invoice.timestamp + out.invoice.expiry) * 1000, state: 'created', status: 'swap.created',
+      expiresAt: (out.invoice.timestamp + out.invoice.expiry) * 1000, state: 'created', status: 'swap.created', speed,
     };
     this.save([rec, ...this.list()]);
     return rec;
@@ -181,7 +214,9 @@ export class LightningReceive {
     const keys = this.account.keys;
     const so = rs.selfSilentOutput({ bScan: keys.bScan, Bspend: keys.Bspend, outpoint: { txid: lockup.txid, vout: lockup.vout }, inputX: out.outputX });
     await this.app.fees.refresh().catch(() => {});
-    const tx = rs.claimTx({ lockup, spk: out.spk, outputX: so.outputX, fee: this.claimFee() });
+    const speed = r.speed || 'slow';
+    // priced for the small key-path claim; only if Boltz does not co-sign is it rebuilt for the script path
+    let tx = rs.claimTx({ lockup, spk: out.spk, outputX: so.outputX, fee: this.claimFee(speed, 'key') });
     let witness, path = 'key', coopError = '';
     try {
       const coop = rs.cooperativeClaim(tx, out, s.claimPriv, s.claimPub);
@@ -189,12 +224,16 @@ export class LightningReceive {
       witness = coop.finish(reply);
     } catch (e) {
       coopError = e.message;
+      tx = rs.claimTx({ lockup, spk: out.spk, outputX: so.outputX, fee: this.claimFee(speed, 'script') });
       witness = rs.scriptPathWitness(tx, out, s.claimPriv, s.preimage); // Boltz is not needed for this one
       path = 'script';
     }
     const hex = tx.toHex([witness]);
     // keep the signed claim first: if the broadcast fails it is sent again on the next tick
-    this.update(r.id, { state: 'claimed', lockupTxid: lockup.txid, claimTxid: tx.txid, claimHex: hex, received: tx.outputs[0].value, path, coopError, error: '' });
+    this.update(r.id, {
+      state: 'claimed', lockupTxid: lockup.txid, lockupVout: lockup.vout, lockupValue: lockup.value, outputX: so.outputX,
+      claimTxid: tx.txid, claimHex: hex, claimFee: lockup.value - tx.outputs[0].value, received: tx.outputs[0].value, path, coopError, error: '',
+    });
     await this.broadcast(hex);
     await this.app.scanner.ingestTx(tx.txid);
     this.app.render();
@@ -214,9 +253,33 @@ export class LightningReceive {
     if (res.ok) {
       const j = await res.json();
       if (j?.confirmed) { this.update(r.id, { state: 'done', claimHex: undefined }); return; }
+      if (await this.bumpIfLate(r)) return;
       if (!this.app.coins.shielded.some((c) => c.txid === r.claimTxid)) await this.app.scanner.ingestTx(r.claimTxid);
       return;
     }
     if (r.claimHex) await this.broadcast(r.claimHex);
+  }
+
+  /**
+   * A cheap claim still unconfirmed when half the time lock is gone is replaced (RBF) by one at the Fast
+   * rate. The replacement goes through the claim script, which needs nobody else; it pays the same output.
+   */
+  async bumpIfLate(r) {
+    if (r.bumped || r.lockupVout == null || !r.outputX) return false;
+    const tip = await this.app.sync.tipHeight();
+    if (tip < r.timeout - LATE_BLOCKS) return false;
+    const { s, out } = this.swapOf(r);
+    await this.app.fees.refresh().catch(() => {});
+    const fast = Math.max(1, this.app.fees.rates.fast);
+    const fee = Math.max(Math.ceil(rs.SCRIPT_VSIZE * fast), (r.claimFee || 0) + rs.SCRIPT_VSIZE + 1);
+    const lockup = { txid: r.lockupTxid, vout: r.lockupVout, value: r.lockupValue };
+    const tx = rs.claimTx({ lockup, spk: out.spk, outputX: r.outputX, fee });
+    const hex = tx.toHex([rs.scriptPathWitness(tx, out, s.claimPriv, s.preimage)]);
+    const old = r.claimTxid;
+    this.update(r.id, { claimTxid: tx.txid, claimHex: hex, claimFee: fee, received: tx.outputs[0].value, path: 'script', bumped: old });
+    await this.broadcast(hex);
+    this.app.coins.remove([`${old}:0`]); // the replaced claim's coin; the new one is read back below
+    await this.app.scanner.ingestTx(tx.txid);
+    return true;
   }
 }

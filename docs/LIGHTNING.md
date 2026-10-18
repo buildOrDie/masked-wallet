@@ -51,6 +51,13 @@ The claim is signed in one of two ways:
 - **Normal case.** It is signed with Boltz using MuSig2 (BIP 327) as a key-path spend. On-chain, it looks like any taproot spend. Boltz's partial signature is checked, and so is the combined signature, before anything is broadcast.
 - **If Boltz does not answer or sends a bad signature.** The wallet claims alone through the claim script (script path). This needs only our key and the preimage.
 
+## Fees
+
+- **Boltz:** its percentage fee, plus its lockup transaction fee. Boltz sets both.
+- **The claim.** The claim is priced for the key path (111 vB). Only if Boltz does not co-sign is it rebuilt for the script path (152 vB).
+- **Claim fee rate.** By default it is the cheapest rate that still confirms: the Slow rate, at least 1 sat/vB. **Faster** uses the Avg rate.
+- **A cheap claim that waits too long gets replaced.** If it is still unconfirmed when 72 blocks are left before the time lock, the wallet replaces it (RBF) at the Fast rate through the claim script. The replacement needs nobody else and pays the same Shielded output.
+
 ## Keys and storage
 
 Each receive keeps a small record in local storage: the Boltz swap id, the invoice, the scripts' public data, and a random nonce. The claim key and preimage are derived from the spend key and that nonce, so the record alone cannot claim anything.

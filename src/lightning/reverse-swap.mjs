@@ -26,8 +26,10 @@ const { b2n, n2b, mod, mulG } = sp.util;
 // opcodes used by the swap scripts
 const OP = { SIZE: 0x82, EQUALVERIFY: 0x88, HASH160: 0xa9, CHECKSIG: 0xac, CHECKSIGVERIFY: 0xad, CLTV: 0xb1 };
 
-/** Virtual size of a claim with one input and one taproot output, spent by the script path (the larger). */
-export const CLAIM_VSIZE = 152;
+/** Virtual size of the claim (one input, one taproot output) signed with Boltz: one signature, key path. */
+export const KEY_VSIZE = 111;
+/** The same claim spent alone through the claim script: signature, preimage, script and control block. */
+export const SCRIPT_VSIZE = 152;
 /** Below this the claim output would be dust. */
 export const DUST = 330;
 /** The claim signals RBF and has no lock time. */
