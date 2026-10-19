@@ -8,6 +8,7 @@ import { FeeOracle } from '../net/FeeOracle.mjs';
 import { OrdChecker } from '../net/OrdChecker.mjs';
 import { ScanServer } from '../net/ScanServer.mjs';
 import { TokenServer } from '../net/TokenServer.mjs';
+import { ShordMonitor } from '../net/ShordMonitor.mjs';
 import { ChainSync } from '../scan/ChainSync.mjs';
 import { ShieldedScanner } from '../scan/ShieldedScanner.mjs';
 import { DeployRegistry, MintLog, PendingTransfers, TransferLog } from '../tokens/records.mjs';
@@ -44,6 +45,7 @@ export class MaskedApp {
     this.tokenServer = new TokenServer({ net, store });
     this.scanServer = new ScanServer({ net, store });
     this.fees = new FeeOracle({ net, servers: this.servers });
+    this.shord = new ShordMonitor(this);
 
     // the wallet
     this.account = new Account(this);
@@ -137,6 +139,8 @@ export class MaskedApp {
 
   setNet(n) {
     const state = this.state, keys = state.wallet;
+    this.shord.reset();
+    state.status.shord = null;
     state.net = n;
     this.inscriptions.reset();
     if (keys?.source === 'mnemonic') {

@@ -39,8 +39,14 @@ export class Platform {
 
   /** Ask for permission to reach a server the user typed in Settings. */
   async requestOrigin(url) {
+    return this.requestOrigins([url]);
+  }
+
+  /** Request multiple custom servers in one user gesture. */
+  async requestOrigins(urls) {
     if (!this.hasExt || !chrome.permissions?.request) return;
-    const ok = await chrome.permissions.request({ origins: [new URL(url).origin + '/*'] });
+    const origins = [...new Set(urls.map((url) => new URL(url).origin + '/*'))];
+    const ok = await chrome.permissions.request({ origins });
     if (!ok) throw new Error('Permission to reach that server was declined.');
   }
 }
