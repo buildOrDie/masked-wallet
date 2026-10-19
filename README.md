@@ -102,6 +102,13 @@ The wallet is a set of small classes wired together by one composition root (`sr
 
 Keys stay in the browser: the recovery phrase is stored only as an AES-256-GCM vault (PBKDF2, 600,000 iterations). The background script and websites never see keys. Shielded scanning downloads public block data and never sends the scan key anywhere.
 
+## Shielded Ordinals (SHORD)
+
+Settings includes an opt-in, node-free SHORD collection status monitor with an optional comparison
+indexer and Bitcoin API block-hash check. This is read-only, indexer-reported state; it does not
+verify ownership, scan SHORD holdings or sign SHORD transactions. SHORD notes are separate from
+the existing BIP 352 Shielded balance. See [setup, trust limits and the integration roadmap](docs/SHIELDED-ORDINALS.md).
+
 ## Contributing and security
 
 Pull requests are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Please report security issues privately as described in [SECURITY.md](SECURITY.md).

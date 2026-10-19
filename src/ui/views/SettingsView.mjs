@@ -3,6 +3,7 @@ import { toHex } from '../../core/bytes.mjs';
 import * as sp from '../../crypto/sp-core.mjs';
 import { ESPLORA, NETWORKS } from '../../bitcoin/networks.mjs';
 import { EsploraPool } from '../../net/EsploraPool.mjs';
+import { NAKAS_PARENT } from '../../net/ShordMonitor.mjs';
 import { Keyring } from '../../wallet/Keyring.mjs';
 import { View } from '../View.mjs';
 import { I, copyBtn, rowKV } from '../html.mjs';
@@ -56,6 +57,7 @@ export class SettingsView extends View {
     ${this.trading()}
     ${this.servers()}
     ${this.indexer()}
+    ${this.shord()}
     ${this.advanced(w)}
     <p class="muted small center">MASKED ${VERSION_LABEL} · keys stay in this browser</p>`;
   }
@@ -144,6 +146,35 @@ export class SettingsView extends View {
       <p class="muted small">Shows reported token balances. The MASKED server compares supported balances with local OPI; transfers require separate checks. Saved per network.</p>
     </div>
   </section>`;
+  }
+
+  shord() {
+    const monitor = this.app.shord, config = monitor.config(), result = monitor.result;
+    const primary = result?.primary;
+    const comparison = {
+      none: 'Not configured', agree: 'Summary digests agree at the same block',
+      disagree: 'CONFLICT: indexers disagree', 'different-heights': 'Different heights; cannot compare',
+      unavailable: 'Comparison indexer unavailable',
+    }[result?.comparison || 'none'];
+    const chain = { match: 'Block hash matches Bitcoin API', mismatch: 'CONFLICT: Bitcoin API reports another block', unavailable: 'Bitcoin API check unavailable' }[result?.chain || 'unavailable'];
+    return `<section class="card menu">
+      <div class="menu-row"><span>${I.shieldPlain}<b>Shielded Ordinals (SHORD)</b></span><span class="small muted">Read-only</span></div>
+      <div class="det-body">
+        <p class="muted small">Check a collection without running a Bitcoin node. SHORD notes are separate from your silent-payment Shielded balance. This monitor does not show your holdings or move assets.</p>
+        <label class="field"><span>Primary SHORD indexer</span><input id="shordPrimary" class="mono" value="${esc(config?.primary || '')}" placeholder="https://your-shord-indexer" spellcheck="false" autocomplete="off"></label>
+        <label class="field"><span>Comparison indexer (optional)</span><input id="shordPeer" class="mono" value="${esc(config?.peer || '')}" placeholder="https://another-shord-indexer" spellcheck="false" autocomplete="off"></label>
+        <label class="field"><span>Collection parent inscription</span><input id="shordParent" class="mono" value="${esc(config?.parent || NAKAS_PARENT)}" spellcheck="false" autocomplete="off"></label>
+        <div class="row"><button class="btn primary sm" id="btnShordSave" ${monitor.busy ? 'disabled' : ''}>Save &amp; check</button>${config ? `<button class="btn ghost sm" id="btnShordCheck" ${monitor.busy ? 'disabled' : ''}>Check again</button><button class="btn ghost sm" id="btnShordOff">Turn off</button>` : ''}</div>
+        ${monitor.busy ? '<p class="msg">Checking collection status…</p>' : ''}
+        ${this.statusLine('shord')}
+        ${result?.error ? `<p class="msg err">${esc(result.error)}</p>` : ''}
+        ${primary ? `<div class="kv small">${rowKV('Reported block', primary.height.toLocaleString())}${rowKV('Reported notes', primary.notes.toLocaleString())}${rowKV('Bitcoin API', esc(chain))}${rowKV('Comparison', esc(comparison))}</div>
+          <p class="lbl">Reported state digest</p><p class="mono small wrapall">${esc(primary.digest)}</p>
+          <p class="muted small">Checked ${esc(new Date(result.checkedAt).toLocaleString())}. Results are a snapshot; use Check again to refresh.</p>` : ''}
+        <p class="warn small">Indexer-reported state, not independently verified ownership. Matching summaries and a block hash do not prove complete history or valid protocol execution.</p>
+        <p class="muted small">Checks send only the collection ID and block height. Nothing is requested until you save or check. Settings are per network; no API key is required for status.</p>
+      </div>
+    </section>`;
   }
 
   advanced(w) {

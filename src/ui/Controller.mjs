@@ -238,6 +238,15 @@ export class Controller {
         this.render(); break;
       }
       case 'btnIdxOff': await app.tokens.saveIndexer(''); state.status.idx = ['Indexer turned off.', 'ok']; this.render(); break;
+      case 'btnShordSave': {
+        state.status.shord = null;
+        try {
+          await app.shord.save({ primary: $('#shordPrimary').value, peer: $('#shordPeer').value, parent: $('#shordParent').value }, (urls) => app.platform.requestOrigins(urls));
+        } catch (err) { state.status.shord = [err.message, 'err']; }
+        this.render(); break;
+      }
+      case 'btnShordCheck': state.status.shord = null; await app.shord.refresh(); break;
+      case 'btnShordOff': app.shord.clear(); state.status.shord = null; this.render(); break;
       case 'btnSrvSave':
         state.status.srv = ['Checking…', '']; this.render();
         await app.servers.saveCustom($('#srvUrl').value, { requestPermission: (u) => app.platform.requestOrigin(u) });
