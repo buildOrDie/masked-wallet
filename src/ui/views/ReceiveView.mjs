@@ -4,6 +4,12 @@ import { I, addrChunks, btcLogo, head, qrSvg, seg, shieldLogo } from '../html.mj
 
 /** Receive: the Public or Shielded address as text and QR code. */
 export class ReceiveView extends View {
+  /** A ready post with the Shielded address, opened in X. */
+  static shareUrl(addr) {
+    const text = `Pay me privately 🎭\n\n${addr}\n\nSilent payments on Bitcoin, via @masked_wallet\nmaskedwallet.com`;
+    return `https://x.com/intent/post?text=${encodeURIComponent(text)}`;
+  }
+
   render() {
     const { account } = this;
     const kind = this.f.recvKind;
@@ -20,6 +26,7 @@ export class ReceiveView extends View {
       <div class="qr-wrap">${qrSvg(a)}</div>
       <p class="addr mono">${addrChunks(a)}</p>
       <button class="btn primary wide" data-copy="${esc(a)}">${I.copy}<span>Copy address</span></button>
+      ${kind === 'shielded' && !account.isTest ? `<a class="btn ghost wide" href="${ReceiveView.shareUrl(a)}" target="_blank" rel="noopener">${I.x}<span>Share on X</span></a>` : ''}
       <p class="info">${info}</p>
       ${account.isTest ? `<p class="info warn">${account.params.name} only. Never send real bitcoin here.</p>` : ''}
     </section>
