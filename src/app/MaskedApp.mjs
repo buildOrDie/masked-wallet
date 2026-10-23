@@ -23,6 +23,7 @@ import { InscriptionIndex } from '../wallet/InscriptionIndex.mjs';
 import { Keyring } from '../wallet/Keyring.mjs';
 import { TxBuilder } from '../wallet/TxBuilder.mjs';
 import { Vault } from '../wallet/Vault.mjs';
+import { OfflinePayments } from '../wallet/OfflinePayments.mjs';
 import { Controller } from '../ui/Controller.mjs';
 import { NAV, Screen } from '../ui/Screen.mjs';
 import { AppState, SidePicker } from './AppState.mjs';
@@ -43,7 +44,7 @@ export class MaskedApp {
     this.ord = new OrdChecker({ net, store });
     this.tokenServer = new TokenServer({ net, store });
     this.scanServer = new ScanServer({ net, store });
-    this.fees = new FeeOracle({ net, servers: this.servers });
+    this.fees = new FeeOracle({ net, servers: this.servers, store });
 
     // the wallet
     this.account = new Account(this);
@@ -53,6 +54,7 @@ export class MaskedApp {
     this.sync = new ChainSync(this);
     this.builder = new TxBuilder(this);
     this.vault = new Vault(store);
+    this.offline = new OfflinePayments(this);
 
     // tokens
     this.deploys = new DeployRegistry(this);
@@ -109,6 +111,7 @@ export class MaskedApp {
       () => this.inscriptions.readCoins(this.coins.publicThenShielded()),
       () => this.trade.recoverShieldedTransfers(),
       () => this.fees.refreshPrice(),
+      () => this.offline.flush(),
     ];
   }
 
@@ -160,6 +163,10 @@ export class MaskedApp {
     initFast(secpWasm).then((ok) => { this.scanner.fast = ok; });
     this.controller.attach(document);
     setInterval(() => this.sync.watchdog(), 10000);
+    // signed payments waiting for a connection go out as soon as there is one
+    window.addEventListener('online', () => { this.offline.flush(); this.render(); });
+    window.addEventListener('offline', () => this.render());
+    setInterval(() => { if (this.state.lockState === 'open') this.offline.flush(); }, 20000);
     if (platform.isApp || (!platform.hasExt && matchMedia('(max-width: 560px)').matches)) document.documentElement.classList.add('app');
     // Android back button: go back to the wallet home, and leave the app from there
     if (platform.isApp) window.Capacitor.Plugins?.App?.addListener?.('backButton', () => {

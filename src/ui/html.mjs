@@ -47,7 +47,7 @@ export const addrChunks = (a) => a.match(/.{1,4}/g).map((c, i) => `<span class="
 /** QR code as SVG (addresses in upper case: alphanumeric mode, a smaller code). */
 export function qrSvg(text) {
   const q = qrcode(0, 'M');
-  const addr = /^t?sp1|^(bc|tb)1/i.test(text);
+  const addr = /^t?sp1|^(bc|tb)1/i.test(text) || /^[0-9a-f]+$/i.test(text); // addresses and raw transactions: alphanumeric mode
   q.addData(addr ? text.toUpperCase() : text, addr ? 'Alphanumeric' : 'Byte');
   q.make();
   const n = q.getModuleCount(), m = 2;

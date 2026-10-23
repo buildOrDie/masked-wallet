@@ -90,7 +90,10 @@ export class CoinStore {
   isProtected(c) { return this.autoProtected(c) || this.locks().has(`${c.txid}:${c.vout}`); }
 
   /** Free to spend: not protected, and checked by ord on Mainnet. */
-  spendableOf(list) { return list.filter((c) => c.sats != null && !this.isProtected(c) && !this.ord.unverified(c)); }
+  spendableOf(list) {
+    const held = this.app.offline?.reserved() || new Set(); // coins in a signed payment not sent yet
+    return list.filter((c) => c.sats != null && !held.has(c.key) && !this.isProtected(c) && !this.ord.unverified(c));
+  }
 
   publicSpendable() { return this.account.canSign ? this.spendableOf(this.public) : []; }
   shieldedSpendable() { return this.account.canSign ? this.spendableOf(this.shielded.filter((c) => !c.example)) : []; }

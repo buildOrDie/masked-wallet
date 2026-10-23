@@ -6,10 +6,12 @@ export const FEE_MIN = 0.1;
 export const FEE_MAX = 2000;
 
 export class FeeOracle {
-  constructor({ net, servers }) {
+  constructor({ net, servers, store = null }) {
     this.netOf = net;
     this.servers = servers;
-    this.rates = { slow: 1, normal: 2, fast: 4 };
+    this.store = store;
+    // the last rates seen, so a payment signed offline still gets a sensible fee
+    this.rates = store?.getJson(this.ratesKey, null) || { slow: 1, normal: 2, fast: 4 };
     this.usd = null;
     this.usdAt = 0;
   }
@@ -25,7 +27,10 @@ export class FeeOracle {
     const normal = Math.max(slow, half >= 1 ? Math.round(half) : 1);
     const fast = Math.max(normal, Math.ceil(Number(j.fastestFee) || normal));
     this.rates = { slow, normal, fast };
+    this.store?.setJson(this.ratesKey, this.rates);
   }
+
+  get ratesKey() { return `wren.fees.${this.netOf()}`; }
 
   /** A custom rate typed in the form, or 0 when it is out of range. */
   static custom(text) {

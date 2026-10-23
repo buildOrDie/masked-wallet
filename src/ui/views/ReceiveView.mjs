@@ -22,6 +22,7 @@ export class ReceiveView extends View {
       <button class="btn primary wide" data-copy="${esc(a)}">${I.copy}<span>Copy address</span></button>
       <p class="info">${info}</p>
       ${account.isTest ? `<p class="info warn">${account.params.name} only. Never send real bitcoin here.</p>` : ''}
-    </section>`;
+    </section>
+    <button class="link-row" data-go="relay">${I.lock}<span><b>Got a signed payment?</b> Send it to the network</span><span class="chev">›</span></button>`;
   }
 }

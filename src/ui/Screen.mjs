@@ -5,6 +5,7 @@ import { I } from './html.mjs';
 import { CoinList, TokenList } from './Lists.mjs';
 import { HomeView } from './views/HomeView.mjs';
 import { ReceiveView } from './views/ReceiveView.mjs';
+import { RelayView } from './views/RelayView.mjs';
 import { SendView } from './views/SendView.mjs';
 import { MintView } from './views/MintView.mjs';
 import { TokenView } from './views/TokenView.mjs';
@@ -23,7 +24,7 @@ export class Screen {
     this.coins = new CoinList(app);
     this.tokens = new TokenList(app);
     this.views = {
-      approve: new ApproveView(app), home: new HomeView(app), token: new TokenView(app), receive: new ReceiveView(app),
+      approve: new ApproveView(app), home: new HomeView(app), token: new TokenView(app), receive: new ReceiveView(app), relay: new RelayView(app),
       send: new SendView(app, 'send'), shield: new SendView(app, 'shield'), activity: new ActivityView(app), mint: new MintView(app), settings: new SettingsView(app),
     };
     // screens in front of the wallet, by lock state
@@ -37,7 +38,7 @@ export class Screen {
   /** Which nav tab a view belongs to. */
   navOf(v) {
     const { state } = this.app;
-    const n = ['receive', 'send', 'shield'].includes(v) ? 'home'
+    const n = ['receive', 'send', 'shield', 'relay'].includes(v) ? 'home'
       : v === 'token' || (v === 'mint' && (state.f.mintMode === 'send' || state.f.mintMode === 'transfer')) ? (state.tokFrom || 'home') : v;
     return n === 'activity' ? 'settings' : n;
   }

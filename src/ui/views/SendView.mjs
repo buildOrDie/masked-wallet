@@ -1,6 +1,7 @@
 import { esc, fmtBtc, short, sumSats } from '../../core/format.mjs';
 import { View } from '../View.mjs';
-import { btcLogo, copyBtn, head, headWith, rowKV, shieldLogo, sideLogo } from '../html.mjs';
+import { OfflinePayments } from '../../wallet/OfflinePayments.mjs';
+import { I, btcLogo, copyBtn, head, headWith, qrSvg, rowKV, shieldLogo, sideLogo } from '../html.mjs';
 
 /** Send bitcoin, or Shield (Public → Shielded): form → review → done. */
 export class SendView extends View {
@@ -13,6 +14,7 @@ export class SendView extends View {
   render() {
     const st = this.state.send;
     if (st.stage === 'review' && st.built) return this.review(st.built);
+    if (st.stage === 'offline' && st.built) return this.signed(st.built);
     if (st.stage === 'done' && st.built) {
       const b = st.built;
       return this.done(b.toSelf ? 'Shielded!' : 'Sent!', `${fmtBtc(b.amount)} ${this.unit}${b.toSelf ? ' moved to your Shielded balance.' : ' is on its way.'}`, b.txid, b.toSelf ? 'It shows up as pending until the next block.' : '');
@@ -53,6 +55,7 @@ export class SendView extends View {
   review(b) {
     const { unit } = this;
     const busy = this.state.busy;
+    const offline = !OfflinePayments.online();
     const toTxt = b.toSelf ? `${shieldLogo}<b>My Shielded balance</b>` : `<span class="mono">${esc(short(b.recipient, 10))}</span>`;
     return `
     ${headWith('data-reviewback', 'Confirm')}
@@ -67,12 +70,39 @@ export class SendView extends View {
         ${rowKV('Total', `<b>${fmtBtc(b.amount + b.fee)} ${unit}</b>`)}
       </div>
       ${this.statusLine('send')}
-      <button class="btn primary wide" id="btnConfirmSend" ${busy ? 'disabled' : ''}>${busy ? 'Sending…' : b.toSelf ? 'Confirm & shield' : 'Confirm & send'}</button>
+      ${offline ? `<p class="info warn">You're offline. Sign it now; MASKED sends it the moment this device or the receiver gets online.</p>` : ''}
+      <button class="btn ${offline ? 'ghost' : 'primary'} wide" id="btnConfirmSend" ${busy || offline ? 'disabled' : ''}>${busy ? 'Sending…' : b.toSelf ? 'Confirm & shield' : 'Confirm & send'}</button>
+      ${b.toSelf ? '' : `<button class="btn ${offline ? 'primary' : 'ghost'} wide" id="btnSignOffline" ${busy ? 'disabled' : ''}>${I.lock}<span>Sign now, send later</span></button>`}
       <details class="adv"><summary>Transaction details</summary>
         <div class="kv small">${rowKV('Txid', `<span class="mono">${short(b.txid, 8)}</span>`)}${rowKV('Coin used', `<span class="mono">${short(b.coin.txid, 6)}:${b.coin.vout}</span>`)}</div>
         <textarea rows="3" class="mono" readonly>${b.hex}</textarea>${copyBtn(b.hex, 'Copy raw tx')}
       </details>
     </section>`;
   }
-}
 
+  /** A payment signed without broadcasting: QR and text to hand over, sent automatically when online. */
+  signed(b) {
+    const p = this.app.offline.get(b.txid);
+    const state = p?.state || 'waiting';
+    const text = p ? OfflinePayments.shareText(p, this.unit) : b.hex;
+    const line = state === 'sent' ? ['On the network. It lands when the next block confirms it.', 'ok']
+      : state === 'failed' ? [p.error || 'This payment could not be sent.', 'err']
+      : [OfflinePayments.online() ? 'Sending…' : 'Waiting for a connection. Whoever gets online first sends it: you or the receiver.', ''];
+    return `
+    ${head('Signed payment')}
+    <section class="card receive ${b.kind === 'shielded' ? 'shielded' : ''}">
+      <div class="recv-badge">${b.kind === 'shielded' ? shieldLogo : btcLogo}<b>${fmtBtc(b.amount)} ${this.unit}</b></div>
+      <p class="muted small">to <span class="mono">${esc(short(b.recipient, 10))}</span>${b.kind === 'shielded' ? ' · lands silent' : ''}</p>
+      ${state === 'waiting' ? `<div class="qr-wrap">${qrSvg(b.hex.toUpperCase())}</div>
+      <p class="muted small">The receiver scans this with their phone camera, or you send the text below in any chat (Bitchat works offline).</p>` : ''}
+      <p class="msg ${line[1]}" role="status">${esc(line[0])}</p>
+      <button class="btn primary wide" data-copy="${esc(text)}">${I.copy}<span>Copy signed payment</span></button>
+      <div class="kv small" style="width:100%;text-align:left">
+        ${rowKV('Network fee', `${fmtBtc(b.fee)} ${this.unit}`)}
+        ${rowKV('Transaction', state === 'sent' ? `<a class="link" href="${this.account.explorer.tx(b.txid)}" target="_blank" rel="noopener">${short(b.txid, 8)} ${I.ext}</a>` : `<span class="mono">${short(b.txid, 8)}</span>`)}
+      </div>
+      <p class="info">Not final until it confirms on Bitcoin. Until then, only hand it to someone who trusts you, and don't spend these coins elsewhere: MASKED holds them back for you.</p>
+      <button class="btn ghost wide" data-go="relay">All signed payments</button>
+    </section>`;
+  }
+}

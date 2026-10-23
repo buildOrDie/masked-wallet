@@ -15,7 +15,7 @@ import { $, $$ } from './dom.mjs';
 const { b2n } = sp.util;
 
 /** Which status line an error goes to, by view. */
-const ERROR_SLOT = { send: 'send', shield: 'send', mint: 'mint', settings: 'wallet', activity: 'scan' };
+const ERROR_SLOT = { send: 'send', shield: 'send', mint: 'mint', settings: 'wallet', activity: 'scan', relay: 'relay' };
 
 export class Controller {
   /** @param {import('../app/MaskedApp.mjs').MaskedApp} app */
@@ -120,6 +120,7 @@ export class Controller {
     if (t.hasAttribute('data-approve')) { app.approvals.approve(); return true; }
     if (t.hasAttribute('data-reject')) { app.approvals.reject(); return true; }
     if (d.unsite) { await app.sites.disconnect(d.unsite); this.render(); return true; }
+    if (d.offrm) { app.offline.remove(d.offrm); this.render(); return true; }
     if (d.mintall) {
       const dep = deploys.find(d.mintall);
       f.mintMode = 'mint'; f.mintTick = dep.tick; f.mintAmt = String(Number(dep.max) - tokens.mintedSoFar(dep.tick)); f.mintTo = 'self';
@@ -216,6 +217,25 @@ export class Controller {
         break;
       }
       case 'btnConfirmSend': await this.confirmSend(); break;
+      case 'btnSignOffline': {
+        const b = state.send.built;
+        app.offline.keepSigned(b);
+        state.send = { stage: 'offline', built: b };
+        f.sendAmount = ''; f.sendTo = '';
+        this.render();
+        app.offline.flush();
+        break;
+      }
+      case 'btnRelay': {
+        try {
+          const { payment, toPublic, isNew } = app.offline.addFromText(f.relayText);
+          f.relayText = '';
+          state.status.relay = [isNew ? `Payment of ${fmtBtc(payment.amount)} ${account.unit} added.${toPublic ? ` ${fmtBtc(toPublic)} goes to your Public address.` : ''} It goes out as soon as you're online.` : 'You already have this payment.', 'ok'];
+        } catch (err) { state.status.relay = [err.message, 'err']; }
+        this.render();
+        app.offline.flush();
+        break;
+      }
       case 'btnReviewMint': {
         const recipient = f.mintTo === 'self' ? account.shieldAddr() : f.mintOther.trim();
         await review('mint', () => app.tokenTx.mint({ from: f.mintFrom, tick: f.mintTick, amt: f.mintAmt, recipient, rate: app.feeRate() }));
