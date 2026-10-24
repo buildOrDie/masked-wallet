@@ -7,10 +7,13 @@
 - **Public**: a normal taproot address (`bc1p…`) for exchanges, marketplaces and dApps.
 - **Shielded**: a reusable [silent payment](https://github.com/bitcoin/bips/blob/master/bip-0352.mediawiki) address (`sp1…`, BIP 352). Every payment lands on a new one-time output, so nobody can look up what you hold or link your payments.
 
-- **Offline send**: sign a payment with no internet, hand it over by QR code or text (even over Bitchat), and it is sent when either side gets online. See [docs/OFFLINE.md](docs/OFFLINE.md).
-- **Silent airdrop**: paste a list of Shielded addresses (even a whole X thread) and pay everyone privately in one transaction. See [docs/AIRDROP.md](docs/AIRDROP.md).
+It also does:
 
-It mints, inscribes and sends BRC-20 and BRC2.0 tokens, and gives websites a UniSat-compatible provider, `window.masked`.
+- **Offline send:** sign a payment with no internet, then hand it over by QR code or as text, in any chat, Bitchat included. It is sent when either side gets online. See [docs/OFFLINE.md](docs/OFFLINE.md).
+- **Silent airdrop:** paste a list of Shielded addresses (even a whole X reply thread) and pay everyone in one transaction, each with a silent payment. See [docs/AIRDROP.md](docs/AIRDROP.md).
+- **Share on X:** post your Shielded address in one tap from Receive.
+- **BRC-20 and BRC2.0:** mint, deploy, inscribe and send.
+- **`window.masked`:** a UniSat-compatible provider for websites.
 
 [**Add to Chrome**](https://chromewebstore.google.com/detail/masked-wallet/pojmpfcbdmacabhckemelcbkmckhaoig) · [maskedwallet.com](https://maskedwallet.com) · [@masked_wallet](https://x.com/masked_wallet)
 
@@ -23,6 +26,8 @@ It mints, inscribes and sends BRC-20 and BRC2.0 tokens, and gives websites a Uni
 | <img src="docs/img/home-public.png" width="250" alt="Home on the Public side"> | <img src="docs/img/home-shielded.png" width="250" alt="Home on the Shielded side"> | <img src="docs/img/token-shielded.png" width="250" alt="A BRC2.0 token held in Shielded"> |
 | **Receive privately** | **Trade from Shielded** | **List straight from Shielded** |
 | <img src="docs/img/receive-shielded.png" width="250" alt="Shielded receive address"> | <img src="docs/img/approve-trade.png" width="250" alt="Approval to trade from Shielded"> | <img src="docs/img/approve-list.png" width="250" alt="Approval to inscribe a transfer on a Shielded coin"> |
+| **Offline send** (2.14) | **Silent airdrop** (2.15) | **Share on X** (2.14) |
+| <img src="docs/img/offline-signed.png" width="250" alt="A payment signed offline, as a QR code"> | <img src="docs/img/airdrop.png" width="250" alt="Airdrop: 12 people found in a pasted X thread"> | <img src="docs/img/share-on-x.png" width="250" alt="Share the Shielded address on X"> |
 
 ## Install
 
@@ -35,11 +40,18 @@ Node 20+:
 
 ```sh
 npm ci
-npm run check   # lint, type check, and the tests (BIP 352 vectors, fast scanner, private trading, wallet services)
+npm run check   # lint, type check, and the tests (BIP 352 vectors, fast scanner, private trading, wallet services, offline send, airdrop)
 npm run build   # rebuilds extension/ from src/
 ```
 
-The build is reproducible: the same source always gives the same `extension/`. The Chrome Web Store has version 2.12.9, built byte-for-byte from the tag [`v2.12.9`](../../tree/v2.12.9) (the store package only drops the manifest `key`). `main` is 2.13.0: the same wallet, rewritten into classes and modules (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)); it comes to the store with the next update.
+The build is reproducible: the same source always gives the same `extension/`. The Chrome Web Store package is built from a tagged release, and only drops the manifest `key`.
+
+| Version | What's new | Where |
+|---|---|---|
+| [`v2.12.9`](../../tree/v2.12.9) | the version on the Chrome Web Store today | Chrome Web Store |
+| 2.13.0 | the same wallet, rewritten into classes and modules ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)) | GitHub |
+| [`v2.14.0`](../../tree/v2.14.0) | Offline send, Share on X | GitHub; Chrome Web Store update in review |
+| [`v2.15.0`](../../tree/v2.15.0) | Silent airdrop | `main` |
 
 ## Use it from your website: `window.masked`
 
@@ -96,7 +108,7 @@ The wallet is a set of small classes wired together by one composition root (`sr
 |---|---|
 | `src/crypto/` | BIP 352 silent payments (`sp-core.mjs`, pure, checked against the official vectors) and the WebAssembly scanner. |
 | `src/bitcoin/`, `src/ordinals/` | Addresses, taproot, hand-built transactions and signatures; inscription envelopes and BRC-20 / BRC2.0 rules. |
-| `src/wallet/` | Keys, coins and their protection, sends and inscriptions, the encrypted vault. |
+| `src/wallet/` | Keys, coins and their protection, sends and inscriptions, offline-signed payments, silent airdrops, the encrypted vault. |
 | `src/scan/` | Finding Shielded payments: the private check, worker threads, and syncing with the chain. |
 | `src/tokens/`, `src/trade/` | Token balances and transactions; private trading from Shielded. |
 | `src/dapp/`, `src/provider/` | `window.masked`: approvals and PSBT signing in the wallet; `inpage.js`, `content.js` and `background.js` (routing, never holds keys). |

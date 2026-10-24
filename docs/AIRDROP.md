@@ -1,6 +1,13 @@
 # Silent airdrop
 
-Send → **Airdrop** pays the same amount to many Shielded addresses in one transaction. Every recipient gets an ordinary silent payment (BIP 352). On-chain, nobody can tell who was paid, or that the outputs were one airdrop.
+Send → **Airdrop** pays the same amount to many Shielded addresses in one transaction. Every recipient gets an ordinary silent payment (BIP 352). On-chain, nobody can tell who was paid.
+
+## What stays private and what does not
+
+- **Private:** who received. Each output is a fresh one-time key. Only its owner's wallet recognises it, and nothing links it to an `sp1…` address or a person.
+- **Visible:** that it is a batch payout. Anyone looking at the transaction sees many outputs of the same size coming from the same inputs.
+- **Visible to recipients:** each recipient can see the whole transaction, so they know roughly how many people got paid. They can't tell who the others are.
+- **Separate airdrops can't be linked.** Each one pays fresh outputs, so two of them can't be connected through their recipients.
 
 ## Using it
 

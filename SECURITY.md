@@ -10,6 +10,9 @@ MASKED is **experimental, unaudited software**. Treat it as a hot wallet for tes
 - **Third-party data:** balances, fees and broadcasts go through public Bitcoin APIs (mempool.space, blockstream.info) or a server you set. They can see your IP and the Public address you query. Token balances go through the MASKED token server (tokens.maskedwallet.com), which sees your Public address. Inscription checks go to ordinals.com.
 - **Shielded scanning** downloads public block data from the MASKED scan server (or public APIs). It never receives your scan key, and it can't tell which outputs are yours, but it sees which block ranges your wallet asks for.
 - **BRC2.0 balances** shown in the wallet are worked out from the inscriptions it holds. An indexer (e.g. Best in Slot / OPI) has the final word.
+- **Offline send:** a signed payment is a promise until it confirms. Whoever signed it can still spend the same coins elsewhere first. MASKED holds the coin back in the wallet that signed it, but not in another wallet restored from the same phrase. The signed text is the whole transaction, so anyone who sees it can broadcast it. That's fine, since it can only pay the recipients it was signed for.
+- **Silent airdrop:** recipients can't be linked to their addresses, but the transaction clearly looks like a batch payout (many outputs of the same size), and every recipient can see that transaction.
+- **Share on X** opens x.com with your Shielded address in a post. Posting it links that address to your X account. It does not link the payments you receive.
 
 ## What protects you today
 

@@ -1,6 +1,6 @@
 // Silent airdrop: one transaction that pays the same amount to many Shielded (sp1…) addresses. Every
-// recipient gets an ordinary silent-payment output: on-chain nobody can tell who was paid, or that the
-// outputs belong to one airdrop list.
+// recipient gets an ordinary silent-payment output: on-chain nobody can tell who was paid. (The transaction
+// itself does look like a batch payout: many outputs of the same size.)
 import * as sp from '../crypto/sp-core.mjs';
 import { fmtBtc } from '../core/format.mjs';
 import { RawTransaction } from '../bitcoin/RawTransaction.mjs';
