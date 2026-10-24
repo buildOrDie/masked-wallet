@@ -66,6 +66,7 @@ export class Screen {
     this.header(gate);
     $('#nav').style.display = gate || state.view === 'approve' ? 'none' : '';
     $('#lockBtn').hidden = !!gate || !app.vault.read();
+    const pb = $('#panelBtn'); if (pb) pb.hidden = !app.platform.canOpenSidePanel || state.view === 'approve';
     app.sites.publishPublic();
     app.trade.publish();
     $('#nav').innerHTML = NAV.map(([k, n, ic]) => `<button data-go="${k}" class="${this.navOf(state.view) === k ? 'on' : ''}">${ic}<span>${n}</span></button>`).join('');

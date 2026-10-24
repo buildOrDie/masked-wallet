@@ -13,6 +13,7 @@ import { SettingsView } from './views/SettingsView.mjs';
 import { TokenSendView } from './views/TokenSendView.mjs';
 
 import { $, $$ } from './dom.mjs';
+import { I } from './html.mjs';
 const { b2n } = sp.util;
 
 /** Which status line an error goes to, by view. */
@@ -99,6 +100,15 @@ export class Controller {
       this.render();
     };
     if (t.id === 'netChip') { state.view = 'settings'; this.render(); return true; }
+    if (t.hasAttribute('data-pwtoggle')) {
+      const i = /** @type {HTMLInputElement} */ ($('#pwUnlock'));
+      const show = i.type === 'password';
+      i.type = show ? 'text' : 'password';
+      t.innerHTML = show ? I.eyeOff : I.eye;
+      t.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+      i.focus();
+      return true;
+    }
     if (t.hasAttribute('data-rbfinfo')) { e.preventDefault(); f.rbfInfo = !f.rbfInfo; this.render(); return true; }
     if (d.side) { app.side.set(d.side); this.render(); return true; }
     if (d.copy != null) {
@@ -281,7 +291,7 @@ export class Controller {
         state.status.scansrv = [`Using ${EsploraPool.hostOf(app.scanServer.defaultUrl)}.`, 'ok']; this.render();
         sync.run(4); break;
       case 'btnScanOff': await app.scanServer.save(''); state.status.scansrv = ['Scan server off.', 'ok']; this.render(); break;
-      case 'btnPanel': await app.platform.openSidePanel(); break;
+      case 'btnPanel': case 'panelBtn': await app.platform.openSidePanel(); break;
       case 'btnOnboard': await app.lock.onboard(); break;
       case 'btnMigrate': await app.lock.migrate(); break;
       case 'btnChangePw': await app.lock.changePassword(); break;

@@ -52,7 +52,8 @@ The build is reproducible: the same source always gives the same `extension/`. T
 | 2.13.0 | the same wallet, rewritten into classes and modules ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)) | GitHub |
 | [`v2.14.0`](../../tree/v2.14.0) | Offline send, Share on X | GitHub |
 | [`v2.15.0`](../../tree/v2.15.0) | Silent airdrop | Chrome Web Store |
-| [`v2.15.1`](../../tree/v2.15.1) | no scrollbar drawn in the popup (scroll with the trackpad or wheel, no wide grey bar on Windows) | `main` |
+| [`v2.15.1`](../../tree/v2.15.1) | no scrollbar drawn in the popup (scroll with the trackpad or wheel, no wide grey bar on Windows) | GitHub |
+| [`v2.15.2`](../../tree/v2.15.2) | redesigned unlock screen (show-password button, clearer wrong-password state); a side panel button in the header | `main` |
 
 ## Use it from your website: `window.masked`
 

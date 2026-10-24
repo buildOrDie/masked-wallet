@@ -3,7 +3,7 @@
 import { NETWORKS } from '../../bitcoin/networks.mjs';
 import { BIRTHDAYS } from '../../scan/ChainSync.mjs';
 import { View } from '../View.mjs';
-import { copyBtn, seg } from '../html.mjs';
+import { I, copyBtn, seg } from '../html.mjs';
 import { $ } from '../dom.mjs';
 
 const logoBig = () => `<div class="lk-logo">${$('.logo')?.innerHTML || ''}</div>`;
@@ -13,14 +13,21 @@ const newPasswordFields = (placeholder2 = 'Confirm password') => `<input type="p
 export class LockView extends View {
   render() {
     const busy = this.state.busy;
-    return `<section class="lk">
-    ${logoBig()}
-    <h1>Welcome back</h1>
-    <p class="muted">Enter your password to unlock MASKED.</p>
-    <input type="password" id="pwUnlock" placeholder="Password" autocomplete="current-password" autofocus>
-    ${this.statusLine('lock')}
-    <button class="btn primary wide" id="btnUnlock" ${busy ? 'disabled' : ''}>${busy ? 'Unlocking…' : 'Unlock'}</button>
-    <button class="link small" data-forgot>Forgot password? Restore with your recovery phrase</button>
+    const bad = this.state.status.lock?.[1] === 'err';
+    return `<section class="lk unlock-screen">
+    <div class="lock-main">
+      <div class="lock-logo">${logoBig()}</div>
+      <h1>Welcome back</h1>
+      <p class="muted">Your Bitcoin, masked.</p>
+      <div class="pw-wrap ${bad ? 'bad' : ''}">
+        <input type="password" id="pwUnlock" placeholder="Password" autocomplete="current-password" autofocus>
+        <button class="pw-eye" data-pwtoggle aria-label="Show password">${I.eye}</button>
+      </div>
+      ${this.statusLine('lock')}
+      <button class="btn primary wide" id="btnUnlock" ${busy ? 'disabled' : ''}>${I.unlock}<span>${busy ? 'Unlocking…' : 'Unlock'}</span></button>
+      <button class="link small" data-forgot>Forgot password? Restore with your recovery phrase</button>
+    </div>
+    <p class="lock-foot">${I.shieldPlain}<span>Your keys never leave this device</span></p>
   </section>`;
   }
 }
