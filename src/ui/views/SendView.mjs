@@ -1,5 +1,6 @@
 import { esc, fmtBtc, short, sumSats } from '../../core/format.mjs';
 import { View } from '../View.mjs';
+import { AirdropView } from './AirdropView.mjs';
 import { OfflinePayments } from '../../wallet/OfflinePayments.mjs';
 import { I, btcLogo, copyBtn, head, headWith, qrSvg, rowKV, shieldLogo, sideLogo } from '../html.mjs';
 
@@ -9,9 +10,11 @@ export class SendView extends View {
   constructor(app, mode) {
     super(app);
     this.mode = mode; // 'send' | 'shield'
+    this.drop = new AirdropView(app);
   }
 
   render() {
+    if (this.mode === 'send' && this.f.sendMode === 'airdrop') return this.drop.render();
     const st = this.state.send;
     if (st.stage === 'review' && st.built) return this.review(st.built);
     if (st.stage === 'offline' && st.built) return this.signed(st.built);
@@ -34,6 +37,7 @@ export class SendView extends View {
           <span class="addr-kind k-${k.kind}" id="sendKind">${SendView.kindNote(k)}</span></label>`;
     return `
     ${head(shield ? 'Shield' : 'Send')}
+    ${shield ? '' : AirdropView.tabs('send')}
     ${shield ? `<section class="explain">${shieldLogo}<p><b>Shielding</b> moves coins from your Public balance into your Shielded balance. After that, your coins can't be traced to your public address.</p></section>` : ''}
     <section class="card form">
       ${shield ? '' : `<div class="field"><span class="lbl">From</span>${this.fromSeg('sendFrom')}</div>`}

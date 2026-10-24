@@ -8,6 +8,7 @@ import { FEE_MAX, FEE_MIN, FeeOracle } from '../net/FeeOracle.mjs';
 import { EsploraPool } from '../net/EsploraPool.mjs';
 import { Keyring } from '../wallet/Keyring.mjs';
 import { SendView } from './views/SendView.mjs';
+import { AirdropView } from './views/AirdropView.mjs';
 import { SettingsView } from './views/SettingsView.mjs';
 import { TokenSendView } from './views/TokenSendView.mjs';
 
@@ -15,7 +16,7 @@ import { $, $$ } from './dom.mjs';
 const { b2n } = sp.util;
 
 /** Which status line an error goes to, by view. */
-const ERROR_SLOT = { send: 'send', shield: 'send', mint: 'mint', settings: 'wallet', activity: 'scan', relay: 'relay' };
+const ERROR_SLOT = { send: 'send', shield: 'send', drop: 'drop', mint: 'mint', settings: 'wallet', activity: 'scan', relay: 'relay' };
 
 export class Controller {
   /** @param {import('../app/MaskedApp.mjs').MaskedApp} app */
@@ -50,6 +51,9 @@ export class Controller {
     if (b === 'mintTick') { clearTimeout(this.tickTimer); this.tickTimer = setTimeout(() => { if (state.view === 'mint') this.render(); }, 450); }
     if (b === 'mintOther') { const k = codec.kind(e.target.value), el = $('#mintKind'); if (el) { el.className = `addr-kind k-${k.kind}`; el.textContent = k.text || ''; } }
     if (b === 'feeCustom') this.customFeeHint(e.target.value);
+    if (b === 'dropText') { const el = $('#dropCount'); if (el) { const pv = this.app.ui.view('send').drop.preview(); el.innerHTML = AirdropView.countNote(pv); el.className = `addr-kind ${pv.n ? 'k-shielded' : ''}`; } }
+    if (b === 'dropText' || b === 'dropEach') { clearTimeout(this.dropTimer); this.dropTimer = setTimeout(() => { if (state.view === 'send') this.render(); }, 400); }
+    if (state.status.drop) state.status.drop = null;
     if (state.status.send) state.status.send = null;
   }
 
@@ -81,7 +85,7 @@ export class Controller {
       if (await this.onData(t, e)) return;
       await this.onButton(t);
     } catch (err) {
-      const key = ERROR_SLOT[this.state.view];
+      const key = this.state.view === 'send' && this.f.sendMode === 'airdrop' ? 'drop' : ERROR_SLOT[this.state.view];
       if (key) this.app.setStatus(key, friendly(err.message), 'err'); else this.toast(err.message);
     }
   }
@@ -120,6 +124,7 @@ export class Controller {
     if (t.hasAttribute('data-approve')) { app.approvals.approve(); return true; }
     if (t.hasAttribute('data-reject')) { app.approvals.reject(); return true; }
     if (d.unsite) { await app.sites.disconnect(d.unsite); this.render(); return true; }
+    if (t.hasAttribute('data-dropback')) { state.drop = { stage: 'form' }; this.render(); return true; }
     if (d.offrm) { app.offline.remove(d.offrm); this.render(); return true; }
     if (d.mintall) {
       const dep = deploys.find(d.mintall);
@@ -169,7 +174,7 @@ export class Controller {
     const { app, state, f } = this, d = t.dataset;
     if (d.recv) f.recvKind = d.recv;
     if (d.filter) f.coinFilter = d.filter;
-    if (d.reset || ['send', 'shield'].includes(d.go)) { state.send = { stage: 'form' }; state.status.send = null; }
+    if (d.reset || ['send', 'shield'].includes(d.go)) { state.send = { stage: 'form' }; state.status.send = null; if (state.drop.stage !== 'review') state.drop = { stage: 'form' }; }
     if (d.reset || d.go === 'mint') { if (state.mint.stage === 'done') state.mint = { stage: 'form' }; state.status.mint = null; }
     // the Mint tab always opens Mint & deploy (Send / Inscribe are sub-pages of a token)
     if (t.closest('#nav') && d.go === 'mint' && ['send', 'transfer'].includes(f.mintMode)) { f.mintMode = 'mint'; state.mint = { stage: 'form' }; }
@@ -217,6 +222,8 @@ export class Controller {
         break;
       }
       case 'btnConfirmSend': await this.confirmSend(); break;
+      case 'btnReviewDrop': await review('drop', () => app.airdrop.build({ from: f.dropFrom, text: f.dropText, each: Number(String(f.dropEach || '').replace(/[^\d]/g, '')), rate: app.feeRate() })); break;
+      case 'btnConfirmDrop': await this.confirmDrop(); break;
       case 'btnSignOffline': {
         const b = state.send.built;
         app.offline.keepSigned(b);
@@ -286,6 +293,18 @@ export class Controller {
       case 'btnCalc': { try { state.calc = { out: this.computeOutputs() }; } catch (err) { state.calc = { err: err.message }; } this.render(); break; }
       default: break;
     }
+  }
+
+  async confirmDrop() {
+    const { app, state, f } = this;
+    const b = state.drop.built;
+    state.busy = true; this.render();
+    try {
+      await app.broadcast(b.hex);
+      state.drop = { stage: 'done', built: b };
+      f.dropText = '';
+      app.afterBroadcast(b.spent, [b.txid]);
+    } finally { state.busy = false; this.render(); }
   }
 
   async confirmSend() {

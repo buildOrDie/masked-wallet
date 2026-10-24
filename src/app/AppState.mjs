@@ -8,6 +8,7 @@ export const FORM_DEFAULTS = {
   depTick: '', depMax: '21000000', depLim: '1000', depFrom: 'public', depResTo: 'shielded', depWho: 'self', recTick: '', recSalt: '',
   tsTick: '', tsTo: '', tsAmt: '', tsFrom: 'public', trTick: '', trAmt: '', trFrom: 'public',
   coinFilter: 'all', scanText: '', calcRecips: '', relayText: '',
+  sendMode: 'send', dropText: '', dropEach: '1000', dropFrom: 'public',
   // set by the screens that use them
   homeTok: 'all', tokTab: 'history', obMode: 'create', backed: false, apRisk: false, rbfInfo: false,
 };
@@ -28,6 +29,7 @@ export class AppState {
     this.status = {};                // status line per area: [text, cls]
     this.send = { stage: 'form' };   // form | review | done, with the built transaction
     this.mint = { stage: 'form' };
+    this.drop = { stage: 'form' };   // Send → Airdrop
     this.busy = false;
     this.reveal = false;             // recovery phrase on show in Settings
     this.calc = null;                // output calculator result
@@ -38,7 +40,7 @@ export class AppState {
 /** Public | Shielded: the side Home shows. Send, Receive and Mint start on the same side. */
 export class SidePicker {
   static KEY = 'wren.side';
-  static FIELDS = ['recvKind', 'sendFrom', 'mintFrom', 'trFrom', 'tsFrom', 'depFrom'];
+  static FIELDS = ['recvKind', 'sendFrom', 'mintFrom', 'trFrom', 'tsFrom', 'depFrom', 'dropFrom'];
 
   /** @param {import('./MaskedApp.mjs').MaskedApp} app */
   constructor(app) { this.app = app; }

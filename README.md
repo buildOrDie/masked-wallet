@@ -8,6 +8,7 @@
 - **Shielded**: a reusable [silent payment](https://github.com/bitcoin/bips/blob/master/bip-0352.mediawiki) address (`sp1…`, BIP 352). Every payment lands on a new one-time output, so nobody can look up what you hold or link your payments.
 
 - **Offline send**: sign a payment with no internet, hand it over by QR code or text (even over Bitchat), and it is sent when either side gets online. See [docs/OFFLINE.md](docs/OFFLINE.md).
+- **Silent airdrop**: paste a list of Shielded addresses (even a whole X thread) and pay everyone privately in one transaction. See [docs/AIRDROP.md](docs/AIRDROP.md).
 
 It mints, inscribes and sends BRC-20 and BRC2.0 tokens, and gives websites a UniSat-compatible provider, `window.masked`.
 

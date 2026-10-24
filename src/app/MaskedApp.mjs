@@ -24,6 +24,7 @@ import { Keyring } from '../wallet/Keyring.mjs';
 import { TxBuilder } from '../wallet/TxBuilder.mjs';
 import { Vault } from '../wallet/Vault.mjs';
 import { OfflinePayments } from '../wallet/OfflinePayments.mjs';
+import { Airdrop } from '../wallet/Airdrop.mjs';
 import { Controller } from '../ui/Controller.mjs';
 import { NAV, Screen } from '../ui/Screen.mjs';
 import { AppState, SidePicker } from './AppState.mjs';
@@ -55,6 +56,7 @@ export class MaskedApp {
     this.builder = new TxBuilder(this);
     this.vault = new Vault(store);
     this.offline = new OfflinePayments(this);
+    this.airdrop = new Airdrop(this);
 
     // tokens
     this.deploys = new DeployRegistry(this);
@@ -126,7 +128,7 @@ export class MaskedApp {
   resetWallet() {
     const state = this.state;
     this.coins.clear();
-    state.send = { stage: 'form' }; state.mint = { stage: 'form' }; state.reveal = false;
+    state.send = { stage: 'form' }; state.mint = { stage: 'form' }; state.drop = { stage: 'form' }; state.reveal = false;
     this.loadWalletData();
   }
 
