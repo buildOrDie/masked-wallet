@@ -48,10 +48,11 @@ The build is reproducible: the same source always gives the same `extension/`. T
 
 | Version | What's new | Where |
 |---|---|---|
-| [`v2.12.9`](../../tree/v2.12.9) | the version on the Chrome Web Store today | Chrome Web Store |
+| [`v2.12.9`](../../tree/v2.12.9) | the first Chrome Web Store version | GitHub |
 | 2.13.0 | the same wallet, rewritten into classes and modules ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)) | GitHub |
-| [`v2.14.0`](../../tree/v2.14.0) | Offline send, Share on X | GitHub; Chrome Web Store update in review |
-| [`v2.15.0`](../../tree/v2.15.0) | Silent airdrop | `main` |
+| [`v2.14.0`](../../tree/v2.14.0) | Offline send, Share on X | GitHub |
+| [`v2.15.0`](../../tree/v2.15.0) | Silent airdrop | Chrome Web Store |
+| [`v2.15.1`](../../tree/v2.15.1) | no scrollbar drawn in the popup (scroll with the trackpad or wheel, no wide grey bar on Windows) | `main` |
 
 ## Use it from your website: `window.masked`
 
