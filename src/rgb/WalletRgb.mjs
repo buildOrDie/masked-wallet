@@ -40,7 +40,11 @@ function brief(text) {
 /** Errors that mean "no RGB outputs to put the asset on yet". */
 const NEEDS_OUTPUTS = /insufficient ?allocation|allocation ?slots|insufficient bitcoin|InsufficientBitcoins|no (colorable|available) (utxo|output)s?/i;
 
-const EMPTY_FIELDS = () => ({ name: '', ticker: '', supply: '', precision: '2', sendTo: '', sendAmt: '', recvAsset: '' });
+const EMPTY_FIELDS = () => ({ name: '', ticker: '', supply: '', precision: '2', sendTo: '', sendAmt: '', recvAsset: '', recvAmt: '', recvExpiry: '86400', recvType: '' });
+/** How long an invoice works: 1 hour, 24 hours, 7 days. */
+export const RGB_EXPIRY = [['3600', '1 hour'], ['86400', '24 hours'], ['604800', '7 days']];
+/** Test BTC a blind invoice needs (one RGB output, set up on demand). Below it, Receive suggests a witness invoice. */
+export const RGB_BLIND_MIN = 2000;
 
 /**
  * RGB inside the wallet. It opens by itself while the wallet is open on Signet: its test keys are encrypted with a
@@ -58,6 +62,7 @@ export class WalletRgb {
     this.message = '';
     this.tried = '';      // profile id already tried this session, so a failure doesn't retry on every render
     this.invoice = '';    // the last receive invoice
+    /** @type {any} */ this.invoiceInfo = null;
     this.issued = null;   // { ticker, assetId } after Create
     this.pending = null;  // a reviewed send
     this.sent = null;     // { txid, amount, ticker } after Send
@@ -102,6 +107,8 @@ export class WalletRgb {
     return { settled, pending: Math.max(0, sum('future') - settled) };
   }
   amount(a, n) { return fromBase(n, a?.precision || 0); }
+  /** Blind unless chosen otherwise; witness by default when there is too little test BTC for a blind one. */
+  recvType() { return this.fields.recvType || (this.data && this.btc().settled < RGB_BLIND_MIN ? 'witness' : 'blind'); }
 
   // ---- lifecycle ----
   async acquire() {
@@ -274,22 +281,46 @@ export class WalletRgb {
         });
       }
       case 'issueAgain': this.issued = null; return app.render();
-      case 'invoice': return this.run(async () => {
-        const r = await this.withOutputs(() => this.service.receive(this.fields.recvAsset.trim()));
-        this.invoice = r.invoice;
-      });
+      case 'opt': { // a Receive option, "key:value"
+        const [k, v] = String(arg).split(':');
+        if (['recvType', 'recvExpiry'].includes(k)) { this.fields[k] = v; this.invoice = ''; this.message = ''; }
+        return app.render();
+      }
+      case 'invoice': {
+        const assetId = this.fields.recvAsset.trim(), a = assetId ? this.find(assetId) : null;
+        const witness = this.recvType() === 'witness';
+        let amount = 0;
+        try {
+          if (this.fields.recvAmt.trim()) {
+            if (!a) throw new Error('Pick the token first to ask for a fixed amount.');
+            amount = toBase(this.fields.recvAmt, a.precision);
+          }
+        } catch (e) { this.message = e.message; return app.render(); }
+        const opts = { assetId, amount, durationSeconds: Number(this.fields.recvExpiry) || 86400, witness };
+        return this.run(async () => {
+          // a witness invoice needs no RGB output of ours; a blind one may need one set up first
+          const r = witness ? await this.service.receive(opts) : await this.withOutputs(() => this.service.receive(opts));
+          this.invoice = r.invoice;
+          this.invoiceInfo = { witness, amount: amount ? this.amount(a, amount) : '', ticker: a?.ticker || '', expiry: Number(this.fields.recvExpiry) || 86400 };
+        });
+      }
       case 'review': {
         const a = this.find(this.asset);
-        try {
-          if (!a) throw new Error('Pick a token first.');
-          const invoice = this.fields.sendTo.trim();
-          if (!/^rgb:/i.test(invoice)) throw new Error('Paste the RGB invoice from the person you are paying. It starts with rgb:');
-          const amount = toBase(this.fields.sendAmt, a.precision);
+        const invoice = this.fields.sendTo.trim();
+        if (!a) { this.message = 'Pick a token first.'; return app.render(); }
+        if (!/^rgb:/i.test(invoice)) { this.message = 'Paste the RGB invoice from the person you are paying. It starts with rgb:'; return app.render(); }
+        return this.run(async () => {
+          let d;
+          try { d = await this.service.decode(invoice); } catch { throw new Error('That is not a valid RGB invoice. Ask them to make a new one.'); }
+          if (d.assetId && d.assetId !== a.assetId) throw new Error(`This invoice asks for a different token, not ${a.ticker}.`);
+          if (d.expirationTimestamp && d.expirationTimestamp <= Date.now() / 1000) throw new Error('This invoice has expired. Ask them to make a new one.');
+          if (!this.profile.invoiceNets.includes(String(d.network).toLowerCase())) throw new Error(`This invoice is not for ${this.profile.label}.`);
+          // an invoice with a fixed amount fills it in
+          const amount = d.amount || toBase(this.fields.sendAmt, a.precision);
+          if (d.amount) this.fields.sendAmt = this.amount(a, d.amount).replace(/,/g, '');
           if (amount > Number(a.balance?.spendable || 0)) throw new Error(`You can send up to ${this.amount(a, a.balance?.spendable)} ${a.ticker}.`);
-          this.pending = Object.freeze({ assetId: a.assetId, ticker: a.ticker, invoice, amount, shown: this.amount(a, amount) });
-          this.message = '';
-        } catch (e) { this.message = e.message; }
-        return app.render();
+          this.pending = Object.freeze({ assetId: a.assetId, ticker: a.ticker, invoice, amount, shown: this.amount(a, amount), witness: !!d.witness, fixed: !!d.amount });
+        });
       }
       case 'cancel': this.pending = null; return app.render();
       case 'confirm': {

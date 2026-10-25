@@ -90,7 +90,8 @@ test('valid test send uses the reviewed exact asset and amount', async () => {
 for (const [label, decoded] of [
   ['mainnet', { recipientId: 'utxob:test', network: 'mainnet' }],
   ['wrong asset', { recipientId: 'utxob:test', network: 'signet', assetId: 'other' }],
-  ['witness', { recipientId: 'wvout:test', network: 'signet' }],
+  ['not an invoice recipient', { recipientId: 'tb1qsomething', network: 'signet' }],
+  ['amount differs from a fixed-amount invoice', { recipientId: 'utxob:test', network: 'signet', amount: 99 }],
   ['expired', { recipientId: 'utxob:test', network: 'signet', expirationTimestamp: 1 }],
 ]) test(`${label} invoice never reaches send`, async () => {
   const f = fixture(); await open(f); f.service.backupSaved();

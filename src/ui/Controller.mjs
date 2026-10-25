@@ -102,7 +102,7 @@ export class Controller {
       this.render();
     };
     if (d.rgb) { await app.rgb.action(d.rgb, d.rgbArg || ''); return true; }
-    if (t.hasAttribute?.('data-rgb-pick')) { app.rgb.fields.recvAsset = d.rgbPick || ''; app.rgb.invoice = ''; this.render(); return true; }
+    if (t.hasAttribute?.('data-rgb-pick')) { app.rgb.fields.recvAsset = d.rgbPick || ''; app.rgb.fields.recvAmt = ''; app.rgb.invoice = ''; this.render(); return true; }
     if (t.id === 'netChip') { state.view = 'settings'; this.render(); return true; }
     if (t.hasAttribute('data-pwtoggle')) {
       const i = /** @type {HTMLInputElement} */ ($('#pwUnlock'));

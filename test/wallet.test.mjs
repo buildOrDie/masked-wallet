@@ -202,7 +202,7 @@ function rgbApp(net = 'signet') {
 }
 const TUSD = { assetId: 'rgb:tusd', ticker: 'TUSD', name: 'Test USD', precision: 2, issuedSupply: 100000, balance: { settled: 123450, future: 123450, spendable: 123450 } };
 function rgbReady(app, extra = {}) {
-  Object.assign(app.rgb, { ready: true, service: { backupRequired: false, profile: app.rgb.profile } });
+  Object.assign(app.rgb, { ready: true, service: { backupRequired: false, profile: app.rgb.profile, decode: async () => ({ network: 'signet' }) } });
   app.rgb.data = { address: 'tb1qrgbfunding', btc: { vanilla: { settled: 0, future: 0 }, colored: { settled: 0, future: 0 } }, groups: { nia: [TUSD] }, transfers: {}, ...extra };
 }
 
@@ -236,7 +236,8 @@ test('Receive has an RGB tab on Signet only; Mint has "RGB token"', () => {
   app.state.f.recvKind = 'rgb';
   let html = app.ui.views.receive.render();
   assert.match(html, /data-set="recvKind" data-val="rgb"/);
-  assert.match(html, /Make an invoice/);
+  assert.match(html, /Make invoice/);
+  assert.match(html, /No BTC needed/);
   app.rgb.invoice = 'rgb:~/~/utxob:abc';
   assert.match(app.ui.views.receive.render(), /class="qr"/);
   app.state.f.mintMode = 'rgb';
@@ -377,4 +378,53 @@ test('the token page renders history from the engine (timestamps and amounts)', 
   assert.match(html, /\+1,000/);
   assert.match(html, /Sent/);
   assert.match(html, /−12\.5/);
+});
+
+test('Receive options: token, fixed amount, expiry, and "No BTC needed" by default when test BTC is low', async () => {
+  const app = rgbApp();
+  app.rgb.ensure = () => {};
+  rgbReady(app);
+  const got = [];
+  app.rgb.service.receive = async (o) => { got.push(o); return { invoice: 'rgb:~/~/~/sb:wvout:abc' }; };
+  app.rgb.service.decode = async () => ({});
+  assert.equal(app.rgb.recvType(), 'witness', 'no test BTC: witness');
+  app.rgb.fields.recvAsset = 'rgb:tusd'; app.rgb.fields.recvAmt = '12.5';
+  await app.rgb.action('opt', 'recvExpiry:3600');
+  await app.rgb.action('invoice');
+  assert.deepEqual(got[0], { assetId: 'rgb:tusd', amount: 1250, durationSeconds: 3600, witness: true });
+  app.state.f.recvKind = 'rgb';
+  const html = app.ui.views.receive.render();
+  assert.match(html, /12\.5 TUSD/);
+  assert.match(html, /No BTC needed \(witness\)/);
+  assert.match(html, /1 hour/);
+  // with enough test BTC the default is Private (blind)
+  app.rgb.data.btc.vanilla.settled = 50000;
+  app.rgb.fields.recvType = '';
+  assert.equal(app.rgb.recvType(), 'blind');
+  // a fixed amount needs a token
+  app.rgb.fields.recvAsset = ''; app.rgb.fields.recvAmt = '5';
+  await app.rgb.action('invoice');
+  assert.match(app.rgb.message, /Pick the token first/);
+});
+
+test('Send: an invoice with a fixed amount fills it in; a different token or an expired invoice is refused', async () => {
+  const app = rgbApp();
+  app.rgb.ensure = () => {};
+  rgbReady(app);
+  let d = { assetId: 'rgb:tusd', amount: 2500, network: 'signet', witness: true };
+  app.rgb.service.decode = async () => d;
+  app.rgb.asset = 'rgb:tusd';
+  app.rgb.fields.sendTo = 'rgb:fixed';
+  await app.rgb.action('review');
+  assert.equal(app.rgb.pending.amount, 2500);
+  assert.equal(app.rgb.pending.witness, true);
+  assert.equal(app.rgb.fields.sendAmt, '25');
+  assert.match(app.ui.views.rgbsend.render(), /1,000 sats for their new output/);
+  app.rgb.pending = null;
+  d = { assetId: 'rgb:other', network: 'signet' };
+  await app.rgb.action('review');
+  assert.match(app.rgb.message, /different token/);
+  d = { network: 'signet', expirationTimestamp: 1 };
+  await app.rgb.action('review');
+  assert.match(app.rgb.message, /expired/);
 });

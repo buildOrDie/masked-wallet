@@ -25,6 +25,7 @@ function fakeLib() {
     signPsbt(p) { calls.push(['sign', p]); return 'signed-' + p; }
     issueAssetNia(...a) { calls.push(['issue', ...a]); return { assetId: 'rgb:NEW', ticker: a[0], name: a[1], precision: a[2], issuedSupply: a[3][0], balance: { settled: a[3][0] } }; }
     blindReceive(...a) { calls.push(['blindReceive', ...a]); return { invoice: 'rgb:~/~/utxob:xyz?endpoints=rpcs://p', recipientId: 'utxob:xyz', expirationTimestamp: 9 }; }
+    witnessReceive(...a) { calls.push(['witnessReceive', ...a]); return { invoice: 'rgb:~/~/~/sb:wvout:xyz', recipientId: 'sb:wvout:xyz', expirationTimestamp: 9 }; }
     async sendBegin(o, map, donation, fee, minConf) { calls.push(['sendBegin', map, donation, fee, minConf]); return 'psbt-s'; }
     async sendEnd(o, signed, skip) { calls.push(['sendEnd', signed, skip]); return { txid: 'tx1', batchTransferIdx: 1 }; }
     backup(pw) { calls.push(['backup', pw]); return new Uint8Array([7, 8]); }
@@ -32,7 +33,7 @@ function fakeLib() {
   }
   class WasmInvoice {
     constructor(s) { this.s = s; }
-    invoiceData() { return { recipientId: 'utxob:abc', assetId: null, network: 'Signet', expirationTimestamp: null, transportEndpoints: ['rpcs://proxy.iriswallet.com/0.2/json-rpc'] }; }
+    invoiceData() { if (this.s === 'rgb:w') return { recipientId: 'sb:wvout:w1', assignment: { Fungible: 300n }, network: 'Signet', transportEndpoints: [] }; return { recipientId: 'utxob:abc', assetId: null, network: 'Signet', expirationTimestamp: null, transportEndpoints: ['rpcs://proxy.iriswallet.com/0.2/json-rpc'] }; }
     free() {}
   }
   const restoreKeys = (net, m) => { calls.push(['restoreKeys', net, m]); return { accountXpubVanilla: 'xv', accountXpubColored: 'xc', masterFingerprint: 'ff' }; };
@@ -132,4 +133,16 @@ test('BigInt from the engine becomes plain numbers (the screens sort and date th
   assert.equal(typeof t.createdAt, 'number');
   assert.equal(t.createdAt * 1000 - 0, 1761400000000);
   assert.equal(t.assignments[0].Fungible, 100000);
+});
+
+test('witness invoices: made with no RGB output of ours; paying one adds 1,000 sats for the new output', async () => {
+  const { w, calls } = await open();
+  await w.onchainReceive({ assetId: 'rgb:A', amount: 300, durationSeconds: 3600, witness: true });
+  assert.deepEqual(calls.find((c) => c[0] === 'witnessReceive'), ['witnessReceive', 'rgb:A', { Fungible: 300 }, 3600, ['rpcs://proxy.iriswallet.com/0.2/json-rpc'], 1]);
+  const d = await w.decodeRGBInvoice({ invoice: 'rgb:w' });
+  assert.equal(d.witness, true); assert.equal(d.amount, 300);
+  await w.onchainSend({ invoice: 'rgb:w', assetId: 'rgb:A', amount: 300, feeRate: 2 });
+  const [, map] = calls.find((c) => c[0] === 'sendBegin');
+  assert.deepEqual(map['rgb:A'][0].witnessData, { amountSat: 1000, blinding: null });
+  assert.equal(map['rgb:A'][0].transportEndpoints[0], 'rpcs://proxy.iriswallet.com/0.2/json-rpc', 'falls back to our proxy');
 });

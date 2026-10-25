@@ -3,7 +3,7 @@
 // page layout, the review card and the done screen.
 import { dayLabel, esc, fmtBtc, short } from '../../core/format.mjs';
 import { RGB_PROFILES } from '../../rgb/config.mjs';
-import { RGB_FUND_BTC, RGB_LOW_BTC } from '../../rgb/WalletRgb.mjs';
+import { RGB_BLIND_MIN, RGB_EXPIRY, RGB_FUND_BTC, RGB_LOW_BTC } from '../../rgb/WalletRgb.mjs';
 import { View } from '../View.mjs';
 import { I, addrChunks, btcLogo, head, qrSvg, rowKV, tokIcon } from '../html.mjs';
 
@@ -146,7 +146,8 @@ export class RgbSendView extends View {
           ${rowKV('Token', `${esc(p.ticker)} ${rgbBadge}`)}
           ${rowKV('To', `<span class="mono">${esc(short(p.invoice, 12))}</span>`)}
           ${rowKV('Privacy', '<span class="good">Private — the amount and token are not on the blockchain</span>')}
-          ${rowKV('Network fee', 'a few hundred test sats')}
+          ${p.fixed ? rowKV('Amount', 'set by the invoice') : ''}
+          ${rowKV('Network fee', p.witness ? 'a few hundred test sats + 1,000 sats for their new output' : 'a few hundred test sats')}
         </div>
         ${msg(r)}
         <button class="btn primary wide" data-rgb="confirm" ${r.busy ? 'disabled' : ''}>${r.busy ? 'Sending…' : 'Confirm & send'}</button>
@@ -173,18 +174,32 @@ export class RgbReceive {
       return `<section class="card receive"><div class="recv-badge">${rgbBadge}<b>RGB invoice</b></div>
         ${r.exists ? `<p class="muted center">${r.phase === 'error' ? esc(r.message) : 'Opening RGB…'}</p>` : `<p class="info">RGB tokens move privately: only you and the sender see them.</p><button class="btn primary wide" data-rgb="on" ${r.busy ? 'disabled' : ''}>Turn on RGB</button>`}</section>`;
     }
-    const assets = r.assets(), cur = r.fields.recvAsset;
-    const picks = assets.length ? `<div class="chips">${[['', 'Any token'], ...assets.map((a) => [a.assetId, a.ticker])].map(([id, t]) => `<button class="chip ${cur === id ? 'on' : ''}" data-rgb-pick="${esc(id)}"><b>${esc(t)}</b></button>`).join('')}</div>` : '';
-    return `${picks}<section class="card receive">
-      <div class="recv-badge">${rgbBadge}<b>RGB invoice</b></div>
-      ${r.invoice ? `<div class="qr-wrap">${qrSvg(r.invoice)}</div><p class="addr mono small">${esc(r.invoice)}</p>
+    const assets = r.assets(), cur = r.fields.recvAsset, a = cur ? r.find(cur) : null;
+    const type = r.recvType(), low = r.btc().settled < RGB_BLIND_MIN;
+    const segOf = (key, val, opts) => `<div class="seg" role="radiogroup">${opts.map(([v, l]) => `<button role="radio" aria-checked="${val === v}" data-rgb="opt" data-rgb-arg="${key}:${v}">${l}</button>`).join('')}</div>`;
+    if (r.invoice) {
+      const info = r.invoiceInfo || {};
+      const exp = RGB_EXPIRY.find(([v]) => Number(v) === info.expiry)?.[1] || '';
+      return `<section class="card receive">
+        <div class="recv-badge">${rgbBadge}<b>${info.amount ? `${esc(info.amount)} ${esc(info.ticker)}` : info.ticker ? `Any amount of ${esc(info.ticker)}` : 'Any RGB token'}</b></div>
+        <div class="qr-wrap">${qrSvg(r.invoice)}</div><p class="addr mono small">${esc(r.invoice)}</p>
         <button class="btn primary wide" data-copy="${esc(r.invoice)}">${I.copy}<span>Copy invoice</span></button>
-        <button class="btn ghost wide" data-rgb="invoice" ${r.busy ? 'disabled' : ''}>New invoice</button>`
-        : `<p class="info">An invoice is a one-time code for receiving. Make one and send it to the person paying you.</p>
-        <button class="btn primary wide" data-rgb="invoice" ${r.busy ? 'disabled' : ''}>${r.busy ? 'Making invoice…' : 'Make an invoice'}</button>`}
+        <div class="kv small">${rowKV('Type', info.witness ? 'No BTC needed (witness)' : 'Private (blind)')}${rowKV('Works for', exp || 'a while')}</div>
+        <p class="info">Send this to the person paying you. It works once.</p>
+        <button class="btn ghost wide" data-rgb="opt" data-rgb-arg="recvType:${type}">New invoice</button>
+        <p class="info warn">${esc(r.profile.label)} test tokens only. They have no value.</p>
+      </section>`;
+    }
+    return `<section class="card form">
+      <div class="field"><span class="lbl">Token</span>
+        <div class="chips">${[['', 'Any token'], ...assets.map((x) => [x.assetId, x.ticker])].map(([id, t]) => `<button class="chip ${cur === id ? 'on' : ''}" data-rgb-pick="${esc(id)}"><b>${esc(t)}</b></button>`).join('')}</div></div>
+      ${a ? input(r, 'recvAmt', 'Amount', 'inputmode="decimal" placeholder="Any amount"', `${esc(a.ticker)} · optional`) : ''}
+      <div class="field"><span class="lbl">Works for</span>${segOf('recvExpiry', r.fields.recvExpiry, RGB_EXPIRY)}</div>
+      <div class="field"><span class="lbl">Invoice type</span>${segOf('recvType', type, [['blind', 'Private'], ['witness', 'No BTC needed']])}
+        <span class="addr-kind">${type === 'witness' ? 'The sender adds 1,000 sats for your new output, so you need no BTC.' : 'Receives onto one of your RGB outputs, fully hidden. Needs a little test BTC.'}</span></div>
+      ${type === 'blind' && low ? `<p class="info warn">Your RGB test BTC is low. Pick "No BTC needed", or add test BTC on Home first.</p>` : ''}
       ${msg(r)}
-      <p class="info">Private: the token and the amount are not on the blockchain. Each invoice works once.</p>
-      <p class="info warn">${esc(r.profile.label)} test tokens only. They have no value.</p>
+      <button class="btn primary wide" data-rgb="invoice" ${r.busy ? 'disabled' : ''}>${r.busy ? 'Making invoice…' : 'Make invoice'}</button>
     </section>`;
   }
 }

@@ -109,9 +109,18 @@ export class LiteWallet {
     return asset(a);
   }
 
-  /** A blinded invoice (the sender learns no address of ours). */
-  async onchainReceive({ assetId = null } = {}) {
-    const r = plain(this.wallet.blindReceive(assetId || null, 'Any', null, [this.transport], 1));
+  /** Sats the sender puts in the new output when paying a witness invoice (above dust, so it relays). */
+  static WITNESS_SATS = 1000;
+
+  /**
+   * An invoice. Blind (default): receives onto one of our RGB outputs, blinded, so the sender learns no address;
+   * needs a free RGB output. Witness: the sender creates the output (and pays its sats), so it works with no BTC.
+   * @param {{ assetId?: string|null, amount?: number, durationSeconds?: number|null, witness?: boolean }} [o]
+   */
+  async onchainReceive({ assetId = null, amount = 0, durationSeconds = null, witness = false } = {}) {
+    const assignment = amount ? { Fungible: amount } : 'Any';
+    const make = witness ? 'witnessReceive' : 'blindReceive';
+    const r = plain(this.wallet[make](assetId || null, assignment, durationSeconds, [this.transport], 1));
     await this.save();
     return { invoice: String(r?.invoice ?? ''), recipientId: String(r?.recipientId ?? ''), expirationTimestamp: r?.expirationTimestamp ?? null };
   }
@@ -123,19 +132,21 @@ export class LiteWallet {
       return {
         invoice, recipientId: String(d?.recipientId ?? ''), assetId: d?.assetId ?? undefined,
         network: String(d?.network ?? '').toLowerCase(), expirationTimestamp: d?.expirationTimestamp ?? null,
+        amount: Number(d?.assignment?.Fungible || 0), witness: String(d?.recipientId ?? '').includes('wvout:'),
         transportEndpoints: (d?.transportEndpoints || []).map(String),
       };
     } finally { inv.free(); }
   }
 
-  /** Send to a blinded invoice: build, sign and broadcast. */
+  /** Send to an invoice (blind or witness): build, sign and broadcast. */
   async onchainSend({ invoice, assetId, amount, feeRate }) {
     const online = this.requireOnline();
     const d = await this.decodeRGBInvoice({ invoice });
     const recipients = {
       [assetId]: [{
         recipientId: d.recipientId,
-        witnessData: null,
+        // a witness invoice: we create the receiver's output, with a few sats in it
+        witnessData: d.witness ? { amountSat: LiteWallet.WITNESS_SATS, blinding: null } : null,
         assignment: { Fungible: amount },
         transportEndpoints: d.transportEndpoints.length ? d.transportEndpoints : [this.transport],
       }],

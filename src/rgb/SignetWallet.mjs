@@ -85,16 +85,21 @@ export class SignetWallet {
     const params = newAsset(fields);
     return this.mutate(wallet => wallet.issueAssetNia(params));
   }
-  receive(assetId) {
-    return this.mutate(wallet => wallet.onchainReceive({ ...(assetId ? { assetId } : {}), witness: false }));
+  /** @param {{ assetId?: string, amount?: number, durationSeconds?: number, witness?: boolean } | string} [o] */
+  receive(o = {}) {
+    const opts = typeof o === 'string' ? { assetId: o } : o;
+    return this.mutate(wallet => wallet.onchainReceive({ assetId: opts.assetId || null, amount: opts.amount || 0, durationSeconds: opts.durationSeconds ?? null, witness: !!opts.witness }));
   }
+  /** What an invoice asks for (no change to the wallet). */
+  decode(invoice) { return this.exclusive(() => this.requireWallet().decodeRGBInvoice({ invoice })); }
   send({ invoice, assetId, amount, fee }) {
     if (!invoice.startsWith('rgb:') || !assetId) throw new Error('Enter an RGB invoice and the exact asset ID.');
     const params = { invoice, assetId, amount: baseUnits(amount), feeRate: testFee(fee) };
     return this.mutate(async wallet => {
       const decoded = await wallet.decodeRGBInvoice({ invoice });
-      // Use blinded invoices only; witness invoices require additional satoshi outputs.
-      if (!decoded?.recipientId || !String(decoded.recipientId).includes('utxob:')) throw new Error('Use a blinded RGB invoice for this prototype.');
+      // blind (utxob:) or witness (wvout:) invoices
+      if (!decoded?.recipientId || !/utxob:|wvout:/.test(String(decoded.recipientId))) throw new Error('This is not an RGB invoice MASKED can pay.');
+      if (decoded.amount && decoded.amount !== params.amount) throw new Error('The amount does not match the invoice.');
       if (!this.profile.invoiceNets.includes(String(decoded.network).toLowerCase())) throw new Error(`The invoice is not for ${this.profile.label}.`);
       if (decoded.assetId && decoded.assetId !== assetId) throw new Error('Invoice asset ID does not match.');
       if (decoded.expirationTimestamp && decoded.expirationTimestamp <= Date.now() / 1000) throw new Error('This RGB invoice has expired.');
