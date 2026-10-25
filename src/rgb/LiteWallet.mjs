@@ -146,7 +146,8 @@ export class LiteWallet {
       [assetId]: [{
         recipientId: d.recipientId,
         // a witness invoice: we create the receiver's output, with a few sats in it
-        witnessData: d.witness ? { amountSat: LiteWallet.WITNESS_SATS, blinding: null } : null,
+        // rgb-lib-wasm wants amountSat as a string here (a number is refused), while the token amount is a number
+        witnessData: d.witness ? { amountSat: String(LiteWallet.WITNESS_SATS), blinding: null } : null,
         assignment: { Fungible: amount },
         transportEndpoints: d.transportEndpoints.length ? d.transportEndpoints : [this.transport],
       }],

@@ -143,6 +143,7 @@ test('witness invoices: made with no RGB output of ours; paying one adds 1,000 s
   assert.equal(d.witness, true); assert.equal(d.amount, 300);
   await w.onchainSend({ invoice: 'rgb:w', assetId: 'rgb:A', amount: 300, feeRate: 2 });
   const [, map] = calls.find((c) => c[0] === 'sendBegin');
-  assert.deepEqual(map['rgb:A'][0].witnessData, { amountSat: 1000, blinding: null });
+  assert.deepEqual(map['rgb:A'][0].witnessData, { amountSat: '1000', blinding: null }, 'a string: the real engine refuses a number here');
+  assert.equal(typeof map['rgb:A'][0].assignment.Fungible, 'number', 'and refuses a string for the token amount');
   assert.equal(map['rgb:A'][0].transportEndpoints[0], 'rpcs://proxy.iriswallet.com/0.2/json-rpc', 'falls back to our proxy');
 });
