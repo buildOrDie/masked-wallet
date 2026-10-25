@@ -110,6 +110,7 @@ test('SDK string errors become readable messages', async () => {
   assert.match(rgbError(new TypeError('Failed to fetch')), /Can't reach the Utexo Signet RGB servers/);
   assert.match(rgbError('InsufficientBitcoins'), /Not enough test BTC/);
   assert.match(rgbError('InsufficientAllocationSlots'), /still setting up/);
+  assert.match(rgbError('Insufficient allocations'), /still setting up/, 'the wording rgb-lib-wasm uses');
   const timeout = 'Indexer error: Esplora async error: Reqwest(reqwest::Error { kind: Request, source: "JsValue(Error: Network timeout: the server did not answer in time\\nError: Network timeout: the server did not answer in time\\n at chrome-extension://x/app.bundle.js:5:11572" })';
   assert.equal(rgbError(timeout, { id: 'public', label: 'Public Signet' }), 'The Public Signet block server is busy or down right now.');
   assert.match(rgbError('Indexer error: Esplora async error: HttpResponse { status: 502, message: "<html><head><title>502 Bad Gateway</title>" }'), /busy or down/);

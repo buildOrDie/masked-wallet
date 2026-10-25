@@ -19,7 +19,7 @@ export function rgbError(error, profile = profileOf('utexo')) {
   const text = brief(full);
   if (/did not answer in time|timed? ?out|\b429\b|too many requests|status: 50[234]\b|bad gateway|service unavailable|gateway time/i.test(full)) return `The ${profile.label} block server is busy or down right now.`;
   if (/invalid indexer|failed to fetch|network ?error|internet|ECONN|proxy/i.test(full)) return `Can't reach the ${profile.label} RGB servers right now. Check your connection and try again. (${text})`;
-  if (/allocation ?slots|InsufficientAllocationSlots|no (colorable|available) (utxo|output)s?/i.test(text)) {
+  if (/insufficient ?allocation|allocation ?slots|no (colorable|available) (utxo|output)s?/i.test(text)) {
     return `RGB is still setting up. Wait for one block (about 10 minutes), then try again. (${text})`;
   }
   if (/insufficient|not enough/i.test(text)) {
@@ -38,7 +38,7 @@ function brief(text) {
 }
 
 /** Errors that mean "no RGB outputs to put the asset on yet". */
-const NEEDS_OUTPUTS = /allocation ?slots|InsufficientAllocationSlots|insufficient bitcoin|InsufficientBitcoins|no (colorable|available) (utxo|output)s?/i;
+const NEEDS_OUTPUTS = /insufficient ?allocation|allocation ?slots|insufficient bitcoin|InsufficientBitcoins|no (colorable|available) (utxo|output)s?/i;
 
 const EMPTY_FIELDS = () => ({ name: '', ticker: '', supply: '', precision: '2', sendTo: '', sendAmt: '', recvAsset: '' });
 

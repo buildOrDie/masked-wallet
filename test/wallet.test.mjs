@@ -308,7 +308,7 @@ test('RGB outputs are made by themselves when a step needs them', async () => {
   const calls = [];
   app.rgb.service = { createUtxos: async (fee) => { calls.push(['utxos', fee]); }, snapshot: async () => app.rgb.data, profile: app.rgb.profile };
   let n = 0;
-  const out = await app.rgb.withOutputs(async () => { if (n++ === 0) throw 'InsufficientAllocationSlots'; return 'ok'; });
+  const out = await app.rgb.withOutputs(async () => { if (n++ === 0) throw 'Insufficient allocations'; return 'ok'; });
   assert.equal(out, 'ok');
   assert.deepEqual(calls, [['utxos', '2']]);
   await assert.rejects(app.rgb.withOutputs(async () => { throw 'InsufficientAllocationSlots'; }), /Wait for one block/);
