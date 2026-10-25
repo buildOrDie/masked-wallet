@@ -5,7 +5,7 @@ import { dayLabel, esc, fmtBtc, short } from '../../core/format.mjs';
 import { RGB_PROFILES } from '../../rgb/config.mjs';
 import { RGB_FUND_BTC, RGB_LOW_BTC } from '../../rgb/WalletRgb.mjs';
 import { View } from '../View.mjs';
-import { I, addrChunks, head, qrSvg, rowKV, tokIcon } from '../html.mjs';
+import { I, addrChunks, btcLogo, head, qrSvg, rowKV, tokIcon } from '../html.mjs';
 
 export const rgbBadge = '<span class="badge rgb">RGB</span>';
 const rgbIcon = (ticker, big = false) => tokIcon(ticker || 'RG', big).replace('class="tok-ic', 'class="tok-ic rgb');
@@ -51,11 +51,16 @@ export class RgbHome {
     const { settled, pending } = r.btc();
     const fund = settled + pending < RGB_LOW_BTC
       ? `<button class="hint hint-cta" data-rgb="fund"><span class="hint-ic">${I.recv}</span><span><b>Add test BTC for RGB</b><span>RGB pays its own network fees. Send ${RGB_FUND_BTC} from your Public balance.</span></span><span class="chev">›</span></button>`
-      : pending && !settled ? '<p class="muted small center">Test BTC for RGB is waiting for a block (about 10 minutes).</p>' : '';
+      : '';
+    // RGB's own test BTC (it pays RGB's network fees), with its address: tap to copy
+    const addr = r.data.address || '';
+    const feeRow = `<button class="tok-line" data-copy="${esc(addr)}" title="Copy RGB address">${btcLogo}
+        <span class="bal-txt"><b class="tk">Test BTC for fees</b><span class="mono">${esc(short(addr, 6))} ${I.copy}</span></span>
+        <span class="bal-amt"><b>${fmtBtc(settled)}</b><span>${pending ? `<span class="pend-t">+${fmtBtc(pending)} waiting for a block</span>` : 'tBTC'}</span></span></button>`;
     return `<section class="home-toks">
       <div class="list-h"><b>RGB tokens</b><button class="link small" data-rgb="refresh" ${r.busy ? 'disabled' : ''}>${r.busy ? 'Updating…' : 'Refresh'}</button></div>
       ${fund}
-      <div class="tok-list">${list.map((a) => {
+      <div class="tok-list">${feeRow}${list.map((a) => {
         const s = Number(a.balance?.settled || 0), fut = Number(a.balance?.future || 0);
         return `<button class="tok-line" data-rgb="token" data-rgb-arg="${esc(a.assetId)}">${rgbIcon(a.ticker)}
         <span class="bal-txt"><b class="tk">${esc(a.ticker)}</b><span>RGB${fut > s ? ' · <span class="pend-t">incoming</span>' : ''}</span></span>

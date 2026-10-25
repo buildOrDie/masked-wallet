@@ -221,6 +221,8 @@ test('Home on Signet: a "Try RGB tokens" card, then RGB tokens in the same rows 
   assert.match(html, /class="tok-line" data-rgb="token" data-rgb-arg="rgb:tusd"/);
   assert.match(html, /1,234\.5/, 'amount in token units, not base units');
   assert.match(html, /Add test BTC for RGB/, 'low test BTC: one tap to fund from Public');
+  assert.match(html, /Test BTC for fees/, 'RGB\'s own BTC and address are on Home');
+  assert.match(html, /data-copy="tb1qrgbfunding"/);
   assert.doesNotMatch(html, /Prepare RGB outputs|password/i, 'no manual setup steps');
   assert.equal(app.account.pubAddr(), address);
   app.state.net = 'main';
