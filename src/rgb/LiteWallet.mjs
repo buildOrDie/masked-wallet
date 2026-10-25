@@ -11,6 +11,18 @@ export const rgbNetwork = (n) => NETWORKS[String(n).toLowerCase()] || (() => { t
 export const rpcEndpoint = (url) => String(url).replace(/^https:\/\//i, 'rpcs://').replace(/^http:\/\//i, 'rpc://');
 
 const num = (x) => Number(x ?? 0);
+
+/**
+ * The engine returns u64 values (amounts, timestamps, indexes) as BigInt. The screens do ordinary maths on them
+ * (sorting, dates, sums), and BigInt does not mix with numbers. Turn them into numbers; a value beyond 2^53 (no
+ * test amount gets there) becomes a string rather than a wrong number.
+ */
+export function plain(x) {
+  if (typeof x === 'bigint') return x <= BigInt(Number.MAX_SAFE_INTEGER) && x >= -BigInt(Number.MAX_SAFE_INTEGER) ? Number(x) : x.toString();
+  if (Array.isArray(x)) return x.map(plain);
+  if (x && typeof x === 'object' && !(x instanceof Uint8Array)) return Object.fromEntries(Object.entries(x).map(([k, v]) => [k, plain(v)]));
+  return x;
+}
 const balance = (b) => ({ settled: num(b?.settled), future: num(b?.future), spendable: num(b?.spendable) });
 const asset = (a) => ({
   assetId: String(a?.assetId ?? ''), ticker: String(a?.ticker ?? ''), name: String(a?.name ?? ''),
@@ -69,14 +81,14 @@ export class LiteWallet {
     await this.wallet.sync(online);
     await this.save();
   }
-  async refreshWallet() { const r = await this.wallet.refresh(this.requireOnline(), null, [], false); await this.save(); return r; }
+  async refreshWallet() { const r = await this.wallet.refresh(this.requireOnline(), null, [], false); await this.save(); return plain(r); }
   async getAddress() { return this.wallet.getAddress(); }
-  async getBtcBalance() { const b = this.wallet.getBtcBalance(); return { vanilla: balance(b?.vanilla), colored: balance(b?.colored) }; }
+  async getBtcBalance() { const b = plain(this.wallet.getBtcBalance()); return { vanilla: balance(b?.vanilla), colored: balance(b?.colored) }; }
   async listAssets() {
-    const r = this.wallet.listAssets([]) || {};
+    const r = plain(this.wallet.listAssets([]) || {});
     return { nia: (r.nia || []).map(asset), ifa: (r.ifa || []).map(asset) };
   }
-  async listTransfers(assetId = null) { return this.wallet.listTransfers(assetId) || []; }
+  async listTransfers(assetId = null) { return plain(this.wallet.listTransfers(assetId) || []); }
 
   /** Sign a PSBT with this wallet's own keys. */
   sign(psbt) { return this.wallet.signPsbt(psbt); }
@@ -92,14 +104,14 @@ export class LiteWallet {
 
   /** A new asset with a fixed supply, held by this wallet. */
   async issueAssetNia({ ticker, name, precision, amounts }) {
-    const a = this.wallet.issueAssetNia(ticker, name, precision, amounts);
+    const a = plain(this.wallet.issueAssetNia(ticker, name, precision, amounts));
     await this.save();
     return asset(a);
   }
 
   /** A blinded invoice (the sender learns no address of ours). */
   async onchainReceive({ assetId = null } = {}) {
-    const r = this.wallet.blindReceive(assetId || null, 'Any', null, [this.transport], 1);
+    const r = plain(this.wallet.blindReceive(assetId || null, 'Any', null, [this.transport], 1));
     await this.save();
     return { invoice: String(r?.invoice ?? ''), recipientId: String(r?.recipientId ?? ''), expirationTimestamp: r?.expirationTimestamp ?? null };
   }
@@ -107,7 +119,7 @@ export class LiteWallet {
   async decodeRGBInvoice({ invoice }) {
     const inv = new this.lib.WasmInvoice(invoice);
     try {
-      const d = inv.invoiceData();
+      const d = plain(inv.invoiceData());
       return {
         invoice, recipientId: String(d?.recipientId ?? ''), assetId: d?.assetId ?? undefined,
         network: String(d?.network ?? '').toLowerCase(), expirationTimestamp: d?.expirationTimestamp ?? null,
@@ -129,7 +141,7 @@ export class LiteWallet {
       }],
     };
     const psbt = await this.wallet.sendBegin(online, recipients, false, BigInt(Math.round(feeRate)), 1);
-    const r = await this.wallet.sendEnd(online, this.sign(psbt), false);
+    const r = plain(await this.wallet.sendEnd(online, this.sign(psbt), false));
     await this.save();
     return r;
   }

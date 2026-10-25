@@ -17,9 +17,9 @@ function fakeLib() {
     async flush() { calls.push(['flush']); }
     free() { calls.push(['free']); }
     getAddress() { return 'tb1qtest'; }
-    getBtcBalance() { return { vanilla: { settled: 5000, future: 7000, spendable: 5000 }, colored: { settled: 2000, future: 2000, spendable: 2000 } }; }
+    getBtcBalance() { return { vanilla: { settled: 5000n, future: 7000n, spendable: 5000n }, colored: { settled: 2000n, future: 2000n, spendable: 2000n } }; }
     listAssets(f) { calls.push(['listAssets', f]); return { nia: [{ assetId: 'rgb:A', ticker: 'TUSDT', name: 'Test USD', precision: 2, issuedSupply: 100, balance: { settled: 100, future: 100, spendable: 100 } }], ifa: [], cfa: [] }; }
-    listTransfers() { return []; }
+    listTransfers() { return [{ idx: 1n, createdAt: 1761400000n, updatedAt: 1761400100n, status: 'Settled', kind: 'Issuance', assignments: [{ Fungible: 100000n }] }]; }
     async createUtxosBegin(...a) { calls.push(['createUtxosBegin', ...a.slice(1)]); return 'psbt-u'; }
     async createUtxosEnd(o, signed, skip) { calls.push(['createUtxosEnd', signed, skip]); return 4; }
     signPsbt(p) { calls.push(['sign', p]); return 'signed-' + p; }
@@ -121,4 +121,15 @@ test('Refresh can scan addresses ahead, so coins sent to an older address are fo
   await w.syncWallet({ full: true });
   const i = calls.findIndex((c) => c[0] === 'fullScan');
   assert.ok(i > 0 && calls[i + 1][0] === 'sync', 'full scan, then sync');
+});
+
+test('BigInt from the engine becomes plain numbers (the screens sort and date them)', async () => {
+  const { plain } = await import('../src/rgb/LiteWallet.mjs');
+  assert.deepEqual(plain({ a: 5n, b: [1n, { c: 2n }], d: 'x', e: null }), { a: 5, b: [1, { c: 2 }], d: 'x', e: null });
+  assert.equal(plain(2n ** 60n), '1152921504606846976', 'too big for a number: kept exact as text');
+  const { w } = await open();
+  const [t] = await w.listTransfers('rgb:A');
+  assert.equal(typeof t.createdAt, 'number');
+  assert.equal(t.createdAt * 1000 - 0, 1761400000000);
+  assert.equal(t.assignments[0].Fungible, 100000);
 });

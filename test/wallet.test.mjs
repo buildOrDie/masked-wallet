@@ -366,3 +366,15 @@ test('a slow block server keeps RGB open with a retry note; RGB waits for the wa
   clearTimeout(app2.rgb.waiting);
   globalThis.localStorage.removeItem(app.rgb.profile.vaultKey);
 });
+
+test('the token page renders history from the engine (timestamps and amounts)', async () => {
+  const app = rgbApp();
+  app.rgb.ensure = () => {};
+  rgbReady(app, { transfers: { 'rgb:tusd': [{ idx: 1, createdAt: 1761400000, updatedAt: 1761400100, status: 'Settled', kind: 'Issuance', assignments: [{ Fungible: 100000 }] }, { idx: 2, createdAt: 1761400200, status: 'WaitingConfirmations', kind: 'Send', requestedAssignment: { Fungible: 1250 }, assignments: [] }] } });
+  await app.rgb.action('token', 'rgb:tusd');
+  const html = app.ui.views.rgbtok.render();
+  assert.match(html, /Created/);
+  assert.match(html, /\+1,000/);
+  assert.match(html, /Sent/);
+  assert.match(html, /−12\.5/);
+});
