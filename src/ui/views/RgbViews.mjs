@@ -147,11 +147,14 @@ export class RgbSendView extends View {
           ${rowKV('To', `<span class="mono">${esc(short(p.invoice, 12))}</span>`)}
           ${rowKV('Privacy', '<span class="good">Private — the amount and token are not on the blockchain</span>')}
           ${p.fixed ? rowKV('Amount', 'set by the invoice') : ''}
-          ${p.proxies?.length ? rowKV('Transfer server', `${esc(p.proxies.join(', '))}${p.ask?.length ? ' <span class="muted">(Chrome will ask to allow it)</span>' : ''}`) : ''}
+          ${rowKV('Transfer server', `${esc(p.proxies.join(', '))} ${p.ask.length ? '<span class="muted">· not allowed yet</span>' : p.check?.ok ? '<span class="good">· reachable</span>' : p.check ? '<span class="meh">· not usable</span>' : '<span class="muted">· checking…</span>'}`)}
           ${rowKV('Network fee', p.witness ? 'a few hundred test sats + 1,000 sats for their new output' : 'a few hundred test sats')}
         </div>
+        ${p.ask.length ? `<p class="info">This invoice uses its own transfer server (${esc(p.ask.map((u) => new URL(u).host).join(', '))}). The token's proof is dropped off there for them to collect. Allow MASKED to reach it:</p>
+          <button class="btn primary wide" data-rgb="allowProxy" ${r.busy ? 'disabled' : ''}>Allow ${esc(new URL(p.ask[0]).host)}</button>` : ''}
+        ${p.check && !p.check.ok ? `<p class="info warn">MASKED can't use this invoice's transfer server: ${esc(p.check.detail)}</p><button class="btn ghost wide" data-rgb="recheck" ${r.busy ? 'disabled' : ''}>Check again</button>` : ''}
         ${msg(r)}
-        <button class="btn primary wide" data-rgb="confirm" ${r.busy ? 'disabled' : ''}>${r.busy ? 'Sending…' : 'Confirm & send'}</button>
+        <button class="btn primary wide" data-rgb="confirm" ${r.busy || !p.check?.ok ? 'disabled' : ''}>${r.busy ? 'Working…' : 'Confirm & send'}</button>
       </section>`;
     }
     const sp = Number(a.balance?.spendable || 0);

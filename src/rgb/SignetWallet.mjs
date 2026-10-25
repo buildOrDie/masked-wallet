@@ -90,6 +90,8 @@ export class SignetWallet {
     const opts = typeof o === 'string' ? { assetId: o } : o;
     return this.mutate(wallet => wallet.onchainReceive({ assetId: opts.assetId || null, amount: opts.amount || 0, durationSeconds: opts.durationSeconds ?? null, witness: !!opts.witness }));
   }
+  /** @param {string} url an https:// transfer server URL */
+  checkProxy(url) { return this.exclusive(() => this.requireWallet().checkProxy(url)); }
   /** What an invoice asks for (no change to the wallet). */
   decode(invoice) { return this.exclusive(() => this.requireWallet().decodeRGBInvoice({ invoice })); }
   send({ invoice, assetId, amount, fee }) {

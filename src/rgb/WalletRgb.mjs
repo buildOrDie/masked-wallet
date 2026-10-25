@@ -116,6 +116,18 @@ export class WalletRgb {
     return { settled, pending: Math.max(0, sum('future') - settled) };
   }
   amount(a, n) { return fromBase(n, a?.precision || 0); }
+  /** Ask each transfer server in the pending send whether it answers and speaks our protocol. */
+  async checkProxies() {
+    const p = this.pending;
+    if (!p) return;
+    const errors = [];
+    for (const e of p.endpoints) {
+      try { await this.service.checkProxy(proxyUrl(e)); return void (this.pending = { ...p, check: { ok: true, detail: '' } }); } catch (err) {
+        errors.push(`${hostOf(e)}: ${brief(typeof err === 'string' ? err : err?.message || String(err))}`);
+      }
+    }
+    this.pending = { ...p, check: { ok: false, detail: errors.join(' · ') } };
+  }
   /** Blind unless chosen otherwise; witness by default when there is too little test BTC for a blind one. */
   recvType() { return this.fields.recvType || (this.data && this.btc().settled < RGB_BLIND_MIN ? 'witness' : 'blind'); }
 
@@ -328,18 +340,30 @@ export class WalletRgb {
           const amount = d.amount || toBase(this.fields.sendAmt, a.precision);
           if (d.amount) this.fields.sendAmt = this.amount(a, d.amount).replace(/,/g, '');
           if (amount > Number(a.balance?.spendable || 0)) throw new Error(`You can send up to ${this.amount(a, a.balance?.spendable)} ${a.ticker}.`);
-          const proxies = (d.transportEndpoints || []).map(hostOf);
-          this.pending = Object.freeze({ assetId: a.assetId, ticker: a.ticker, invoice, amount, shown: this.amount(a, amount), witness: !!d.witness, fixed: !!d.amount, proxies, ask: newProxies(d.transportEndpoints) });
+          const endpoints = d.transportEndpoints?.length ? d.transportEndpoints : [this.profile.sdk.transportEndpoint];
+          const ask = newProxies(endpoints);
+          this.pending = { assetId: a.assetId, ticker: a.ticker, invoice, amount, shown: this.amount(a, amount), witness: !!d.witness, fixed: !!d.amount, endpoints, proxies: endpoints.map(hostOf), ask, check: null };
+          // a server we can already reach is checked now; a new one waits for "Allow" (Chrome asks on that click)
+          if (!ask.length) await this.checkProxies();
         });
       }
+      case 'allowProxy': {
+        const p = this.pending;
+        if (!p) return;
+        return this.run(async () => {
+          await app.platform.requestOrigins(p.ask); // first: still the click, so Chrome can show its prompt
+          this.pending = { ...p, ask: [] };
+          await this.checkProxies();
+        });
+      }
+      case 'recheck': return this.run(() => this.checkProxies());
       case 'cancel': this.pending = null; return app.render();
       case 'confirm': {
         const p = this.pending;
         if (!p) return;
         return this.run(async () => {
           this.message = 'Sending…'; app.render();
-          // first, while this is still the click: let Chrome ask once for an invoice's own transfer server
-          if (p.ask?.length) await app.platform.requestOrigins(p.ask);
+          if (!p.check?.ok) throw new Error('Check the transfer server first.');
           const r = await this.service.send({ invoice: p.invoice, assetId: p.assetId, amount: String(p.amount), fee: RGB_FEE });
           this.sent = { txid: r?.txid || '', shown: p.shown, ticker: p.ticker };
           this.pending = null;

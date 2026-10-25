@@ -202,7 +202,7 @@ function rgbApp(net = 'signet') {
 }
 const TUSD = { assetId: 'rgb:tusd', ticker: 'TUSD', name: 'Test USD', precision: 2, issuedSupply: 100000, balance: { settled: 123450, future: 123450, spendable: 123450 } };
 function rgbReady(app, extra = {}) {
-  Object.assign(app.rgb, { ready: true, service: { backupRequired: false, profile: app.rgb.profile, decode: async () => ({ network: 'signet' }) } });
+  Object.assign(app.rgb, { ready: true, service: { backupRequired: false, profile: app.rgb.profile, decode: async () => ({ network: 'signet' }), checkProxy: async () => {} } });
   app.rgb.data = { address: 'tb1qrgbfunding', btc: { vanilla: { settled: 0, future: 0 }, colored: { settled: 0, future: 0 } }, groups: { nia: [TUSD] }, transfers: {}, ...extra };
 }
 
@@ -429,23 +429,37 @@ test('Send: an invoice with a fixed amount fills it in; a different token or an 
   assert.match(app.rgb.message, /expired/);
 });
 
-test('an invoice with its own transfer server: shown on review, Chrome asked once on Confirm', async () => {
+test('an invoice with its own transfer server: Allow asks Chrome once, then the server is checked before Confirm', async () => {
   const app = rgbApp();
   app.rgb.ensure = () => {};
   rgbReady(app);
   const { newProxies, proxyUrl, rgbError } = await import('../src/rgb/WalletRgb.mjs');
   assert.equal(proxyUrl('rpcs://rgb.example.com/json-rpc'), 'https://rgb.example.com/json-rpc');
   assert.deepEqual(newProxies(['rpcs://proxy.iriswallet.com/0.2/json-rpc', 'rpcs://rgb.example.com/json-rpc']), ['https://rgb.example.com/json-rpc']);
+  const checked = [];
+  let fail = 'Invalid proxy protocol version: 0.1';
+  app.rgb.service.checkProxy = async (u) => { checked.push(u); if (fail) throw fail; };
   app.rgb.service.decode = async () => ({ network: 'signet', transportEndpoints: ['rpcs://rgb.example.com/json-rpc'] });
   app.rgb.asset = 'rgb:tusd'; app.rgb.fields.sendTo = 'rgb:x'; app.rgb.fields.sendAmt = '1';
   await app.rgb.action('review');
-  assert.match(app.ui.views.rgbsend.render(), /rgb\.example\.com.*Chrome will ask/s);
+  let html = app.ui.views.rgbsend.render();
+  assert.match(html, /data-rgb="allowProxy"[^>]*>Allow rgb\.example\.com/);
+  assert.match(html, /data-rgb="confirm"[^>]*disabled/, 'no sending before the server is allowed and checked');
+  assert.deepEqual(checked, [], 'not checked before it is allowed');
   const asked = [];
   app.platform = { requestOrigins: async (u) => { asked.push(u); } };
+  await app.rgb.action('allowProxy');
+  assert.deepEqual(asked, [['https://rgb.example.com/json-rpc']]);
+  assert.deepEqual(checked, ['https://rgb.example.com/json-rpc']);
+  html = app.ui.views.rgbsend.render();
+  assert.match(html, /can't use this invoice's transfer server: rgb\.example\.com: Invalid proxy protocol version: 0\.1/);
+  fail = '';
+  await app.rgb.action('recheck');
+  assert.equal(app.rgb.pending.check.ok, true);
+  assert.doesNotMatch(app.ui.views.rgbsend.render(), /data-rgb="confirm"[^>]*disabled/);
   app.rgb.service.send = async () => ({ txid: 'ab'.repeat(32) });
   app.rgb.service.snapshot = async () => app.rgb.data;
   await app.rgb.action('confirm');
-  assert.deepEqual(asked, [['https://rgb.example.com/json-rpc']]);
   assert.equal(app.rgb.sent.txid, 'ab'.repeat(32));
   assert.match(rgbError('Invalid transport endpoints: no valid transport endpoints'), /transfer server named in this invoice/);
 });

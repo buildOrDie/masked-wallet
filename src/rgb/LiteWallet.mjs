@@ -158,6 +158,9 @@ export class LiteWallet {
     return r;
   }
 
+  /** Check that an RGB transfer server answers and speaks a protocol this engine supports. Throws the reason. */
+  async checkProxy(url) { await this.lib.checkProxyUrl(url); }
+
   async createBackup({ password }) { this.lastBackupBytes = this.wallet.backup(password); }
   getLastBackupBytes() { return this.lastBackupBytes; }
   async restoreFromBackupBytes(bytes, password) { this.wallet.restoreBackup(bytes, password); await this.save(); }
