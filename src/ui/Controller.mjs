@@ -39,6 +39,8 @@ export class Controller {
 
   // ---- typing: update the bound field and the hints next to it, without a full render ----
   onInput(e) {
+    const rgbField = e.target.dataset?.rgbField;
+    if (rgbField) { this.app.rgb.fields[rgbField] = e.target.value; this.app.rgb.pending = null; return; }
     const b = e.target.dataset?.bind;
     if (!b) return;
     const { state, f } = this, codec = this.app.account.codec;
@@ -99,6 +101,13 @@ export class Controller {
       try { state.mint = { stage: 'review', built: await build() }; state.status.mint = null; } catch (err) { state.status.mint = [friendly(err.message), 'err']; }
       this.render();
     };
+    if (d.rgb) { await app.rgb.action(d.rgb, d.rgbArg || ''); return true; }
+    if (d.rgbGo) {
+      app.rgb.mode = d.rgbGo === 'btc' ? '' : d.rgbGo;
+      app.rgb.pending = null;
+      app.rgb.fields.asset = d.asset || '';
+      state.view = d.rgbGo === 'btc' ? 'home' : d.rgbGo; this.render(); return true;
+    }
     if (t.id === 'netChip') { state.view = 'settings'; this.render(); return true; }
     if (t.hasAttribute('data-pwtoggle')) {
       const i = /** @type {HTMLInputElement} */ ($('#pwUnlock'));
@@ -182,6 +191,7 @@ export class Controller {
   /** data-go: open another view (with the extra data-* that come with it). */
   go(t) {
     const { app, state, f } = this, d = t.dataset;
+    if (['send', 'receive', 'shield', 'home'].includes(d.go)) { app.rgb.mode = ''; app.rgb.pending = null; }
     if (d.recv) f.recvKind = d.recv;
     if (d.filter) f.coinFilter = d.filter;
     if (d.reset || ['send', 'shield'].includes(d.go)) { state.send = { stage: 'form' }; state.status.send = null; if (state.drop.stage !== 'review') state.drop = { stage: 'form' }; }

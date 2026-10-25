@@ -1,3 +1,4 @@
+import { RgbPanel } from '../RgbPanel.mjs';
 import { esc, fmtBtc, short, sumSats } from '../../core/format.mjs';
 import { View } from '../View.mjs';
 import { AirdropView } from './AirdropView.mjs';
@@ -14,6 +15,7 @@ export class SendView extends View {
   }
 
   render() {
+    if (this.app.rgb.available && this.app.rgb.mode === 'send' && this.mode === 'send') return RgbPanel.form(this.app, 'send');
     if (this.mode === 'send' && this.f.sendMode === 'airdrop') return this.drop.render();
     const st = this.state.send;
     if (st.stage === 'review' && st.built) return this.review(st.built);

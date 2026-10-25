@@ -1,0 +1,68 @@
+// RGB test networks. Both are separate test environments, never MASKED's mainnet account.
+// - public: public Bitcoin Signet (the same chain as MASKED's Signet), mempool.space as the indexer and
+//   Iris Wallet's public RGB proxy for transfer files. No USDT here: issue your own test asset.
+// - utexo: Utexo's own Signet (`signetcustom`), where Utexo's faucet gives test BTC and test assets.
+export const RGB_PROFILES = Object.freeze({
+  public: Object.freeze({
+    id: 'public',
+    label: 'Public Signet',
+    sdk: Object.freeze({
+      network: 'signet',
+      indexerUrl: 'https://mempool.space/signet/api',
+      transportEndpoint: 'https://proxy.iriswallet.com/0.2/json-rpc',
+      dataDir: 'masked_rgb_public_signet_v2', // v2: the on-chain engine (v1 was the Lightning SDK)
+    }),
+    invoiceNets: Object.freeze(['signet']),
+    vaultKey: 'masked.rgb.public-signet.v1',
+    funding: 'Send Signet coins here, for example from your MASKED Signet Public balance.',
+  }),
+  utexo: Object.freeze({
+    id: 'utexo',
+    label: 'Utexo Signet',
+    sdk: Object.freeze({
+      network: 'utexo',
+      indexerUrl: 'https://esplora-api.utexo.com',
+      transportEndpoint: 'https://rgb-proxy.utexo.com/json-rpc',
+      dataDir: 'masked_rgb_utexo_signet_v2',
+    }),
+    invoiceNets: Object.freeze(['signet', 'utexo']),
+    vaultKey: 'masked.rgb.signet.v1',
+    funding: 'Fund this address using /getbtc at Utexo’s faucet. Do not send public Signet coins.',
+  }),
+});
+export const RGB_PROFILE_KEY = 'masked.rgb.profile';
+export const DEFAULT_PROFILE = 'public';
+/** @param {string|null} id */
+export const profileOf = (id) => RGB_PROFILES[id] || RGB_PROFILES[DEFAULT_PROFILE];
+
+// kept for older imports and tests
+export const RGB_SIGNET = RGB_PROFILES.utexo.sdk;
+export const RGB_VAULT_KEY = RGB_PROFILES.utexo.vaultKey;
+export const RGB_DIRTY_KEY = 'masked.rgb.signet.backup-required';
+/** Each network keeps its own "backup needed" flag. */
+export const dirtyKey = (p) => (p.id === 'utexo' ? RGB_DIRTY_KEY : `${p.vaultKey}.backup-required`);
+
+export function baseUnits(text) {
+  if (!/^[1-9]\d*$/.test(String(text))) throw new Error('Enter a positive amount in asset base units.');
+  const value = Number(text);
+  if (!Number.isSafeInteger(value)) throw new Error('Amount exceeds the supported exact integer range.');
+  return value;
+}
+export function testFee(text) {
+  const value = Number(text);
+  if (!Number.isFinite(value) || value < 1 || value > 100) throw new Error('Use a fee rate between 1 and 100 sat/vB.');
+  return value;
+}
+/** A new test asset: ticker, name, decimals and whole-unit supply, checked before the SDK sees them. */
+export function newAsset({ ticker, name, precision, supply }) {
+  const t = String(ticker || '').trim().toUpperCase();
+  if (!/^[A-Z][A-Z0-9]{1,7}$/.test(t)) throw new Error('Ticker: 2 to 8 letters or digits, starting with a letter.');
+  const n = String(name || '').trim();
+  if (n.length < 2 || n.length > 40) throw new Error('Name: 2 to 40 characters.');
+  const p = Number(precision);
+  if (!Number.isInteger(p) || p < 0 || p > 8) throw new Error('Decimals: a whole number from 0 to 8.');
+  const whole = baseUnits(supply);
+  const amount = whole * 10 ** p;
+  if (!Number.isSafeInteger(amount)) throw new Error('Supply is too large for these decimals.');
+  return { ticker: t, name: n, precision: p, amounts: [amount] };
+}

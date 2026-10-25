@@ -51,11 +51,13 @@ export class LockController {
     app.sites.loadSites().then(() => app.render());
     app.render();
     app.sync.run(6);
+    app.rgb.resume(); // reopens RGB if it was unlocked before the popup closed (same session, until auto-lock)
     setInterval(() => { if (state.lockState === 'open' && !app.sync.syncing && document.visibilityState === 'visible') app.sync.run(4); }, 60000);
   }
 
   async lockNow() {
     await this.session.clear();
+    await this.app.rgb.forget();
     this.state.wallet = null; this.secret = null;
     location.reload(); // drops every key from memory
   }
