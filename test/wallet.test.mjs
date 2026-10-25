@@ -352,7 +352,7 @@ test('a slow block server keeps RGB open with a retry note; RGB waits for the wa
   await app.rgb.open(await app.rgb.walletKey());
   assert.equal(app.rgb.ready, true, 'still open');
   assert.deepEqual(calls, ['open', 'timer', 'full'], 'first open on this engine: full scan');
-  assert.match(app.rgb.message, /busy or slow.*try again in a minute/);
+  assert.match(app.rgb.message, /busy or down.*try again in a minute/);
   // waits while the wallet syncs
   globalThis.localStorage.setItem(app.rgb.profile.vaultKey, '{"keyed":"wallet"}');
   const app2 = rgbApp(); let opened = 0;

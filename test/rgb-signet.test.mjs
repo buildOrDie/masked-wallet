@@ -111,7 +111,8 @@ test('SDK string errors become readable messages', async () => {
   assert.match(rgbError('InsufficientBitcoins'), /Not enough test BTC/);
   assert.match(rgbError('InsufficientAllocationSlots'), /still setting up/);
   const timeout = 'Indexer error: Esplora async error: Reqwest(reqwest::Error { kind: Request, source: "JsValue(Error: Network timeout: the server did not answer in time\\nError: Network timeout: the server did not answer in time\\n at chrome-extension://x/app.bundle.js:5:11572" })';
-  assert.equal(rgbError(timeout, { id: 'public', label: 'Public Signet' }), 'The Public Signet block server is busy or slow right now.');
+  assert.equal(rgbError(timeout, { id: 'public', label: 'Public Signet' }), 'The Public Signet block server is busy or down right now.');
+  assert.match(rgbError('Indexer error: Esplora async error: HttpResponse { status: 502, message: "<html><head><title>502 Bad Gateway</title>" }'), /busy or down/);
   assert.doesNotMatch(rgbError('Indexer error: x (JsValue(Error: socket closed\\n at foo.js:1:2))'), /foo\.js/);
   assert.equal(rgbError('Invalid invoice'), 'Invalid invoice');
   assert.equal(rgbError(undefined), 'RGB operation failed.');

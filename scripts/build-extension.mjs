@@ -19,9 +19,20 @@ console.log('Extension built at '+out);
 // RGB: the wallet lazily imports this packaged ESM runtime when RGB is turned on. The engine is rgb-lib-wasm
 // (on-chain RGB only), shrunk with binaryen's wasm-opt -Oz, limited to WebAssembly features Chrome supports. The optimized file is cached by the input's hash,
 // so only the first build takes a couple of minutes.
+// rgb-lib-wasm's fetch calls go through src/rgb/rgbFetch.mjs (a few requests at a time, polite retries)
+const rgbFetchPath=resolve(root,'src/rgb/rgbFetch.mjs');
 await build({
   bundle:true,minify:true,platform:'browser',format:'esm',target:'es2022',
   entryPoints:[resolve(root,'src/rgb/runtime.mjs')],outfile:resolve(out,'rgb-runtime.mjs'),
+  plugins:[{name:'rgb-fetch',setup(b){
+    b.onLoad({filter:/rgb_lib_wasm_bindings\.js$/},async({path})=>{
+      let src=await readFile(path,'utf8'), n=0;
+      src=src.replace(/const ret = fetch\(arg0\);/g,()=>{n++;return 'const ret = __rgbFetch(arg0);';});
+      src=src.replace(/const ret = arg0\.fetch\(arg1\);/g,()=>{n++;return 'const ret = __rgbFetch(arg1);';});
+      if(n!==4) throw new Error(`rgb-lib-wasm changed: expected 4 fetch calls to route, found ${n}`);
+      return {contents:`import { rgbFetch as __rgbFetch } from ${JSON.stringify(rgbFetchPath)};\n`+src,loader:'js'};
+    });
+  }}],
 });
 const engine=resolve(root,'node_modules/@utexo/rgb-lib-wasm/rgb_lib_wasm_bindings_bg.wasm');
 const raw=await readFile(engine);

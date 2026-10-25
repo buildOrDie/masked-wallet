@@ -8,7 +8,7 @@ export const NETWORKS = {
 /** Blockchain servers (Esplora API), in order of preference. */
 export const ESPLORA = {
   main: ['https://mempool.space/api/', 'https://blockstream.info/api/'],
-  signet: ['https://mempool.space/signet/api/'],
+  signet: ['https://mempool.space/signet/api/', 'https://blockstream.info/signet/api/'],
 };
 
 export const BROADCAST = {

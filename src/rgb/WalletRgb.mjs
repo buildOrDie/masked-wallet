@@ -17,7 +17,7 @@ export const RGB_FUND_BTC = '0.0003';
 export function rgbError(error, profile = profileOf('utexo')) {
   const full = typeof error === 'string' ? error : (error instanceof Error ? error.message : String(error?.['message'] ?? ''));
   const text = brief(full);
-  if (/did not answer in time|timed? ?out|\b429\b|too many requests/i.test(full)) return `The ${profile.label} block server is busy or slow right now.`;
+  if (/did not answer in time|timed? ?out|\b429\b|too many requests|status: 50[234]\b|bad gateway|service unavailable|gateway time/i.test(full)) return `The ${profile.label} block server is busy or down right now.`;
   if (/invalid indexer|failed to fetch|network ?error|internet|ECONN|proxy/i.test(full)) return `Can't reach the ${profile.label} RGB servers right now. Check your connection and try again. (${text})`;
   if (/allocation ?slots|InsufficientAllocationSlots|no (colorable|available) (utxo|output)s?/i.test(text)) {
     return `RGB is still setting up. Wait for one block (about 10 minutes), then try again. (${text})`;
