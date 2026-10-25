@@ -59,7 +59,16 @@ export class LiteWallet {
     try { await w.flush(); } finally { w.free(); }
   }
 
-  async syncWallet() { await this.wallet.sync(this.requireOnline()); await this.save(); }
+  /**
+   * Bring the BTC side up to date. `full`: scan addresses ahead (BIP44 gap) too, which finds coins sent to an
+   * address this wallet state has not handed out yet (a restore, or an address shown by an older build).
+   */
+  async syncWallet({ full = false } = {}) {
+    const online = this.requireOnline();
+    if (full) await this.wallet.fullScan(online);
+    await this.wallet.sync(online);
+    await this.save();
+  }
   async refreshWallet() { const r = await this.wallet.refresh(this.requireOnline(), null, [], false); await this.save(); return r; }
   async getAddress() { return this.wallet.getAddress(); }
   async getBtcBalance() { const b = this.wallet.getBtcBalance(); return { vanilla: balance(b?.vanilla), colored: balance(b?.colored) }; }

@@ -12,6 +12,7 @@ function fakeLib() {
     static async create(json) { calls.push(['create', JSON.parse(json)]); return new WasmWallet(); }
     async goOnline(skip, url) { calls.push(['goOnline', skip, url]); return { id: 1, indexerUrl: url }; }
     async sync(online) { calls.push(['sync', online.id]); }
+    async fullScan(online) { calls.push(['fullScan', online.id]); }
     async refresh(online, a, f, skip) { calls.push(['refresh', a, f, skip]); return {}; }
     async flush() { calls.push(['flush']); }
     free() { calls.push(['free']); }
@@ -111,4 +112,13 @@ test('backup bytes, restore, and closing frees the engine after saving', async (
   assert.deepEqual(calls.slice(-2), [['flush'], ['free']]);
   assert.equal(w.isOnline(), false);
   await assert.rejects(() => w.getAddress(), /not open/);
+});
+
+test('Refresh can scan addresses ahead, so coins sent to an older address are found', async () => {
+  const { w, calls } = await open();
+  await w.syncWallet();
+  assert.equal(calls.some((c) => c[0] === 'fullScan'), false, 'the minute-by-minute sync stays light');
+  await w.syncWallet({ full: true });
+  const i = calls.findIndex((c) => c[0] === 'fullScan');
+  assert.ok(i > 0 && calls[i + 1][0] === 'sync', 'full scan, then sync');
 });

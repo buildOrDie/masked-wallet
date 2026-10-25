@@ -122,7 +122,7 @@ export class WalletRgb {
       await service.open(password, runtime.newTestMnemonic, backup);
       this.ready = true;
       if (keyed) this.markKeyed();
-      await this.refresh();
+      await this.refresh(true);
       this.startTimer();
     } catch (error) { await this.close(); throw error; }
   }
@@ -131,7 +131,8 @@ export class WalletRgb {
     const v = this.vault();
     if (v && v.keyed !== 'wallet') try { localStorage.setItem(this.profile.vaultKey, JSON.stringify({ ...v, keyed: 'wallet' })); } catch { /* next open marks it */ }
   }
-  async refresh() { this.data = await this.service.snapshot(); this.saved = false; }
+  /** @param {boolean} [full] scan addresses ahead too: on open and when Refresh is tapped */
+  async refresh(full = false) { this.data = await this.service.snapshot({ full }); this.saved = false; }
   async close() {
     clearInterval(this.timer); this.timer = null;
     this.ready = false; this.data = null; this.pending = null; this.invoice = ''; this.issued = null; this.sent = null; this.saved = false;
@@ -222,7 +223,7 @@ export class WalletRgb {
           this.service.password = key; // backups from now on use the wallet key too
         });
       }
-      case 'refresh': return this.run(() => this.refresh());
+      case 'refresh': return this.run(() => this.refresh(true));
       case 'fund': {
         if (!this.data?.address) return;
         f.sendMode = 'send'; f.sendFrom = 'public'; f.sendTo = this.data.address; f.sendAmount = RGB_FUND_BTC;

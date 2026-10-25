@@ -49,10 +49,11 @@ export class SignetWallet {
     });
   }
   requireWallet() { if (!this.wallet || !this.mnemonic) throw new Error('Unlock the RGB test wallet first.'); return this.wallet; }
-  async snapshot() {
+  /** @param {{ full?: boolean }} [o] full: also scan addresses ahead (finds coins sent to older addresses) */
+  async snapshot({ full = false } = {}) {
     return this.exclusive(async () => {
       const wallet = this.requireWallet();
-      await wallet.syncWallet(); await wallet.refreshWallet();
+      await wallet.syncWallet({ full }); await wallet.refreshWallet();
       // Sequential: the WASM wallet has a shared RefCell and does not support overlapping calls.
       const address = await wallet.getAddress();
       const btc = await wallet.getBtcBalance();
