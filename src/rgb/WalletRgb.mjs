@@ -19,6 +19,7 @@ export function rgbError(error, profile = profileOf('utexo')) {
   const text = brief(full);
   if (/did not answer in time|timed? ?out|\b429\b|too many requests|status: 50[234]\b|bad gateway|service unavailable|gateway time/i.test(full)) return `The ${profile.label} block server is busy or down right now.`;
   if (/invalid indexer|failed to fetch|network ?error|internet|ECONN|proxy/i.test(full)) return `Can't reach the ${profile.label} RGB servers right now. Check your connection and try again. (${text})`;
+  if (/no valid transport endpoints|invalid transport endpoint/i.test(full)) return 'Could not reach the transfer server named in this invoice. Allow MASKED to reach it when asked, or ask for an invoice from MASKED or another wallet using proxy.iriswallet.com.';
   if (/insufficient ?allocation|allocation ?slots|no (colorable|available) (utxo|output)s?/i.test(text)) {
     return `RGB is still setting up. Wait for one block (about 10 minutes), then try again. (${text})`;
   }
@@ -36,6 +37,14 @@ function brief(text) {
   const t = (inner ? inner[1] : String(text)).split('\n')[0].trim();
   return t.length > 140 ? t.slice(0, 137) + '…' : t;
 }
+
+/** Transfer servers MASKED can always reach (listed in the manifest). */
+const KNOWN_PROXIES = ['proxy.iriswallet.com', 'rgb-proxy.utexo.com'];
+/** rpcs://host/path → https://host/path (rpc:// → http://). */
+export const proxyUrl = (e) => String(e).replace(/^rpcs:\/\//i, 'https://').replace(/^rpc:\/\//i, 'http://');
+/** The invoice's transfer servers MASKED is not allowed to reach yet. */
+export const newProxies = (endpoints) => (endpoints || []).map(proxyUrl).filter((u) => { try { return !KNOWN_PROXIES.includes(new URL(u).host); } catch { return false; } });
+const hostOf = (u) => { try { return new URL(proxyUrl(u)).host; } catch { return String(u); } };
 
 /** Errors that mean "no RGB outputs to put the asset on yet". */
 const NEEDS_OUTPUTS = /insufficient ?allocation|allocation ?slots|insufficient bitcoin|InsufficientBitcoins|no (colorable|available) (utxo|output)s?/i;
@@ -319,7 +328,8 @@ export class WalletRgb {
           const amount = d.amount || toBase(this.fields.sendAmt, a.precision);
           if (d.amount) this.fields.sendAmt = this.amount(a, d.amount).replace(/,/g, '');
           if (amount > Number(a.balance?.spendable || 0)) throw new Error(`You can send up to ${this.amount(a, a.balance?.spendable)} ${a.ticker}.`);
-          this.pending = Object.freeze({ assetId: a.assetId, ticker: a.ticker, invoice, amount, shown: this.amount(a, amount), witness: !!d.witness, fixed: !!d.amount });
+          const proxies = (d.transportEndpoints || []).map(hostOf);
+          this.pending = Object.freeze({ assetId: a.assetId, ticker: a.ticker, invoice, amount, shown: this.amount(a, amount), witness: !!d.witness, fixed: !!d.amount, proxies, ask: newProxies(d.transportEndpoints) });
         });
       }
       case 'cancel': this.pending = null; return app.render();
@@ -328,6 +338,8 @@ export class WalletRgb {
         if (!p) return;
         return this.run(async () => {
           this.message = 'Sending…'; app.render();
+          // first, while this is still the click: let Chrome ask once for an invoice's own transfer server
+          if (p.ask?.length) await app.platform.requestOrigins(p.ask);
           const r = await this.service.send({ invoice: p.invoice, assetId: p.assetId, amount: String(p.amount), fee: RGB_FEE });
           this.sent = { txid: r?.txid || '', shown: p.shown, ticker: p.ticker };
           this.pending = null;

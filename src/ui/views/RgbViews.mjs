@@ -147,6 +147,7 @@ export class RgbSendView extends View {
           ${rowKV('To', `<span class="mono">${esc(short(p.invoice, 12))}</span>`)}
           ${rowKV('Privacy', '<span class="good">Private — the amount and token are not on the blockchain</span>')}
           ${p.fixed ? rowKV('Amount', 'set by the invoice') : ''}
+          ${p.proxies?.length ? rowKV('Transfer server', `${esc(p.proxies.join(', '))}${p.ask?.length ? ' <span class="muted">(Chrome will ask to allow it)</span>' : ''}`) : ''}
           ${rowKV('Network fee', p.witness ? 'a few hundred test sats + 1,000 sats for their new output' : 'a few hundred test sats')}
         </div>
         ${msg(r)}
