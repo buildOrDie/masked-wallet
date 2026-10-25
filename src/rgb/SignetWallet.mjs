@@ -57,7 +57,9 @@ export class SignetWallet {
       const address = await wallet.getAddress();
       const btc = await wallet.getBtcBalance();
       const groups = await wallet.listAssets();
-      const transfers = await wallet.listTransfers();
+      // history per asset (rgb-lib lists transfers by asset)
+      const transfers = {};
+      for (const a of Object.values(groups || {}).flat()) if (a?.assetId) transfers[a.assetId] = await wallet.listTransfers(a.assetId);
       const snapshot = { address, btc, groups, transfers };
       const encoded = new TextEncoder().encode(JSON.stringify(snapshot, (_, value) => typeof value === 'bigint' ? value.toString() : value));
       const revision = b64(new Uint8Array(await crypto.subtle.digest('SHA-256', encoded)));

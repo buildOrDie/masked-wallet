@@ -12,13 +12,19 @@ Settings → **RGB** offers two test networks. Each has its own test keys, data,
 
 No USDT exists on either. USDT on Bitcoin uses the BFA asset type, which Utexo's browser libraries do not list yet.
 
-## Public Signet in 5 steps
+## Using it (Public Signet)
 
-1. Select Signet. Settings → RGB → **Public Signet**, set a password (12+ characters), **Enable RGB test assets**, export the backup.
-2. Copy the RGB funding address and send it ~20,000 Signet sats (from your MASKED Signet Public balance works). Wait for a block, then **Refresh**.
-3. **Prepare RGB outputs**, export a fresh backup.
-4. **Create a test asset** (e.g. `TUSDT`, 2 decimals, 1,000,000 supply). Copy its asset ID, export a backup.
-5. In a second browser profile, create another test wallet and a blinded invoice for that asset ID, then send from the first one.
+RGB is part of the normal screens, on Signet only:
+
+1. **Home → Try RGB tokens.** RGB turns on. No extra password: its test keys are encrypted with a key derived from your wallet's recovery words (and BIP39 passphrase), and it opens by itself whenever the wallet is open on Signet.
+2. **Add test BTC for RGB** (Home). RGB pays its own network fees from its own address; this opens Send, filled in with 0.0003 tBTC from your Public balance. Wait for a block.
+3. **Mint → RGB token.** Name, ticker, supply (decimals under *Decimals*, default 2) → **Create token**. The first time, MASKED sets up RGB outputs by itself; if they still need a block, it says so.
+4. Your token shows under **RGB tokens** on Home, in the same rows as BRC-20. Its page has **Send** and **Receive**, History and Details.
+5. **Receive → RGB** makes a one-time invoice (QR + text). To pay one: the token page → **Send**, paste the invoice, amount in token units → **Confirm**.
+
+**Settings → RGB (test)** has the advanced parts: test network (Public or Utexo Signet), the RGB address, backup file and restore (restoring needs the same MASKED wallet), and turning RGB off.
+
+A test wallet made by an earlier test build (with its own RGB password) asks for that password once, then switches to the wallet key.
 
 ## Utexo Signet (original lab)
 

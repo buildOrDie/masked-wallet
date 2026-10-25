@@ -102,12 +102,7 @@ export class Controller {
       this.render();
     };
     if (d.rgb) { await app.rgb.action(d.rgb, d.rgbArg || ''); return true; }
-    if (d.rgbGo) {
-      app.rgb.mode = d.rgbGo === 'btc' ? '' : d.rgbGo;
-      app.rgb.pending = null;
-      app.rgb.fields.asset = d.asset || '';
-      state.view = d.rgbGo === 'btc' ? 'home' : d.rgbGo; this.render(); return true;
-    }
+    if (t.hasAttribute?.('data-rgb-pick')) { app.rgb.fields.recvAsset = d.rgbPick || ''; app.rgb.invoice = ''; this.render(); return true; }
     if (t.id === 'netChip') { state.view = 'settings'; this.render(); return true; }
     if (t.hasAttribute('data-pwtoggle')) {
       const i = /** @type {HTMLInputElement} */ ($('#pwUnlock'));
@@ -126,7 +121,7 @@ export class Controller {
     }
     if (d.go) { this.go(t); return true; }
     if (d.set) {
-      f[d.set] = d.val; state.status.send = null;
+      f[d.set] = d.val; state.status.send = null; app.rgb.message = '';
       if (d.set === 'mintMode') state.status.mint = null;
       this.render();
       if (d.set === 'fee' && d.val === 'custom') $('#feeCustom')?.focus();
@@ -191,7 +186,8 @@ export class Controller {
   /** data-go: open another view (with the extra data-* that come with it). */
   go(t) {
     const { app, state, f } = this, d = t.dataset;
-    if (['send', 'receive', 'shield', 'home'].includes(d.go)) { app.rgb.mode = ''; app.rgb.pending = null; }
+    app.rgb.message = ''; // RGB messages belong to the screen they were shown on
+    if (d.go === 'home') { app.rgb.pending = null; app.rgb.sent = null; }
     if (d.recv) f.recvKind = d.recv;
     if (d.filter) f.coinFilter = d.filter;
     if (d.reset || ['send', 'shield'].includes(d.go)) { state.send = { stage: 'form' }; state.status.send = null; if (state.drop.stage !== 'review') state.drop = { stage: 'form' }; }

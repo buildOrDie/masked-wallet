@@ -66,3 +66,22 @@ export function newAsset({ ticker, name, precision, supply }) {
   if (!Number.isSafeInteger(amount)) throw new Error('Supply is too large for these decimals.');
   return { ticker: t, name: n, precision: p, amounts: [amount] };
 }
+
+/** "12.5" with 2 decimals → 1250 base units. Exact (string math), no rounding: too many decimals is an error. */
+export function toBase(text, precision) {
+  const t = String(text ?? '').trim().replace(/,/g, '');
+  const m = t.match(/^(\d+)(?:\.(\d*))?$/);
+  if (!m) throw new Error('Enter an amount, like 10 or 2.5.');
+  const frac = m[2] || '';
+  if (frac.length > precision) throw new Error(precision ? `This token has ${precision} decimal${precision === 1 ? '' : 's'}.` : 'This token has no decimals.');
+  const n = Number(m[1] + frac.padEnd(precision, '0'));
+  if (!Number.isSafeInteger(n) || n <= 0) throw new Error('Enter an amount above zero.');
+  return n;
+}
+/** 1250 base units with 2 decimals → "12.5" (grouped: "1,234.5"). */
+export function fromBase(n, precision) {
+  const v = Math.max(0, Math.trunc(Number(n) || 0));
+  const s = String(v).padStart(precision + 1, '0');
+  const whole = s.slice(0, s.length - precision) || '0', frac = precision ? s.slice(-precision).replace(/0+$/, '') : '';
+  return Number(whole).toLocaleString('en-US') + (frac ? '.' + frac : '');
+}

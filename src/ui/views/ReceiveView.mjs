@@ -1,4 +1,4 @@
-import { RgbPanel } from '../RgbPanel.mjs';
+import { RgbReceive } from './RgbViews.mjs';
 import { esc } from '../../core/format.mjs';
 import { View } from '../View.mjs';
 import { I, addrChunks, btcLogo, head, qrSvg, seg, shieldLogo } from '../html.mjs';
@@ -12,9 +12,11 @@ export class ReceiveView extends View {
   }
 
   render() {
-    if (this.app.rgb.available && this.app.rgb.mode === 'receive') return RgbPanel.form(this.app, 'receive');
     const { account } = this;
-    const kind = this.f.recvKind;
+    const rgb = this.app.rgb.available;
+    const kind = this.f.recvKind === 'rgb' && !rgb ? 'public' : this.f.recvKind;
+    const tabs = seg('recvKind', kind, [['public', 'Public'], ['shielded', `${I.shieldPlain} Shielded`], ...(rgb ? [['rgb', 'RGB']] : [])]);
+    if (kind === 'rgb') return `${head('Receive')}${tabs}${RgbReceive.render(this.app)}`;
     const a = kind === 'shielded' ? account.shieldAddr() : account.pubAddr();
     if (!a) return `${head('Receive')}<section class="card"><p class="muted">This wallet has no ${kind} address.</p></section>`;
     const info = kind === 'shielded'
@@ -22,7 +24,7 @@ export class ReceiveView extends View {
       : 'For exchanges, faucets and any Bitcoin wallet. Payments here are <b>public</b>.';
     return `
     ${head('Receive')}
-    ${seg('recvKind', kind, [['public', 'Public'], ['shielded', `${I.shieldPlain} Shielded`]])}
+    ${tabs}
     <section class="card receive ${kind}">
       <div class="recv-badge">${kind === 'shielded' ? `${shieldLogo}<b>Shielded address</b>` : `${btcLogo}<b>Public address</b>`}</div>
       <div class="qr-wrap">${qrSvg(a)}</div>

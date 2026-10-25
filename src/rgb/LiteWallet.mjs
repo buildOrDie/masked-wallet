@@ -67,7 +67,7 @@ export class LiteWallet {
     const r = this.wallet.listAssets([]) || {};
     return { nia: (r.nia || []).map(asset), ifa: (r.ifa || []).map(asset) };
   }
-  async listTransfers() { return this.wallet.listTransfers(null) || []; }
+  async listTransfers(assetId = null) { return this.wallet.listTransfers(assetId) || []; }
 
   /** Sign a PSBT with this wallet's own keys. */
   sign(psbt) { return this.wallet.signPsbt(psbt); }

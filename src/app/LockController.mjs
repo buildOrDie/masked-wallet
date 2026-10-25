@@ -51,7 +51,7 @@ export class LockController {
     app.sites.loadSites().then(() => app.render());
     app.render();
     app.sync.run(6);
-    app.rgb.resume(); // reopens RGB if it was unlocked before the popup closed (same session, until auto-lock)
+    app.rgb.resume(); // RGB opens with the wallet on Signet (its test keys are encrypted with a key from the wallet's words)
     setInterval(() => { if (state.lockState === 'open' && !app.sync.syncing && document.visibilityState === 'visible') app.sync.run(4); }, 60000);
   }
 

@@ -109,7 +109,7 @@ test('SDK string errors become readable messages', async () => {
   assert.match(rgbError('Invalid indexer: not a valid esplora server'), /Can't reach the Utexo Signet RGB servers/);
   assert.match(rgbError(new TypeError('Failed to fetch')), /Can't reach the Utexo Signet RGB servers/);
   assert.match(rgbError('InsufficientBitcoins'), /Not enough test BTC/);
-  assert.match(rgbError('InsufficientAllocationSlots'), /Prepare RGB outputs/);
+  assert.match(rgbError('InsufficientAllocationSlots'), /still setting up/);
   assert.equal(rgbError('Invalid invoice'), 'Invalid invoice');
   assert.equal(rgbError(undefined), 'RGB operation failed.');
 });

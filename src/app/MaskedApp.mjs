@@ -145,7 +145,7 @@ export class MaskedApp {
   setNet(n) {
     const state = this.state, keys = state.wallet;
     state.net = n;
-    this.rgb.mode = ''; this.rgb.pending = null;
+    this.rgb.close().catch(() => {}); this.rgb.tried = ''; this.rgb.phase = ''; // RGB is per network
     this.inscriptions.reset();
     if (keys?.source === 'mnemonic') {
       const next = Keyring.fromMnemonic(keys.mnemonic, keys.passphrase, n);

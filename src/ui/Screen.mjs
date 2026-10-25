@@ -9,6 +9,7 @@ import { RelayView } from './views/RelayView.mjs';
 import { SendView } from './views/SendView.mjs';
 import { MintView } from './views/MintView.mjs';
 import { TokenView } from './views/TokenView.mjs';
+import { RgbSendView, RgbTokenView } from './views/RgbViews.mjs';
 import { ActivityView } from './views/ActivityView.mjs';
 import { SettingsView } from './views/SettingsView.mjs';
 import { ApproveView } from './views/ApproveView.mjs';
@@ -26,6 +27,7 @@ export class Screen {
     this.views = {
       approve: new ApproveView(app), home: new HomeView(app), token: new TokenView(app), receive: new ReceiveView(app), relay: new RelayView(app),
       send: new SendView(app, 'send'), shield: new SendView(app, 'shield'), activity: new ActivityView(app), mint: new MintView(app), settings: new SettingsView(app),
+      rgbtok: new RgbTokenView(app), rgbsend: new RgbSendView(app),
     };
     // screens in front of the wallet, by lock state
     this.gates = { locked: new LockView(app), onboard: new OnboardView(app), 'onboard-cancel': new OnboardView(app), migrate: new SetPasswordView(app), backup: new BackupView(app) };
@@ -38,7 +40,7 @@ export class Screen {
   /** Which nav tab a view belongs to. */
   navOf(v) {
     const { state } = this.app;
-    const n = ['receive', 'send', 'shield', 'relay'].includes(v) ? 'home'
+    const n = ['receive', 'send', 'shield', 'relay', 'rgbtok', 'rgbsend'].includes(v) ? 'home'
       : v === 'token' || (v === 'mint' && (state.f.mintMode === 'send' || state.f.mintMode === 'transfer')) ? (state.tokFrom || 'home') : v;
     return n === 'activity' ? 'settings' : n;
   }

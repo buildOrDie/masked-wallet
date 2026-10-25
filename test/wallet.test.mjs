@@ -192,85 +192,148 @@ test('token pages say how far a balance was checked', () => {
   assert.match(view.indexerLine('worldx'), /OPI \+ UniSat balance match/);
 });
 
-// RGB shares existing views and never changes BTC balances or addresses.
-test('RGB is integrated into Signet Home, Send, Receive and Settings', () => {
-  const app = walletApp(keys(), 'signet');
-  app.state.lockState = 'open';
-  for (const side of ['public', 'shielded']) {
-    app.side.set(side);
-    const html = app.ui.views.home.render();
-    assert.match(html, /data-side="public"/);
-    assert.match(html, /data-side="shielded"/);
-    assert.match(html, /RGB assets/);
-    assert.doesNotMatch(html, /iframe|data-go="rgb"/);
-    assert.match(html, side === 'shielded' ? /Shielded balance/ : /Public balance/);
-  }
+// RGB lives on the wallet's own screens (Signet only) and never changes BTC balances or addresses.
+const WORDS = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+function rgbApp(net = 'signet') {
+  const app = walletApp(keys(), net);
+  app.state.lockState = 'open'; app.render = () => {}; app.toast = () => {};
+  app.lock.secret = { words: WORDS, passphrase: '' };
+  return app;
+}
+const TUSD = { assetId: 'rgb:tusd', ticker: 'TUSD', name: 'Test USD', precision: 2, issuedSupply: 100000, balance: { settled: 123450, future: 123450, spendable: 123450 } };
+function rgbReady(app, extra = {}) {
+  Object.assign(app.rgb, { ready: true, service: { backupRequired: false, profile: app.rgb.profile } });
+  app.rgb.data = { address: 'tb1qrgbfunding', btc: { vanilla: { settled: 0, future: 0 }, colored: { settled: 0, future: 0 } }, groups: { nia: [TUSD] }, transfers: {}, ...extra };
+}
+
+test('Home on Signet: a "Try RGB tokens" card, then RGB tokens in the same rows as BRC-20', () => {
+  const app = rgbApp();
+  app.rgb.ensure = () => {};
   const address = app.account.pubAddr();
-  app.rgb.ready = true;
-  app.rgb.data = { groups: { nia: [{ ticker: '<unsafe>', assetId: 'test-id', balance: { settled: 123 } }] } };
-  app.rgb.service = { backupRequired: true };
-  assert.match(app.ui.views.home.render(), /&lt;unsafe&gt;/);
-  assert.match(app.ui.views.home.render(), /data-rgb-go="send"/);
-  app.rgb.mode = 'receive';
-  assert.match(app.ui.views.receive.render(), /Create blinded RGB invoice/);
-  app.rgb.mode = 'send';
-  assert.match(app.ui.views.send.render(), /integer base units/);
-  app.rgb.mode = '';
-  assert.match(app.ui.views.receive.render(), /Shielded address|Public address/);
+  assert.match(app.ui.views.home.render(), /data-rgb="on"[^>]*>.*Try RGB tokens/s);
+  rgbReady(app);
+  const html = app.ui.views.home.render();
+  assert.match(html, /RGB tokens/);
+  assert.match(html, /class="tok-line" data-rgb="token" data-rgb-arg="rgb:tusd"/);
+  assert.match(html, /1,234\.5/, 'amount in token units, not base units');
+  assert.match(html, /Add test BTC for RGB/, 'low test BTC: one tap to fund from Public');
+  assert.doesNotMatch(html, /Prepare RGB outputs|password/i, 'no manual setup steps');
   assert.equal(app.account.pubAddr(), address);
-  assert.match(app.ui.views.settings.render(), /public Bitcoin Signet/);
-  assert.match(app.ui.views.settings.render(), /Create test asset/);
-  assert.doesNotMatch(app.ui.views.settings.render(), /data-rgb="profile"/, 'no network switch while RGB is open');
-  app.rgb.ready = false;
-  assert.match(app.ui.views.settings.render(), /data-rgb="profile" data-rgb-arg="utexo"/);
-  app.rgb.ready = true;
   app.state.net = 'main';
-  assert.doesNotMatch(app.ui.views.home.render(), /RGB assets/);
-  assert.doesNotMatch(app.ui.views.settings.render(), /Enable RGB/);
-  app.rgb.mode = 'send';
-  assert.doesNotMatch(app.ui.views.send.render(), /integer base units/);
+  assert.doesNotMatch(app.ui.views.home.render(), /RGB/);
 });
 
-test('RGB actions reject mainnet and locked wallets before calling the SDK', async () => {
-  const app = walletApp(keys());
+test('Receive has an RGB tab on Signet only; Mint has "RGB token"', () => {
+  const app = rgbApp();
+  app.rgb.ensure = () => {};
+  rgbReady(app);
+  app.state.f.recvKind = 'rgb';
+  let html = app.ui.views.receive.render();
+  assert.match(html, /data-set="recvKind" data-val="rgb"/);
+  assert.match(html, /Make an invoice/);
+  app.rgb.invoice = 'rgb:~/~/utxob:abc';
+  assert.match(app.ui.views.receive.render(), /class="qr"/);
+  app.state.f.mintMode = 'rgb';
+  html = app.ui.views.mint.render();
+  assert.match(html, /data-val="rgb"[^>]*>RGB token/);
+  assert.match(html, /Create token/);
+  app.rgb.issued = { ticker: 'TUSD', assetId: 'rgb:tusd', supply: '1000' };
+  assert.match(app.ui.views.mint.render(), /TUSD created/);
+  app.state.net = 'main';
+  assert.doesNotMatch(app.ui.views.receive.render(), /data-val="rgb"/);
+  assert.match(app.ui.views.receive.render(), /Public address/, 'falls back to Public');
+  assert.doesNotMatch(app.ui.views.mint.render(), /RGB token/);
+});
+
+test('token page and Send: token units, balance check, review', async () => {
+  const app = rgbApp();
+  app.rgb.ensure = () => {};
+  rgbReady(app);
+  await app.rgb.action('token', 'rgb:tusd');
+  assert.equal(app.state.view, 'rgbtok');
+  assert.match(app.ui.views.rgbtok.render(), /TUSD.*badge rgb/s);
+  await app.rgb.action('send', 'rgb:tusd');
+  assert.equal(app.state.view, 'rgbsend');
+  app.rgb.fields.sendTo = 'rgb:~/~/utxob:abc';
+  app.rgb.fields.sendAmt = '2000';
+  await app.rgb.action('review');
+  assert.equal(app.rgb.pending, null);
+  assert.match(app.rgb.message, /up to 1,234\.5 TUSD/);
+  app.rgb.fields.sendAmt = '12.5';
+  await app.rgb.action('review');
+  assert.equal(app.rgb.pending.amount, 1250);
+  assert.match(app.ui.views.rgbsend.render(), /You are sending.*12\.5/s);
+  app.rgb.fields.sendTo = 'bc1qnotaninvoice';
+  await app.rgb.action('review');
+  assert.match(app.rgb.message, /starts with rgb:/);
+});
+
+test('"Add test BTC" opens Send from Public, filled in to the RGB address', async () => {
+  const app = rgbApp();
+  rgbReady(app);
+  await app.rgb.action('fund');
+  assert.equal(app.state.view, 'send');
+  assert.equal(app.state.f.sendTo, 'tb1qrgbfunding');
+  assert.equal(app.state.f.sendFrom, 'public');
+  assert.equal(app.state.f.sendAmount, '0.0003');
+});
+
+test('no second password: the vault key comes from the wallet words, and older test wallets ask once', async () => {
+  const app = rgbApp();
+  const k1 = await app.rgb.walletKey();
+  assert.match(k1, /^[0-9a-f]{64}$/);
+  app.lock.secret = { words: WORDS, passphrase: 'x' };
+  assert.notEqual(await app.rgb.walletKey(), k1, 'the BIP39 passphrase changes it');
+  app.lock.secret = { words: WORDS, passphrase: '' };
+  assert.equal(await app.rgb.walletKey(), k1);
+  // an old vault (no keyed marker) that the wallet key can't open
+  globalThis.localStorage.setItem(app.rgb.profile.vaultKey, JSON.stringify({ format: 'masked-rgb-signet' }));
+  app.rgb.open = async () => { throw new Error('Incorrect password, wrong RGB network, or damaged RGB backup.'); };
+  app.rgb.ensure();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(app.rgb.phase, 'legacy');
+  assert.match(app.ui.views.home.render(), /Earlier RGB password/);
+  globalThis.localStorage.removeItem(app.rgb.profile.vaultKey);
+});
+
+test('RGB outputs are made by themselves when a step needs them', async () => {
+  const app = rgbApp();
+  rgbReady(app, { btc: { vanilla: { settled: 20000, future: 20000 }, colored: { settled: 0, future: 0 } } });
+  const calls = [];
+  app.rgb.service = { createUtxos: async (fee) => { calls.push(['utxos', fee]); }, snapshot: async () => app.rgb.data, profile: app.rgb.profile };
+  let n = 0;
+  const out = await app.rgb.withOutputs(async () => { if (n++ === 0) throw 'InsufficientAllocationSlots'; return 'ok'; });
+  assert.equal(out, 'ok');
+  assert.deepEqual(calls, [['utxos', '2']]);
+  await assert.rejects(app.rgb.withOutputs(async () => { throw 'InsufficientAllocationSlots'; }), /Wait for one block/);
+  app.rgb.data.btc.vanilla.settled = 0;
+  await assert.rejects(app.rgb.withOutputs(async () => { throw 'InsufficientAllocationSlots'; }), /Add test BTC first/);
+});
+
+test('RGB actions refuse Mainnet and a locked wallet', async () => {
+  const app = rgbApp('main');
   await assert.rejects(app.rgb.action('confirm'), /Signet first/);
   app.state.net = 'signet'; app.state.lockState = 'locked';
   await assert.rejects(app.rgb.action('confirm'), /Signet first/);
   assert.equal(app.rgb.service, null);
 });
 
-test('RGB fee balance shows coins still waiting for a block', async () => {
-  const { RgbPanel } = await import('../src/ui/RgbPanel.mjs');
-  const r = { data: { btc: { vanilla: { settled: 0, future: 20000, spendable: 0 }, colored: { settled: 0, future: 0 } } } };
-  const html = RgbPanel.feeBalance(r);
-  assert.match(html, /waiting for a block/);
-  assert.match(html, /Received/);
-  r.data.btc.vanilla.settled = 20000;
-  assert.doesNotMatch(RgbPanel.feeBalance(r), /waiting/);
+test('token units: exact conversion both ways', async () => {
+  const { toBase, fromBase } = await import('../src/rgb/config.mjs');
+  assert.equal(toBase('12.5', 2), 1250);
+  assert.equal(toBase('1,000', 0), 1000);
+  assert.equal(toBase('0.00000001', 8), 1);
+  for (const bad of ['', 'abc', '1.234', '0', '-1', '1e3']) assert.throws(() => toBase(bad, 2), bad);
+  assert.equal(fromBase(123450, 2), '1,234.5');
+  assert.equal(fromBase(5, 0), '5');
+  assert.equal(fromBase(1, 8), '0.00000001');
 });
 
-test('RGB stays unlocked between popup opens until lock, only for the same network', async () => {
-  const app = walletApp(keys(), 'signet');
-  app.state.lockState = 'open'; app.render = () => {}; app.toast = () => {};
-  const mem = {};
-  app.platform = { sessionGet: async (k) => mem[k] || null, sessionSet: async (o) => Object.assign(mem, o), sessionRemove: async (k) => { delete mem[k]; } };
-  const opened = [];
-  app.rgb.open = async (pw) => { opened.push(pw); app.rgb.ready = true; };
-  globalThis.localStorage.setItem(app.rgb.profile.vaultKey, '{}'); // a test wallet exists
-  await app.rgb.resume();
-  assert.deepEqual(opened, [], 'nothing remembered yet');
-  await app.rgb.remember('signet-test-password');
-  assert.equal(mem['masked.rgb.session'].profile, 'public');
-  await app.rgb.resume();
-  assert.deepEqual(opened, ['signet-test-password']);
-  app.rgb.ready = false;
-  mem['masked.rgb.session'].expires = Date.now() - 1;
-  await app.rgb.resume();
-  assert.equal(opened.length, 1, 'expired: asks again');
-  await app.rgb.remember('x'.repeat(12)); await app.rgb.forget();
-  assert.equal(mem['masked.rgb.session'], undefined);
-  app.state.net = 'main';
-  await app.rgb.remember('x'.repeat(12)); await app.rgb.resume();
-  assert.equal(opened.length, 1, 'never on Mainnet');
-  globalThis.localStorage.removeItem(app.rgb.profile.vaultKey);
+test('history rows read like the BRC-20 ones; unpaid invoices are hidden', async () => {
+  const { historyRow } = await import('../src/ui/views/RgbViews.mjs');
+  const app = rgbApp(); const r = app.rgb;
+  assert.deepEqual(historyRow({ kind: 'Issuance', status: 'Settled', assignments: [{ Fungible: 100000 }] }, TUSD, r), { label: 'Created', sign: '+', amount: '1,000', note: '', txid: undefined });
+  assert.equal(historyRow({ kind: 'ReceiveBlind', status: 'WaitingCounterparty', assignments: [] }, TUSD, r), null);
+  assert.equal(historyRow({ kind: 'ReceiveBlind', status: 'WaitingConfirmations', assignments: [{ Fungible: 250 }] }, TUSD, r).note, 'Waiting for a block');
+  assert.equal(historyRow({ kind: 'Send', status: 'Settled', requestedAssignment: { Fungible: 1250 } }, TUSD, r).amount, '12.5');
 });
