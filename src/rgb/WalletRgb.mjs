@@ -15,8 +15,10 @@ export const RGB_FUND_BTC = '0.0003';
  * @param {{ id: string, label: string }} [profile]
  */
 export function rgbError(error, profile = profileOf('utexo')) {
-  const text = typeof error === 'string' ? error : (error instanceof Error ? error.message : String(error?.['message'] ?? ''));
-  if (/invalid indexer|failed to fetch|network ?error|internet|timed? ?out|ECONN|proxy/i.test(text)) return `Can't reach the ${profile.label} RGB servers right now. Check your connection and try again. (${text})`;
+  const full = typeof error === 'string' ? error : (error instanceof Error ? error.message : String(error?.['message'] ?? ''));
+  const text = brief(full);
+  if (/did not answer in time|timed? ?out|\b429\b|too many requests/i.test(full)) return `The ${profile.label} block server is busy or slow right now.`;
+  if (/invalid indexer|failed to fetch|network ?error|internet|ECONN|proxy/i.test(full)) return `Can't reach the ${profile.label} RGB servers right now. Check your connection and try again. (${text})`;
   if (/allocation ?slots|InsufficientAllocationSlots|no (colorable|available) (utxo|output)s?/i.test(text)) {
     return `RGB is still setting up. Wait for one block (about 10 minutes), then try again. (${text})`;
   }
@@ -26,6 +28,13 @@ export function rgbError(error, profile = profileOf('utexo')) {
       : `Not enough confirmed test BTC for RGB. Tap Add test BTC on Home, wait for a block, then try again. (${text})`;
   }
   return text || 'RGB operation failed.';
+}
+
+/** The useful part of an engine error: the innermost message, one line, not too long. */
+function brief(text) {
+  const inner = String(text).match(/Error: ([^\n\\]+)/);
+  const t = (inner ? inner[1] : String(text)).split('\n')[0].trim();
+  return t.length > 140 ? t.slice(0, 137) + '…' : t;
 }
 
 /** Errors that mean "no RGB outputs to put the asset on yet". */
@@ -57,6 +66,8 @@ export class WalletRgb {
     this.release = null;
     this.lockHeld = false;
     this.timer = null;
+    /** @type {any} */ this.waiting = null;
+    this.waitSince = 0;
     this.fields = EMPTY_FIELDS();
   }
 
@@ -122,17 +133,28 @@ export class WalletRgb {
       await service.open(password, runtime.newTestMnemonic, backup);
       this.ready = true;
       if (keyed) this.markKeyed();
-      await this.refresh(true);
       this.startTimer();
     } catch (error) { await this.close(); throw error; }
+    // Balances: a slow or busy server must not close RGB. Keep it open and retry with the minute timer.
+    try {
+      await this.refresh(!!backup || this.needsScan());
+    } catch (error) {
+      this.message = `${rgbError(error, this.profile)} RGB will try again in a minute.`;
+    }
   }
   /** Vaults opened with the wallet key say so; older ones had a password of their own. */
   markKeyed() {
     const v = this.vault();
     if (v && v.keyed !== 'wallet') try { localStorage.setItem(this.profile.vaultKey, JSON.stringify({ ...v, keyed: 'wallet' })); } catch { /* next open marks it */ }
   }
-  /** @param {boolean} [full] scan addresses ahead too: on open and when Refresh is tapped */
-  async refresh(full = false) { this.data = await this.service.snapshot({ full }); this.saved = false; }
+  /** A full address scan has not completed yet for this test wallet on this engine. */
+  needsScan() { try { return localStorage.getItem(`${this.profile.vaultKey}.scanned-v2`) !== '1'; } catch { return true; } }
+  /** @param {boolean} [full] scan addresses ahead too: the first time, and when Refresh is tapped */
+  async refresh(full = false) {
+    full ||= this.needsScan();
+    this.data = await this.service.snapshot({ full }); this.saved = false;
+    if (full) try { localStorage.setItem(`${this.profile.vaultKey}.scanned-v2`, '1'); } catch { /* scans again next time */ }
+  }
   async close() {
     clearInterval(this.timer); this.timer = null;
     this.ready = false; this.data = null; this.pending = null; this.invoice = ''; this.issued = null; this.sent = null; this.saved = false;
@@ -144,13 +166,20 @@ export class WalletRgb {
     clearInterval(this.timer);
     this.timer = setInterval(() => {
       if (!this.ready || this.busy || document.visibilityState !== 'visible') return;
-      this.run(() => this.refresh(), { quiet: true });
+      this.run(async () => { await this.refresh(); this.message = ''; }, { quiet: true });
     }, 60000);
   }
 
   /** Open RGB by itself when the wallet is open on Signet and a test wallet exists. Called from render. */
   ensure() {
     if (!this.available || this.ready || this.busy || !this.exists || this.tried === this.profile.id) return;
+    // let the wallet's own sync finish first: both use the same block servers
+    // (at most 30 s: a long history rescan should not keep RGB closed)
+    if (this.app.sync?.syncing && (this.waitSince ||= Date.now()) > Date.now() - 30000) {
+      if (!this.waiting) this.waiting = setTimeout(() => { this.waiting = null; this.ensure(); this.app.render(); }, 3000);
+      return;
+    }
+    this.waitSince = 0;
     this.tried = this.profile.id;
     setTimeout(() => this.run(async () => {
       this.phase = 'opening'; this.app.render();

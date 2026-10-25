@@ -211,6 +211,10 @@ test('Home on Signet: a "Try RGB tokens" card, then RGB tokens in the same rows 
   app.rgb.ensure = () => {};
   const address = app.account.pubAddr();
   assert.match(app.ui.views.home.render(), /data-rgb="on"[^>]*>.*Try RGB tokens/s);
+  Object.assign(app.rgb, { ready: true, busy: true, data: null });
+  assert.match(app.ui.views.home.render(), /Checking RGB balances/);
+  assert.doesNotMatch(app.ui.views.home.render(), /data-rgb="fund"/, 'no button that would do nothing yet');
+  app.rgb.busy = false;
   rgbReady(app);
   const html = app.ui.views.home.render();
   assert.match(html, /RGB tokens/);
@@ -336,4 +340,27 @@ test('history rows read like the BRC-20 ones; unpaid invoices are hidden', async
   assert.equal(historyRow({ kind: 'ReceiveBlind', status: 'WaitingCounterparty', assignments: [] }, TUSD, r), null);
   assert.equal(historyRow({ kind: 'ReceiveBlind', status: 'WaitingConfirmations', assignments: [{ Fungible: 250 }] }, TUSD, r).note, 'Waiting for a block');
   assert.equal(historyRow({ kind: 'Send', status: 'Settled', requestedAssignment: { Fungible: 1250 } }, TUSD, r).amount, '12.5');
+});
+
+test('a slow block server keeps RGB open with a retry note; RGB waits for the wallet sync first', async () => {
+  const app = rgbApp();
+  const calls = [];
+  app.rgb.acquire = async () => {}; app.rgb.startTimer = () => calls.push('timer');
+  app.rgb.runtime = async () => ({ newTestMnemonic: () => WORDS });
+  app.rgb.serviceFor = async () => (app.rgb.service = { profile: app.rgb.profile, open: async () => calls.push('open'), snapshot: async ({ full }) => { calls.push(full ? 'full' : 'quick'); throw new Error('Network timeout: the server did not answer in time'); }, close: async () => {} });
+  globalThis.localStorage.removeItem(`${app.rgb.profile.vaultKey}.scanned-v2`);
+  await app.rgb.open(await app.rgb.walletKey());
+  assert.equal(app.rgb.ready, true, 'still open');
+  assert.deepEqual(calls, ['open', 'timer', 'full'], 'first open on this engine: full scan');
+  assert.match(app.rgb.message, /busy or slow.*try again in a minute/);
+  // waits while the wallet syncs
+  globalThis.localStorage.setItem(app.rgb.profile.vaultKey, '{"keyed":"wallet"}');
+  const app2 = rgbApp(); let opened = 0;
+  app2.rgb.open = async () => { opened++; };
+  app2.sync.syncing = true;
+  app2.rgb.ensure();
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(opened, 0);
+  clearTimeout(app2.rgb.waiting);
+  globalThis.localStorage.removeItem(app.rgb.profile.vaultKey);
 });

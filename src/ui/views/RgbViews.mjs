@@ -43,6 +43,10 @@ export class RgbHome {
       return `<section class="home-toks"><div class="list-h"><b>RGB tokens</b><span class="muted small">${r.phase === 'error' ? '' : 'opening…'}</span></div>
       ${r.phase === 'error' ? `${msg(r)}<button class="btn ghost wide" data-rgb="retry">Try again</button>` : ''}</section>`;
     }
+    if (!r.data) {
+      return `<section class="home-toks"><div class="list-h"><b>RGB tokens</b><span class="muted small">${r.busy ? 'checking…' : ''}</span></div>
+      ${r.busy ? '<p class="muted small center">Checking RGB balances… the first time takes up to a minute.</p>' : `${msg(r)}<button class="btn ghost wide" data-rgb="refresh">Try again</button>`}</section>`;
+    }
     const list = r.assets();
     const { settled, pending } = r.btc();
     const fund = settled + pending < RGB_LOW_BTC
@@ -197,8 +201,9 @@ export class RgbMint {
         <button class="btn ghost wide" data-rgb="issueAgain">Create another</button></section>`;
     }
     const { settled, pending } = r.btc();
+    const low = r.data && settled + pending < RGB_LOW_BTC;
     return `<div class="testnet-note"><span class="dot-warn"></span>${esc(r.profile.label)} · test tokens with no value</div>
-    ${settled + pending < RGB_LOW_BTC ? `<button class="hint hint-cta" data-rgb="fund"><span class="hint-ic">${I.recv}</span><span><b>Add test BTC first</b><span>Creating a token needs a little test BTC for the network fee.</span></span><span class="chev">›</span></button>` : ''}
+    ${low ? `<button class="hint hint-cta" data-rgb="fund"><span class="hint-ic">${I.recv}</span><span><b>Add test BTC first</b><span>Creating a token needs a little test BTC for the network fee.</span></span><span class="chev">›</span></button>` : ''}
     <section class="card form">
       <div class="row2">
         ${input(r, 'name', 'Name', 'maxlength="40" placeholder="Masked Dollar"')}
