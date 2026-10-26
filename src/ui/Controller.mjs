@@ -110,6 +110,21 @@ export class Controller {
       return true;
     }
     if (t.hasAttribute('data-rbfinfo')) { e.preventDefault(); f.rbfInfo = !f.rbfInfo; this.render(); return true; }
+    // Switch account: switch, add, rename, hide (labels only; the keys come from the phrase)
+    if (d.acctSwitch !== undefined) { app.switchAccount(Number(d.acctSwitch)); f.acctMenu = '-1'; state.view = 'home'; this.render(); return true; }
+    if (t.hasAttribute('data-acct-add')) {
+      const keys = account.keys;
+      const e = app.accounts.add(keys.rootFp);
+      app.switchAccount(e.i); f.acctMenu = String(e.i); this.render();
+      this.toast(`${e.name} added`);
+      return true;
+    }
+    if (d.acctRename !== undefined) {
+      app.accounts.rename(account.keys.rootFp, Number(d.acctRename), /** @type {HTMLInputElement} */ ($('#acctName'))?.value || '');
+      f.acctMenu = '-1'; this.render(); this.toast('Name saved'); return true;
+    }
+    if (d.acctHide !== undefined) { app.accounts.hide(account.keys.rootFp, Number(d.acctHide)); f.acctMenu = '-1'; this.render(); return true; }
+    if (d.acctUnhide !== undefined) { app.accounts.hide(account.keys.rootFp, Number(d.acctUnhide), false); f.acctMenu = '-1'; this.render(); return true; }
     if (d.side) { app.side.set(d.side); this.render(); return true; }
     if (d.copy != null) {
       try { await navigator.clipboard.writeText(d.copy); this.toast('Copied'); } catch { this.toast('Copy failed — select and copy manually'); }

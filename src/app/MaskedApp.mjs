@@ -21,6 +21,7 @@ import { Account } from '../wallet/Account.mjs';
 import { CoinStore } from '../wallet/CoinStore.mjs';
 import { InscriptionIndex } from '../wallet/InscriptionIndex.mjs';
 import { Keyring } from '../wallet/Keyring.mjs';
+import { AccountBook } from '../wallet/AccountBook.mjs';
 import { TxBuilder } from '../wallet/TxBuilder.mjs';
 import { Vault } from '../wallet/Vault.mjs';
 import { OfflinePayments } from '../wallet/OfflinePayments.mjs';
@@ -55,6 +56,7 @@ export class MaskedApp {
     this.sync = new ChainSync(this);
     this.builder = new TxBuilder(this);
     this.vault = new Vault(store);
+    this.accounts = new AccountBook(store);
     this.offline = new OfflinePayments(this);
     this.airdrop = new Airdrop(this);
 
@@ -140,13 +142,39 @@ export class MaskedApp {
     this.sync.loadProgress();
   }
 
+  /**
+   * Keys of account `i` of a phrase, with where its history scan starts: Account 1 follows the phrase (new,
+   * restored, birthday); an added account starts when it was added (its Shielded side had no payments before).
+   */
+  accountKeys(words, passphrase, net, i) {
+    const k = Keyring.fromMnemonic(words, passphrase, net, i);
+    /** @type {any} */ const s = this.lock?.secret || {};
+    if (i === 0) { k.fresh = !!s.fresh; k.birthday = s.birthday || null; k.restored = !!s.restored; }
+    else { const e = this.accounts.entry(k.rootFp, i); k.fresh = !!e.fresh; k.birthday = e.birthday || null; k.restored = false; }
+    return k;
+  }
+
+  /** Open another account of the same phrase: its own addresses, coins, tokens and history. */
+  switchAccount(i) {
+    const state = this.state, keys = state.wallet;
+    if (keys?.source !== 'mnemonic') throw new Error('Accounts need a wallet made from a recovery phrase.');
+    this.accounts.setActive(keys.rootFp, i);
+    if (i === keys.index) return;
+    this.sync.cancel();
+    state.wallet = this.accountKeys(keys.mnemonic, keys.passphrase, state.net, i);
+    this.inscriptions.reset();
+    this.resetWallet();
+    this.render();
+    this.sync.run(6);
+  }
+
   setNet(n) {
     const state = this.state, keys = state.wallet;
     state.net = n;
     this.inscriptions.reset();
     if (keys?.source === 'mnemonic') {
-      const next = Keyring.fromMnemonic(keys.mnemonic, keys.passphrase, n);
-      next.fresh = keys.fresh; next.birthday = keys.birthday; next.restored = keys.restored;
+      const next = this.accountKeys(keys.mnemonic, keys.passphrase, n, keys.index || 0);
+      if (!keys.index) { next.fresh = keys.fresh; next.birthday = keys.birthday; next.restored = keys.restored; }
       state.wallet = next;
       this.store.set('wren.net', state.net);
     } else if (keys?.source === 'example') this.loadExample();

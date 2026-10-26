@@ -12,6 +12,7 @@ It also does:
 - **Offline send:** sign a payment with no internet, then hand it over by QR code or as text, in any chat, Bitchat included. It is sent when either side gets online. See [docs/OFFLINE.md](docs/OFFLINE.md).
 - **Silent airdrop:** paste a list of Shielded addresses (even a whole X reply thread) and pay everyone in one transaction, each with a silent payment. See [docs/AIRDROP.md](docs/AIRDROP.md).
 - **Share on X:** post your Shielded address in one tap from Receive.
+- **Several accounts:** add, rename, hide and switch accounts from one recovery phrase. Account N uses the Public address UniSat shows for its account N (`m/86'/coin'/0'/0/N`) and its own BIP 352 account for Shielded. See [docs/ACCOUNTS.md](docs/ACCOUNTS.md).
 - **BRC-20 and BRC2.0:** mint, deploy, inscribe and send.
 - **`window.masked`:** a UniSat-compatible provider for websites.
 
@@ -53,7 +54,8 @@ The build is reproducible: the same source always gives the same `extension/`. T
 | [`v2.14.0`](../../tree/v2.14.0) | Offline send, Share on X | GitHub |
 | [`v2.15.0`](../../tree/v2.15.0) | Silent airdrop | Chrome Web Store |
 | [`v2.15.1`](../../tree/v2.15.1) | no scrollbar drawn in the popup (scroll with the trackpad or wheel, no wide grey bar on Windows) | GitHub |
-| [`v2.15.2`](../../tree/v2.15.2) | redesigned unlock screen (show-password button, clearer wrong-password state); a side panel button in the header | `main` |
+| [`v2.16.0`](../../tree/v2.16.0) | several accounts from one phrase: add, rename, hide, switch (UniSat-compatible Public addresses) | `main` |
+| [`v2.15.2`](../../tree/v2.15.2) | redesigned unlock screen (show-password button, clearer wrong-password state); a side panel button in the header | GitHub |
 
 ## Use it from your website: `window.masked`
 

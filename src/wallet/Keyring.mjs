@@ -12,6 +12,9 @@ const { b2n, n2b, mulG, Point, mod } = sp.util;
 const b58c = createBase58check(sha256);
 
 export class Keyring {
+  /** @type {{ k: string, root: any } | null} the last master key (see root()) */
+  static _last = null;
+
   /**
    * @param {object} k
    * @param {'mnemonic'|'keys'|'example'} k.source
@@ -34,6 +37,8 @@ export class Keyring {
     this.fresh = false;
     this.birthday = null;
     this.restored = false;
+    this.index = 0;     // account number (0 = Account 1)
+    this.rootFp = '';   // BIP 32 master key fingerprint (hex): the same for every account of this phrase
     this._funding = new Map();
   }
 
@@ -47,14 +52,38 @@ export class Keyring {
     return new Keyring({ source, bScan, bSpend, Bspend, ...extra });
   }
 
-  /** BIP 352 keys at m/352'/coin'/0'/{1',0'}/0 and the Public key at m/86'/coin'/0'/0/0. */
-  static fromMnemonic(words, passphrase = '', net = 'main') {
-    const root = HDKey.fromMasterSeed(mnemonicToSeedSync(words, passphrase));
+  /**
+   * Paths of account `index` (0 = Account 1, exactly the keys of earlier versions):
+   * Shielded (BIP 352): m/352'/coin'/index'/{1',0'}/0 — one BIP 352 account each.
+   * Public (BIP 86): m/86'/coin'/0'/0/index — the next address, like UniSat's accounts, so a UniSat phrase shows
+   * the same Public addresses in the same order.
+   */
+  static paths(net, index = 0) {
     const c = NETWORKS[net].coin;
-    const scan = root.derive(`m/352'/${c}'/0'/1'/0`).privateKey;
-    const spend = root.derive(`m/352'/${c}'/0'/0'/0`).privateKey;
-    const funding = root.derive(`m/86'/${c}'/0'/0/0`).privateKey;
-    return Keyring.fromKeys(b2n(scan), spend, 'mnemonic', { mnemonic: words, passphrase, fundingPriv: toHex(funding) });
+    return { scan: `m/352'/${c}'/${index}'/1'/0`, spend: `m/352'/${c}'/${index}'/0'/0`, funding: `m/86'/${c}'/0'/0/${index}` };
+  }
+
+  /** The master key for a phrase. The seed (2048 PBKDF2 rounds) is the slow part: the last one is kept. */
+  static root(words, passphrase = '') {
+    const k = `${words}\n${passphrase}`;
+    if (Keyring._last?.k !== k) Keyring._last = { k, root: HDKey.fromMasterSeed(mnemonicToSeedSync(words, passphrase)) };
+    return Keyring._last.root;
+  }
+  /** Forget the cached master key (lock, new wallet). */
+  static forgetRoot() { Keyring._last = null; }
+
+  /** Keys of account `index` (default 0: the keys every earlier version used). */
+  static fromMnemonic(words, passphrase = '', net = 'main', index = 0) {
+    if (!Number.isInteger(index) || index < 0 || index >= 0x80000000) throw new Error('Bad account number');
+    const root = Keyring.root(words, passphrase);
+    const p = Keyring.paths(net, index);
+    const scan = root.derive(p.scan).privateKey;
+    const spend = root.derive(p.spend).privateKey;
+    const funding = root.derive(p.funding).privateKey;
+    const k = Keyring.fromKeys(b2n(scan), spend, 'mnemonic', { mnemonic: words, passphrase, fundingPriv: toHex(funding) });
+    k.index = index;
+    k.rootFp = root.fingerprint.toString(16).padStart(8, '0');
+    return k;
   }
 
   static fromExample(example) {

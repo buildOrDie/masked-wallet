@@ -32,12 +32,10 @@ export class LockController {
     if (isNetwork(saved)) state.net = saved;
     if (!store.get(NET_KEY) && secret.net && isNetwork(secret.net)) state.net = secret.net;
     if (!isNetwork(store.get(NET_KEY))) store.set(NET_KEY, state.net); // the lock screen and restore use it
-    const keys = Keyring.fromMnemonic(secret.words, secret.passphrase || '', state.net);
-    keys.fresh = !!secret.fresh;
-    keys.birthday = secret.birthday || null;
-    keys.restored = !!secret.restored;
-    state.wallet = keys;
     this.secret = { words: secret.words, passphrase: secret.passphrase || '', fresh: !!secret.fresh, restored: !!secret.restored, birthday: secret.birthday || null };
+    // the account that was open last (Account 1 for a new or restored phrase)
+    const fp = Keyring.root(secret.words, secret.passphrase || '').fingerprint.toString(16).padStart(8, '0');
+    state.wallet = this.app.accountKeys(secret.words, secret.passphrase || '', state.net, this.app.accounts.active(fp));
     this.app.loadWalletData();
   }
 
@@ -56,6 +54,7 @@ export class LockController {
 
   async lockNow() {
     await this.session.clear();
+    Keyring.forgetRoot();
     this.state.wallet = null; this.secret = null;
     location.reload(); // drops every key from memory
   }
