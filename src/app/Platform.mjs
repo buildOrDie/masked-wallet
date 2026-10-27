@@ -37,6 +37,13 @@ export class Platform {
   async sessionSet(obj) { if (!this.hasSession) return; try { await chrome.storage.session.set(obj); } catch {} }
   async sessionRemove(key) { if (!this.hasSession) return; try { await chrome.storage.session.remove(key); } catch {} }
 
+  /** Ask once to read public posts on X (publish.twitter.com), so the wallet checks @handles itself. Call it first in a click. */
+  async allowX() {
+    if (!this.hasExt || !chrome.permissions?.request) return;
+    const ok = await chrome.permissions.request({ origins: ['https://publish.twitter.com/*'] });
+    if (!ok) throw new Error('MASKED needs to read the post on X to check the @handle. Allow it and try again.');
+  }
+
   /** Ask for permission to reach a server the user typed in Settings. */
   async requestOrigin(url) {
     if (!this.hasExt || !chrome.permissions?.request) return;

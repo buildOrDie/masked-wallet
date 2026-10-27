@@ -8,6 +8,7 @@ import { FeeOracle } from '../net/FeeOracle.mjs';
 import { OrdChecker } from '../net/OrdChecker.mjs';
 import { ScanServer } from '../net/ScanServer.mjs';
 import { TokenServer } from '../net/TokenServer.mjs';
+import { HandleDirectory } from '../net/HandleDirectory.mjs';
 import { ChainSync } from '../scan/ChainSync.mjs';
 import { ShieldedScanner } from '../scan/ShieldedScanner.mjs';
 import { DeployRegistry, MintLog, PendingTransfers, TransferLog } from '../tokens/records.mjs';
@@ -46,6 +47,7 @@ export class MaskedApp {
     this.ord = new OrdChecker({ net, store });
     this.tokenServer = new TokenServer({ net, store });
     this.scanServer = new ScanServer({ net, store });
+    this.handles = new HandleDirectory({ net, store });
     this.fees = new FeeOracle({ net, servers: this.servers, store });
 
     // the wallet

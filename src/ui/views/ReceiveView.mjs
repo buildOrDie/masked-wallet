@@ -4,10 +4,11 @@ import { I, addrChunks, btcLogo, head, qrSvg, seg, shieldLogo } from '../html.mj
 
 /** Receive: the Public or Shielded address as text and QR code. */
 export class ReceiveView extends View {
-  /** A ready post with the Shielded address, opened in X. */
-  static shareUrl(addr) {
-    const text = `Pay me privately 🎭\n\n${addr}\n\nSilent payments on Bitcoin, via @masked_wallet\nmaskedwallet.com`;
-    return `https://x.com/intent/post?text=${encodeURIComponent(text)}`;
+  /** Claim your @ (or the claimed @handle) on the Shielded side. */
+  handleButton() {
+    const mine = this.app.handles.mine(this.account.id);
+    if (mine && mine.address === this.account.shieldAddr().toLowerCase()) return `<button class="xh-banner on" data-go="xclaim">${I.x}<span><b>@${esc(mine.handle)}</b><small>Anyone with MASKED can pay your @handle</small></span><span class="chev">›</span></button>`;
+    return `<button class="xh-banner" data-go="xclaim">${I.x}<span><b>Get paid with your @handle</b><small>Post your address once. Still private.</small></span><span class="new">New</span><span class="chev">›</span></button>`;
   }
 
   render() {
@@ -21,12 +22,12 @@ export class ReceiveView extends View {
     return `
     ${head('Receive')}
     ${seg('recvKind', kind, [['public', 'Public'], ['shielded', `${I.shieldPlain} Shielded`]])}
+    ${kind === 'shielded' && !account.isTest ? this.handleButton() : ''}
     <section class="card receive ${kind}">
       <div class="recv-badge">${kind === 'shielded' ? `${shieldLogo}<b>Shielded address</b>` : `${btcLogo}<b>Public address</b>`}</div>
       <div class="qr-wrap">${qrSvg(a)}</div>
       <p class="addr mono">${addrChunks(a)}</p>
       <button class="btn primary wide" data-copy="${esc(a)}">${I.copy}<span>Copy address</span></button>
-      ${kind === 'shielded' && !account.isTest ? `<a class="btn ghost wide" href="${ReceiveView.shareUrl(a)}" target="_blank" rel="noopener">${I.x}<span>Share on X</span></a>` : ''}
       <p class="info">${info}</p>
       ${account.isTest ? `<p class="info warn">${account.params.name} only. Never send real bitcoin here.</p>` : ''}
     </section>

@@ -7,6 +7,7 @@ import { TxPolicy } from '../bitcoin/RawTransaction.mjs';
 import { FEE_MAX, FEE_MIN, FeeOracle } from '../net/FeeOracle.mjs';
 import { EsploraPool } from '../net/EsploraPool.mjs';
 import { Keyring } from '../wallet/Keyring.mjs';
+import { looksLikeHandle } from '../social/xpost.mjs';
 import { SendView } from './views/SendView.mjs';
 import { AirdropView } from './views/AirdropView.mjs';
 import { SettingsView } from './views/SettingsView.mjs';
@@ -17,7 +18,7 @@ import { I } from './html.mjs';
 const { b2n } = sp.util;
 
 /** Which status line an error goes to, by view. */
-const ERROR_SLOT = { send: 'send', shield: 'send', drop: 'drop', mint: 'mint', settings: 'wallet', activity: 'scan', relay: 'relay' };
+const ERROR_SLOT = { send: 'send', shield: 'send', xclaim: 'xclaim', drop: 'drop', mint: 'mint', settings: 'wallet', activity: 'scan', relay: 'relay' };
 
 export class Controller {
   /** @param {import('../app/MaskedApp.mjs').MaskedApp} app */
@@ -44,7 +45,7 @@ export class Controller {
     const { state, f } = this, codec = this.app.account.codec;
     f[b] = e.target.value;
     const kindHint = (sel, note) => {
-      const k = codec.kind(e.target.value), el = $(sel);
+      const k = sel === '#sendKind' ? SendView.kindOf(this.app, e.target.value) : codec.kind(e.target.value), el = $(sel);
       if (el) { el.className = `addr-kind k-${k.kind}`; el.innerHTML = note(k); }
     };
     if (b === 'sendTo') kindHint('#sendKind', SendView.kindNote);
@@ -52,6 +53,7 @@ export class Controller {
     if (b === 'mintTick') { clearTimeout(this.tickTimer); this.tickTimer = setTimeout(() => { if (state.view === 'mint') this.render(); }, 450); }
     if (b === 'mintOther') { const k = codec.kind(e.target.value), el = $('#mintKind'); if (el) { el.className = `addr-kind k-${k.kind}`; el.textContent = k.text || ''; } }
     if (b === 'feeCustom') this.customFeeHint(e.target.value);
+    if (b === 'xLink') { const btn = $('#btnXClaim'); if (btn) /** @type {HTMLButtonElement} */ (btn).disabled = !e.target.value.trim(); if (state.status.xclaim) { state.status.xclaim = null; $('#view .claim .msg')?.remove(); } }
     if (b === 'dropText') { const el = $('#dropCount'); if (el) { const pv = this.app.ui.view('send').drop.preview(); el.innerHTML = AirdropView.countNote(pv); el.className = `addr-kind ${pv.n ? 'k-shielded' : ''}`; } }
     if (b === 'dropText' || b === 'dropEach') { clearTimeout(this.dropTimer); this.dropTimer = setTimeout(() => { if (state.view === 'send') this.render(); }, 400); }
     if (state.status.drop) state.status.drop = null;
@@ -138,6 +140,7 @@ export class Controller {
       if (d.set === 'fee' && d.val === 'custom') $('#feeCustom')?.focus();
       return true;
     }
+    if (t.hasAttribute('data-xagain')) { state.xclaim = { stage: 'again' }; state.status.xclaim = null; this.render(); return true; }
     if (t.hasAttribute('data-fillself')) { f.sendTo = account.shieldAddr(); this.render(); return true; }
     if (d.max) { const m = app.coins.maxSendable(state.view === 'shield' ? 'public' : d.max, app.feeRate()); f.sendAmount = m ? fmtBtc(m) : ''; this.render(); return true; }
     if (t.hasAttribute('data-reviewback')) { state.send = { stage: 'form' }; this.render(); return true; }
@@ -204,6 +207,7 @@ export class Controller {
     // the Mint tab always opens Mint & deploy (Send / Inscribe are sub-pages of a token)
     if (t.closest('#nav') && d.go === 'mint' && ['send', 'transfer'].includes(f.mintMode)) { f.mintMode = 'mint'; state.mint = { stage: 'form' }; }
     if (d.go === 'shield') f.sendAmount = '';
+    if (d.go === 'xclaim' && state.view !== 'xclaim') { state.xclaim = { stage: 'post' }; state.status.xclaim = null; }
     if (d.go === 'mint' && f.mintMode === 'send') f.mintMode = 'mint';
     state.view = d.go;
     if (d.go === 'settings') app.sites.loadSites().then(() => this.render());
@@ -243,9 +247,11 @@ export class Controller {
       case 'btnOlder': sync.run(24, { older: true }); break;
       case 'btnReviewSend': {
         const shield = state.view === 'shield';
+        if (!shield && looksLikeHandle(f.sendTo)) { await this.reviewToHandle(); break; }
         await review('send', () => app.builder.send({ from: shield ? 'public' : f.sendFrom, to: shield ? 'self' : f.sendTo, amount: parseBtc(f.sendAmount, account.unit), rate: app.feeRate() }));
         break;
       }
+      case 'btnXClaim': await this.claimHandle(); break;
       case 'btnConfirmSend': await this.confirmSend(); break;
       case 'btnReviewDrop': await review('drop', () => app.airdrop.build({ from: f.dropFrom, text: f.dropText, each: Number(String(f.dropEach || '').replace(/[^\d]/g, '')), rate: app.feeRate() })); break;
       case 'btnConfirmDrop': await this.confirmDrop(); break;
@@ -318,6 +324,37 @@ export class Controller {
       case 'btnCalc': { try { state.calc = { out: this.computeOutputs() }; } catch (err) { state.calc = { err: err.message }; } this.render(); break; }
       default: break;
     }
+  }
+
+  /** Send → @handle: read their post on X, check it, then build the payment to the address in it. */
+  async reviewToHandle() {
+    const { app, state, f } = this;
+    const allowed = app.platform.allowX(); // first, while the click still counts as the user's
+    const amount = parseBtc(f.sendAmount, app.account.unit);
+    if (app.account.isTest) throw new Error('X handles work on Mainnet.');
+    state.status.send = [`Checking ${f.sendTo.trim()} on X…`, '']; this.render();
+    await allowed;
+    const h = await app.handles.resolve(f.sendTo);
+    if (h.address === app.account.shieldAddr().toLowerCase()) throw new Error('That @handle is you.');
+    if (app.account.codec.kind(h.address).kind !== 'shielded') throw new Error(`The address in @${h.handle}'s post is not a valid Shielded address.`);
+    const built = await app.builder.send({ from: f.sendFrom, to: h.address, amount, rate: app.feeRate() });
+    state.send = { stage: 'review', built: { ...built, handle: h } };
+    state.status.send = null;
+    this.render();
+  }
+
+  /** Receive → Claim your handle: check the pasted post is ours, register it. */
+  async claimHandle() {
+    const { app, state, f } = this;
+    const allowed = app.platform.allowX();
+    state.status.xclaim = ['Checking your post on X…', '']; this.render();
+    try {
+      await allowed;
+      const v = await app.handles.claim(f.xLink, app.account.shieldAddr());
+      app.handles.saveMine(app.account.id, v);
+      state.xclaim = { stage: 'done', post: v }; state.status.xclaim = null; f.xLink = '';
+    } catch (err) { state.status.xclaim = [friendly(err.message), 'err']; }
+    this.render();
   }
 
   async confirmDrop() {

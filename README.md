@@ -11,7 +11,7 @@ It also does:
 
 - **Offline send:** sign a payment with no internet, then hand it over by QR code or as text, in any chat, Bitchat included. It is sent when either side gets online. See [docs/OFFLINE.md](docs/OFFLINE.md).
 - **Silent airdrop:** paste a list of Shielded addresses (even a whole X reply thread) and pay everyone in one transaction, each with a silent payment. See [docs/AIRDROP.md](docs/AIRDROP.md).
-- **Share on X:** post your Shielded address in one tap from Receive.
+- **Pay an @handle:** type `@someone` in Send and MASKED pays the Shielded address in their X post, checked on X by the wallet itself. Claim your own @ from Receive in two steps; payments to it stay private. See [docs/X-HANDLES.md](docs/X-HANDLES.md).
 - **Several accounts:** add, rename, hide and switch accounts from one recovery phrase. Account N uses the Public address UniSat shows for its account N (`m/86'/coin'/0'/0/N`) and its own BIP 352 account for Shielded. See [docs/ACCOUNTS.md](docs/ACCOUNTS.md).
 - **BRC-20 and BRC2.0:** mint, deploy, inscribe and send.
 - **`window.masked`:** a UniSat-compatible provider for websites.
@@ -27,8 +27,8 @@ It also does:
 | <img src="docs/img/home-public.png" width="250" alt="Home on the Public side"> | <img src="docs/img/home-shielded.png" width="250" alt="Home on the Shielded side"> | <img src="docs/img/token-shielded.png" width="250" alt="A BRC2.0 token held in Shielded"> |
 | **Receive privately** | **Trade from Shielded** | **List straight from Shielded** |
 | <img src="docs/img/receive-shielded.png" width="250" alt="Shielded receive address"> | <img src="docs/img/approve-trade.png" width="250" alt="Approval to trade from Shielded"> | <img src="docs/img/approve-list.png" width="250" alt="Approval to inscribe a transfer on a Shielded coin"> |
-| **Offline send** (2.14) | **Silent airdrop** (2.15) | **Share on X** (2.14) |
-| <img src="docs/img/offline-signed.png" width="250" alt="A payment signed offline, as a QR code"> | <img src="docs/img/airdrop.png" width="250" alt="Airdrop: 12 people found in a pasted X thread"> | <img src="docs/img/share-on-x.png" width="250" alt="Share the Shielded address on X"> |
+| **Offline send** (2.14) | **Silent airdrop** (2.15) | **Pay an @handle** (2.17) |
+| <img src="docs/img/offline-signed.png" width="250" alt="A payment signed offline, as a QR code"> | <img src="docs/img/airdrop.png" width="250" alt="Airdrop: 12 people found in a pasted X thread"> | <img src="docs/img/pay-handle.png" width="250" alt="Sending to an X handle, with the post checked on X"> |
 
 ## Install
 
@@ -41,7 +41,7 @@ Node 20+:
 
 ```sh
 npm ci
-npm run check   # lint, type check, and the tests (BIP 352 vectors, fast scanner, private trading, wallet services, offline send, airdrop)
+npm run check   # lint, type check, and the tests (BIP 352 vectors, fast scanner, private trading, wallet services, offline send, airdrop, accounts, X handles)
 npm run build   # rebuilds extension/ from src/
 ```
 
@@ -54,7 +54,8 @@ The build is reproducible: the same source always gives the same `extension/`. T
 | [`v2.14.0`](../../tree/v2.14.0) | Offline send, Share on X | GitHub |
 | [`v2.15.0`](../../tree/v2.15.0) | Silent airdrop | Chrome Web Store |
 | [`v2.15.1`](../../tree/v2.15.1) | no scrollbar drawn in the popup (scroll with the trackpad or wheel, no wide grey bar on Windows) | GitHub |
-| [`v2.16.0`](../../tree/v2.16.0) | several accounts from one phrase: add, rename, hide, switch (UniSat-compatible Public addresses) | `main` |
+| [`v2.16.0`](../../tree/v2.16.0) | several accounts from one phrase: add, rename, hide, switch (UniSat-compatible Public addresses) | GitHub |
+| [`v2.17.0`](../../tree/v2.17.0) | pay an X @handle; claim your own @ (Receive → Shielded) | `main` |
 | [`v2.15.2`](../../tree/v2.15.2) | redesigned unlock screen (show-password button, clearer wrong-password state); a side panel button in the header | GitHub |
 
 ## Use it from your website: `window.masked`
