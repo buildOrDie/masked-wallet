@@ -1,6 +1,7 @@
 import { esc, fmtBtc, sumSats } from '../../core/format.mjs';
 import { INSCRIPTION_MAX } from '../../ordinals/envelope.mjs';
 import { View } from '../View.mjs';
+import { LeafView } from './LeafView.mjs';
 import { I, btcLogo, shieldLogo } from '../html.mjs';
 
 /** Home: the balance of the side on show (Public or Shielded), actions, both balances and the tokens. */
@@ -23,6 +24,7 @@ export class HomeView extends View {
       ? `<button class="protect-row" data-go="activity" data-filter="brc2">${I.lock}<span><b>${protectedCount} inscription coin${protectedCount === 1 ? '' : 's'} protected</b> · never spent by Send, Shield or Mint</span><span class="chev">›</span></button>`
       : '';
     const usd = (s) => fees.usdOf(s);
+    const leafRow = LeafView.homeRow(app, side);
     return `
     ${w.source === 'example' ? '<div class="testnet-note warn">Demo wallet — keys are public. Create your own in Settings.</div>' : this.netBanner()}
     <section class="hero ${shd ? 'sh' : ''}">
@@ -52,6 +54,7 @@ export class HomeView extends View {
         <span class="bal-amt"><b>${fmtBtc(sh)}</b><span>${usd(sh) || unit}</span></span>
       </button>
     </section>
-    ${app.ui.tokens.home(side)}`;
+    ${app.ui.tokens.home(side, !!leafRow)}
+    ${leafRow}`;
   }
 }

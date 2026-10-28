@@ -8,6 +8,7 @@ import { FEE_MAX, FEE_MIN, FeeOracle } from '../net/FeeOracle.mjs';
 import { EsploraPool } from '../net/EsploraPool.mjs';
 import { Keyring } from '../wallet/Keyring.mjs';
 import { looksLikeHandle } from '../social/xpost.mjs';
+import { fmtLeaf } from '../tokens/leaf.mjs';
 import { SendView } from './views/SendView.mjs';
 import { AirdropView } from './views/AirdropView.mjs';
 import { SettingsView } from './views/SettingsView.mjs';
@@ -18,7 +19,7 @@ import { I } from './html.mjs';
 const { b2n } = sp.util;
 
 /** Which status line an error goes to, by view. */
-const ERROR_SLOT = { send: 'send', shield: 'send', xclaim: 'xclaim', drop: 'drop', mint: 'mint', settings: 'wallet', activity: 'scan', relay: 'relay' };
+const ERROR_SLOT = { send: 'send', shield: 'send', xclaim: 'xclaim', leaf: 'leaf', drop: 'drop', mint: 'mint', settings: 'wallet', activity: 'scan', relay: 'relay' };
 
 export class Controller {
   /** @param {import('../app/MaskedApp.mjs').MaskedApp} app */
@@ -140,6 +141,12 @@ export class Controller {
       if (d.set === 'fee' && d.val === 'custom') $('#feeCustom')?.focus();
       return true;
     }
+    if (t.hasAttribute('data-leafrefresh')) { app.leaf.refresh(true); this.render(); return true; }
+    if (t.hasAttribute('data-leafback')) { state.leafSend = { stage: 'form' }; state.status.leaf = null; this.render(); return true; }
+    if (t.hasAttribute('data-leafmax')) {
+      const l = app.leaf, m = f.leafFrom === 'shielded' ? l.maxShieldedOnce() : l.available('public');
+      f.leafAmt = m > 0n ? fmtLeaf(m).replace(/,/g, '') : ''; this.render(); return true;
+    }
     if (t.hasAttribute('data-xagain')) { state.xclaim = { stage: 'again' }; state.status.xclaim = null; this.render(); return true; }
     if (t.hasAttribute('data-fillself')) { f.sendTo = account.shieldAddr(); this.render(); return true; }
     if (d.max) { const m = app.coins.maxSendable(state.view === 'shield' ? 'public' : d.max, app.feeRate()); f.sendAmount = m ? fmtBtc(m) : ''; this.render(); return true; }
@@ -207,6 +214,7 @@ export class Controller {
     // the Mint tab always opens Mint & deploy (Send / Inscribe are sub-pages of a token)
     if (t.closest('#nav') && d.go === 'mint' && ['send', 'transfer'].includes(f.mintMode)) { f.mintMode = 'mint'; state.mint = { stage: 'form' }; }
     if (d.go === 'shield') f.sendAmount = '';
+    if (d.go === 'leaf') { if (d.leafside) f.leafFrom = d.leafside; state.leafSend = { stage: 'form' }; state.status.leaf = null; }
     if (d.go === 'xclaim' && state.view !== 'xclaim') { state.xclaim = { stage: 'post' }; state.status.xclaim = null; }
     if (d.go === 'mint' && f.mintMode === 'send') f.mintMode = 'mint';
     state.view = d.go;
@@ -252,6 +260,17 @@ export class Controller {
         break;
       }
       case 'btnXClaim': await this.claimHandle(); break;
+      case 'btnLeafReview':
+        state.status.leaf = ['Building…', '']; this.render();
+        state.leafSend = { stage: 'review', built: await app.leaf.build({ from: f.leafFrom === 'shielded' ? 'shielded' : 'public', to: f.leafTo, amount: f.leafAmt, rate: app.feeRate() }) };
+        state.status.leaf = null; this.render(); break;
+      case 'btnLeafConfirm': {
+        const b = state.leafSend.built;
+        state.busy = true; this.render();
+        try { await app.leaf.confirm(b); state.leafSend = { stage: 'done', built: b }; f.leafAmt = ''; f.leafTo = ''; }
+        finally { state.busy = false; this.render(); }
+        break;
+      }
       case 'btnConfirmSend': await this.confirmSend(); break;
       case 'btnReviewDrop': await review('drop', () => app.airdrop.build({ from: f.dropFrom, text: f.dropText, each: Number(String(f.dropEach || '').replace(/[^\d]/g, '')), rate: app.feeRate() })); break;
       case 'btnConfirmDrop': await this.confirmDrop(); break;

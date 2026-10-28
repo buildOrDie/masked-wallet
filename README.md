@@ -14,6 +14,7 @@ It also does:
 - **Pay an @handle:** type `@someone` in Send and MASKED pays the Shielded address in their X post, checked on X by the wallet itself. Claim your own @ from Receive in two steps; payments to it stay private. See [docs/X-HANDLES.md](docs/X-HANDLES.md).
 - **Several accounts:** add, rename, hide and switch accounts from one recovery phrase. Account N uses the Public address UniSat shows for its account N (`m/86'/coin'/0'/0/N`) and its own BIP 352 account for Shielded. See [docs/ACCOUNTS.md](docs/ACCOUNTS.md).
 - **BRC-20 and BRC2.0:** mint, deploy, inscribe and send.
+- **LEAF (CRC-20):** balances and sends on both sides, read from crc20.org with no node. Send to an `sp1…` and the receiver gets LEAF privately. See [docs/LEAF.md](docs/LEAF.md).
 - **`window.masked`:** a UniSat-compatible provider for websites.
 
 [**Add to Chrome**](https://chromewebstore.google.com/detail/masked-wallet/pojmpfcbdmacabhckemelcbkmckhaoig) · [maskedwallet.com](https://maskedwallet.com) · [@masked_wallet](https://x.com/masked_wallet)
@@ -41,7 +42,7 @@ Node 20+:
 
 ```sh
 npm ci
-npm run check   # lint, type check, and the tests (BIP 352 vectors, fast scanner, private trading, wallet services, offline send, airdrop, accounts, X handles)
+npm run check   # lint, type check, and the tests (BIP 352 vectors, fast scanner, private trading, wallet services, offline send, airdrop, accounts, X handles, LEAF)
 npm run build   # rebuilds extension/ from src/
 ```
 
@@ -55,7 +56,8 @@ The build is reproducible: the same source always gives the same `extension/`. T
 | [`v2.15.0`](../../tree/v2.15.0) | Silent airdrop | Chrome Web Store |
 | [`v2.15.1`](../../tree/v2.15.1) | no scrollbar drawn in the popup (scroll with the trackpad or wheel, no wide grey bar on Windows) | GitHub |
 | [`v2.16.0`](../../tree/v2.16.0) | several accounts from one phrase: add, rename, hide, switch (UniSat-compatible Public addresses) | GitHub |
-| [`v2.17.0`](../../tree/v2.17.0) | pay an X @handle; claim your own @ (Receive → Shielded) | `main` |
+| [`v2.17.0`](../../tree/v2.17.0) | pay an X @handle; claim your own @ (Receive → Shielded) | GitHub |
+| [`v2.18.0`](../../tree/v2.18.0) | LEAF (CRC-20): balances and sends, Public and Shielded | `main` |
 | [`v2.15.2`](../../tree/v2.15.2) | redesigned unlock screen (show-password button, clearer wrong-password state); a side panel button in the header | GitHub |
 
 ## Use it from your website: `window.masked`

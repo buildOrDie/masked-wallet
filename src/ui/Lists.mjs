@@ -72,7 +72,7 @@ export class TokenList {
   }
 
   /** Home: UniSat-style token list with All / BRC-20 / BRC2.0 tabs, for one side. */
-  home(side = null) {
+  home(side = null, hasOther = false) {
     const book = this.app.tokens;
     const sideName = side === 'shielded' ? 'Shielded' : 'Public';
     const all = side
@@ -81,7 +81,7 @@ export class TokenList {
         return { ...t, held: amt, listed: side === 'shielded' ? t.listed : 0 };
       }).filter((t) => t.held > 0)
       : book.list();
-    if (side && !all.length) return `<section class="home-toks"><div class="list-h"><b>Tokens</b><span class="muted small">${sideName}</span></div><p class="muted small center">No tokens on this side yet.</p></section>`;
+    if (side && !all.length) return `<section class="home-toks"><div class="list-h"><b>Tokens</b><span class="muted small">${sideName}</span></div>${hasOther ? '' : '<p class="muted small center">No tokens on this side yet.</p>'}</section>`;
     if (!all.length) return '';
     const f = this.app.state.f.homeTok || 'all';
     const v1 = all.filter((t) => !t.v2), v2 = all.filter((t) => t.v2);

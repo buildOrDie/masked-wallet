@@ -14,6 +14,7 @@ import { ShieldedScanner } from '../scan/ShieldedScanner.mjs';
 import { DeployRegistry, MintLog, PendingTransfers, TransferLog } from '../tokens/records.mjs';
 import { TokenBook } from '../tokens/TokenBook.mjs';
 import { TokenTx } from '../tokens/TokenTx.mjs';
+import { LeafBook } from '../tokens/LeafBook.mjs';
 import { TradeAccount } from '../trade/TradeAccount.mjs';
 import { ApprovalController } from '../dapp/ApprovalController.mjs';
 import { PsbtSigner } from '../dapp/PsbtSigner.mjs';
@@ -69,6 +70,7 @@ export class MaskedApp {
     this.pending = new PendingTransfers(this);
     this.tokens = new TokenBook(this);
     this.tokenTx = new TokenTx(this);
+    this.leaf = new LeafBook(this);
 
     // dApps and private trading
     this.trade = new TradeAccount(this);
@@ -118,6 +120,7 @@ export class MaskedApp {
       () => this.trade.recoverShieldedTransfers(),
       () => this.fees.refreshPrice(),
       () => this.offline.flush(),
+      () => this.leaf.refresh(),
     ];
   }
 

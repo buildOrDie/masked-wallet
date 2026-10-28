@@ -17,7 +17,7 @@ const sideName = (from) => (from === 'shielded' ? 'Shielded' : from === 'trade' 
 export const inputOf = (c) => ({ txid: c.txid, vout: c.vout, value: c.sats, scriptPubKey: p2trScript(c.output) });
 
 /** Silent-payment outputs for some recipients, handed out one recipient at a time. */
-class SilentOutputs {
+export class SilentOutputs {
   constructor(keys, outpoints, recipients) {
     this.list = recipients.length ? sp.createOutputs(keys, outpoints, recipients) : [];
   }
