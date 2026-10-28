@@ -7,7 +7,7 @@ export const FORM_DEFAULTS = {
   mintTick: '', mintAmt: '', mintTo: 'self', mintOther: '', mintFrom: 'public', mintMode: 'mint',
   depTick: '', depMax: '21000000', depLim: '1000', depFrom: 'public', depResTo: 'shielded', depWho: 'self', recTick: '', recSalt: '',
   tsTick: '', tsTo: '', tsAmt: '', tsFrom: 'public', trTick: '', trAmt: '', trFrom: 'public',
-  coinFilter: 'all', scanText: '', calcRecips: '', relayText: '', xLink: '', leafFrom: 'public', leafTo: '', leafAmt: '',
+  coinFilter: 'all', scanText: '', calcRecips: '', relayText: '', leafFrom: 'public', leafTo: '', leafAmt: '',
   sendMode: 'send', dropText: '', dropEach: '1000', dropFrom: 'public',
   // set by the screens that use them
   homeTok: 'all', tokTab: 'history', acctMenu: '-1', acctHidden: '', obMode: 'create', backed: false, apRisk: false, rbfInfo: false,
@@ -31,7 +31,6 @@ export class AppState {
     this.mint = { stage: 'form' };
     this.drop = { stage: 'form' };   // Send → Airdrop
     this.leafSend = { stage: 'form' }; // LEAF (CRC-20): form | review | done
-    this.xclaim = { stage: 'post' }; // Claim your @: post | done (with the checked post)
     this.busy = false;
     this.reveal = false;             // recovery phrase on show in Settings
     this.calc = null;                // output calculator result

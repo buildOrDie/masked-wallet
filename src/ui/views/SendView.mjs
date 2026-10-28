@@ -2,7 +2,6 @@ import { esc, fmtBtc, short, sumSats } from '../../core/format.mjs';
 import { View } from '../View.mjs';
 import { AirdropView } from './AirdropView.mjs';
 import { OfflinePayments } from '../../wallet/OfflinePayments.mjs';
-import { looksLikeHandle } from '../../social/xpost.mjs';
 import { I, btcLogo, copyBtn, head, headWith, qrSvg, rowKV, shieldLogo, sideLogo } from '../html.mjs';
 
 /** Send bitcoin, or Shield (Public → Shielded): form → review → done. */
@@ -21,7 +20,6 @@ export class SendView extends View {
     if (st.stage === 'offline' && st.built) return this.signed(st.built);
     if (st.stage === 'done' && st.built) {
       const b = st.built;
-      if (b.handle) return this.done('Sent!', `${fmtBtc(b.amount)} ${this.unit} is on its way to @${esc(b.handle.handle)}, privately.`, b.txid, '', `<a class="btn primary wide" href="${SendView.tellUrl(b.handle.handle)}" target="_blank" rel="noopener">${I.x}<span>Tell @${esc(b.handle.handle)} on X</span></a>`);
       return this.done(b.toSelf ? 'Shielded!' : 'Sent!', `${fmtBtc(b.amount)} ${this.unit}${b.toSelf ? ' moved to your Shielded balance.' : ' is on its way.'}`, b.txid, b.toSelf ? 'It shows up as pending until the next block.' : '');
     }
     return this.form();
@@ -32,10 +30,10 @@ export class SendView extends View {
     const shield = this.mode === 'shield';
     const from = shield ? 'public' : this.f.sendFrom;
     const bal = sumSats(app.coins.spendable(from));
-    const k = SendView.kindOf(this.app, this.f.sendTo);
+    const k = this.account.codec.kind(this.f.sendTo);
     const to = shield
       ? `<div class="flow"><div class="flow-end">${btcLogo}<span><b>Public</b><small>${fmtBtc(bal)} ${unit}</small></span></div><span class="flow-arrow">→</span><div class="flow-end">${shieldLogo}<span><b>Shielded</b><small>${fmtBtc(sumSats(app.coins.shielded))} ${unit}</small></span></div></div>`
-      : `<label class="field"><span class="lbl">To</span><input id="sendTo" data-bind="sendTo" class="mono" spellcheck="false" autocomplete="off" value="${esc(this.f.sendTo)}" placeholder="Address, or an @handle on X">
+      : `<label class="field"><span class="lbl">To</span><input id="sendTo" data-bind="sendTo" class="mono" spellcheck="false" autocomplete="off" value="${esc(this.f.sendTo)}" placeholder="Paste a Bitcoin or shielded address">
           <span class="addr-kind k-${k.kind}" id="sendKind">${SendView.kindNote(k)}</span></label>`;
     return `
     ${head(shield ? 'Shield' : 'Send')}
@@ -53,40 +51,16 @@ export class SendView extends View {
     </section>`;
   }
 
-  /** What the To field holds: an address kind, or an X handle (checked on X at Review). */
-  static kindOf(app, v) {
-    if (looksLikeHandle(v)) return app.account.isTest ? { kind: 'wrongnet', text: 'X handles work on Mainnet' } : { kind: 'handle', text: 'X handle · MASKED checks their post on X when you tap Review' };
-    return app.account.codec.kind(v);
-  }
-
   /** Under the To field: what kind of address it is, or a shortcut to your own Shielded address. */
   static kindNote(k) {
     return k.kind === 'empty' ? '<button class="link" data-fillself>Send to my own Shielded address</button>' : esc(k.text);
-  }
-
-  /** A ready post telling the receiver (no amount: that stays private). */
-  static tellUrl(handle) {
-    const text = `Just sent you some sats privately 🎭 @${handle}\n\nNobody can see how much, or that it was me. Send to any @ with @masked_wallet`;
-    return `https://x.com/intent/post?text=${encodeURIComponent(text)}`;
-  }
-
-  /** The To row for a payment to an X handle: the handle, that the post checked out, and the post itself. */
-  static handleTo(h) {
-    return `<span class="xh">${I.x}<b>@${esc(h.handle)}</b></span><span class="mono small">${esc(short(h.address, 8))}</span>`;
-  }
-
-  /** The post the address came from, as checked on X (the address shortened). */
-  static handlePost(h) {
-    const text = h.text.split(h.address).join(short(h.address, 8)).replace(/\n{3,}/g, '\n\n');
-    const excerpt = text.length > 170 ? text.slice(0, 167) + '…' : text;
-    return `<a class="xpost" href="${esc(h.url)}" target="_blank" rel="noopener"><span class="xpost-by"><span class="good">${I.check} Checked on X</span> · ${esc(h.name || '@' + h.handle)} · ${esc(h.date)}</span><span class="xpost-text">${esc(excerpt)}</span></a>`;
   }
 
   review(b) {
     const { unit } = this;
     const busy = this.state.busy;
     const offline = !OfflinePayments.online();
-    const toTxt = b.toSelf ? `${shieldLogo}<b>My Shielded balance</b>` : b.handle ? SendView.handleTo(b.handle) : `<span class="mono">${esc(short(b.recipient, 10))}</span>`;
+    const toTxt = b.toSelf ? `${shieldLogo}<b>My Shielded balance</b>` : `<span class="mono">${esc(short(b.recipient, 10))}</span>`;
     return `
     ${headWith('data-reviewback', 'Confirm')}
     <section class="card review">
@@ -99,7 +73,6 @@ export class SendView extends View {
         ${rowKV('Network fee', `${fmtBtc(b.fee)} ${unit}`)}
         ${rowKV('Total', `<b>${fmtBtc(b.amount + b.fee)} ${unit}</b>`)}
       </div>
-      ${b.handle ? SendView.handlePost(b.handle) : ''}
       ${this.statusLine('send')}
       ${offline ? `<p class="info warn">You're offline. Sign it now; MASKED sends it the moment this device or the receiver gets online.</p>` : ''}
       <button class="btn ${offline ? 'ghost' : 'primary'} wide" id="btnConfirmSend" ${busy || offline ? 'disabled' : ''}>${busy ? 'Sending…' : b.toSelf ? 'Confirm & shield' : 'Confirm & send'}</button>

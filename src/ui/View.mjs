@@ -60,7 +60,7 @@ export class View {
   }
 
   /** The screen after a broadcast. */
-  done(title, sub, txid, extra = '', more = '') {
+  done(title, sub, txid, extra = '') {
     return `
     <section class="done">
       <div class="done-ic">${I.check}</div>
@@ -68,8 +68,7 @@ export class View {
       <p>${sub}</p>
       ${extra ? `<p class="muted small">${extra}</p>` : ''}
       <a class="btn ghost" href="${this.account.explorer.tx(txid)}" target="_blank" rel="noopener">View on mempool ${I.ext}</a>
-      ${more}
-      <button class="btn ${more ? 'ghost' : 'primary'} wide" data-go="home" data-reset>Done</button>
+      <button class="btn primary wide" data-go="home" data-reset>Done</button>
     </section>`;
   }
 }
