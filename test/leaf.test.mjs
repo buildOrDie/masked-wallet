@@ -8,7 +8,7 @@ import { schnorr } from '@noble/curves/secp256k1';
 import { hex } from '@scure/base';
 import * as sp from '../src/crypto/sp-core.mjs';
 import { walletApp, Keyring } from './helpers/wallet-app.mjs';
-import { balanceFromReply, fmtLeaf, indexerSynced, leafPayload, leafScript, parseLeaf, receiverKind } from '../src/tokens/leaf.mjs';
+import { balanceFromReply, fmtLeaf, indexerSynced, leafPayload, leafScript, leafTransferOf, parseLeaf, receiverKind } from '../src/tokens/leaf.mjs';
 import { LeafBook } from '../src/tokens/LeafBook.mjs';
 import { p2trScript } from '../src/bitcoin/taproot.mjs';
 
@@ -151,4 +151,21 @@ test('in-flight sends are subtracted until crc20.org applies them', () => {
   const { leaf, f } = setup();
   leaf.addPending({ txid: 'ab'.repeat(32), from: f.address, atoms: 300n * LEAF });
   assert.equal(leaf.available('public'), 1700n * LEAF);
+});
+
+test('unconfirmed transfers: read from the mempool, shown as incoming or sending until a block', () => {
+  const { leaf, f } = setup();
+  leaf.store.setJson(leaf.pendingKey, []); // the wallet's storage is shared between tests
+  const tx = (from, to, atoms, op = hex.encode(leafScript(atoms))) => ({ txid: 'cd'.repeat(32), vin: [{ prevout: { scriptpubkey_address: from } }], vout: [{ scriptpubkey: op, value: 0 }, { scriptpubkey_address: to, value: 330 }], status: { confirmed: false } });
+  assert.deepEqual(leafTransferOf(tx(OTHER_TR, f.address, 5n * LEAF)), { txid: 'cd'.repeat(32), from: OTHER_TR, to: f.address, atoms: 5n * LEAF });
+  assert.equal(leafTransferOf(tx(OTHER_TR, f.address, 5n, '6a' + '04' + 'deadbeef')), null, 'not a LEAF payload');
+  assert.equal(leafTransferOf({ vout: [{ scriptpubkey: '0014' + '00'.repeat(20) }] }), null);
+  leaf.unconfirmed = [leafTransferOf(tx(OTHER_TR, f.address, 5n * LEAF))];
+  assert.equal(leaf.incoming('public'), 5n * LEAF);
+  assert.equal(leaf.available('public'), 2000n * LEAF, 'incoming LEAF is not spendable before it confirms');
+  leaf.unconfirmed = [{ ...leafTransferOf(tx(f.address, OTHER_TR, 7n * LEAF)), txid: 'ef'.repeat(32) }];
+  assert.equal(leaf.outgoing('public'), 7n * LEAF, 'a send made elsewhere (another wallet) is still subtracted');
+  assert.equal(leaf.available('public'), 1993n * LEAF);
+  leaf.addPending({ txid: 'ef'.repeat(32), from: f.address, atoms: 7n * LEAF });
+  assert.equal(leaf.available('public'), 1993n * LEAF, 'the same send is never subtracted twice');
 });

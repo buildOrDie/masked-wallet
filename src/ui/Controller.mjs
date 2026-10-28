@@ -139,6 +139,7 @@ export class Controller {
       if (d.set === 'fee' && d.val === 'custom') $('#feeCustom')?.focus();
       return true;
     }
+    if (d.leafself) { f.leafTo = d.leafself === 'shielded' ? account.shieldAddr() : account.pubAddr(); state.status.leaf = null; this.render(); return true; }
     if (t.hasAttribute('data-leafrefresh')) { app.leaf.refresh(true); this.render(); return true; }
     if (t.hasAttribute('data-leafback')) { state.leafSend = { stage: 'form' }; state.status.leaf = null; this.render(); return true; }
     if (t.hasAttribute('data-leafmax')) {

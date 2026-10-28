@@ -73,3 +73,19 @@ export function balanceFromReply(j) {
 
 /** /status: is the indexer at the chain tip? (Until then balances may be behind.) */
 export const indexerSynced = (j) => j?.network === 'bitcoin' && j?.token?.tick === 'LEAF' && j?.indexer?.synced === true;
+
+/**
+ * A LEAF transfer in an Esplora transaction (unconfirmed or not): { txid, from, to, atoms }, or null when the
+ * transaction is not one. Same rules as the indexer: vout[0] is the exact payload, vout[1] the receiver.
+ */
+export function leafTransferOf(tx) {
+  const op = tx?.vout?.[0]?.scriptpubkey, recv = tx?.vout?.[1];
+  if (typeof op !== 'string' || !op.startsWith('6a') || !recv?.scriptpubkey_address) return null;
+  const len = parseInt(op.slice(2, 4), 16);
+  if (!(len > 0 && len <= 75) || op.length !== 4 + len * 2) return null;
+  let text = '';
+  for (let i = 4; i < op.length; i += 2) text += String.fromCharCode(parseInt(op.slice(i, i + 2), 16));
+  const m = text.match(/^\{"p":"crc-20","op":"transfer","tick":"LEAF","amt":"(\d+)"\}$/);
+  if (!m) return null;
+  return { txid: tx.txid, from: tx.vin?.[0]?.prevout?.scriptpubkey_address || null, to: recv.scriptpubkey_address, atoms: BigInt(m[1]) };
+}

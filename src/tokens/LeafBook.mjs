@@ -11,7 +11,7 @@ import { fmtBtc } from '../core/format.mjs';
 import { fetchWithin } from '../net/http.mjs';
 import { DUST_CHANGE } from '../ordinals/envelope.mjs';
 import { SilentOutputs, inputOf } from '../wallet/TxBuilder.mjs';
-import { LEAF_API, balanceFromReply, fmtLeaf, indexerSynced, leafScript, parseLeaf, receiverKind, vsizeOf } from './leaf.mjs';
+import { LEAF_API, balanceFromReply, fmtLeaf, indexerSynced, leafScript, leafTransferOf, parseLeaf, receiverKind, vsizeOf } from './leaf.mjs';
 
 const STALE_MS = 60_000;
 const PENDING_MS = 3 * 86400_000; // forget an unconfirmed send after 3 days (it failed or was replaced)
@@ -29,6 +29,8 @@ export class LeafBook {
     /** Shielded addresses that hold LEAF: { address, atoms, coinKey|null } */
     this.sh = [];
     this.at = 0; this.busy = false; this.error = ''; this.behind = false;
+    /** Unconfirmed LEAF transfers touching our addresses, from the mempool: { txid, from, to, atoms } */
+    this.unconfirmed = [];
   }
 
   get on() { return this.app.state.net === 'main' && !!this.app.account.keys; }
@@ -60,7 +62,39 @@ export class LeafBook {
     return (this.store.getJson(this.pendingKey, []) || []).filter((p) => now - p.at < PENDING_MS);
   }
   addPending(p) { this.store.setJson(this.pendingKey, [...this.pending(), { ...p, atoms: String(p.atoms), at: Date.now() }]); }
-  pendingFrom(address) { return this.pending().filter((p) => p.from === address).reduce((a, p) => a + BigInt(p.atoms), 0n); }
+  /** LEAF on its way out of an address: our own sends not applied yet, plus any unconfirmed send seen in the mempool. */
+  pendingFrom(address) {
+    const out = new Map();
+    for (const p of this.pending()) if (p.from === address) out.set(p.txid, BigInt(p.atoms));
+    for (const u of this.unconfirmed) if (u.from === address) out.set(u.txid, u.atoms);
+    return [...out.values()].reduce((a, v) => a + v, 0n);
+  }
+  /** LEAF on its way in to a side: unconfirmed transfers to our addresses (counted once they confirm). */
+  incoming(side) {
+    const mine = side === 'shielded' ? new Set(this.shieldedAddrs()) : new Set([this.account.pubAddr()]);
+    return this.unconfirmed.filter((u) => mine.has(u.to) && !mine.has(u.from)).reduce((a, u) => a + u.atoms, 0n);
+  }
+  outgoing(side) {
+    const addrs = side === 'shielded' ? this.sh.map((s) => s.address) : [this.account.pubAddr()];
+    return addrs.reduce((a, x) => a + this.pendingFrom(x), 0n);
+  }
+  shieldedAddrs() { return this.app.coins.shielded.filter((c) => !c.example).map((c) => this.account.codec.trAddress(c.output)); }
+
+  /** Unconfirmed LEAF transfers: the Public address's mempool, and the transactions of Shielded coins still pending. */
+  async readMempool() {
+    const base = this.app.servers.base(), found = new Map();
+    const take = (tx) => { const t = leafTransferOf(tx); if (t) found.set(t.txid, t); };
+    const pub = this.account.pubAddr();
+    try {
+      const r = await this.fetch(`${base}address/${pub}/txs/mempool`);
+      if (r.ok) for (const tx of await r.json()) take(tx);
+    } catch {}
+    const txids = [...new Set(this.app.coins.shielded.filter((c) => c.pending && !c.example).map((c) => c.txid))].slice(0, 10);
+    for (const id of txids) {
+      try { const r = await this.fetch(`${base}tx/${id}`); if (r.ok) { const tx = await r.json(); if (!tx.status?.confirmed) take(tx); } } catch {}
+    }
+    this.unconfirmed = [...found.values()];
+  }
 
   /** Sends crc20.org has applied leave the in-flight list (their LEAF is gone from the confirmed balance). */
   async settlePending() {
@@ -100,7 +134,7 @@ export class LeafBook {
           if (atoms > 0n) found.push({ address: a, atoms, coinKey: byAddr.get(a)?.key || null });
         }
       };
-      const [pub] = await Promise.all([pubAddr ? this.balanceOf(pubAddr) : Promise.resolve(0n), ...Array.from({ length: Math.min(3, addrs.length) }, worker)]);
+      const [pub] = await Promise.all([pubAddr ? this.balanceOf(pubAddr) : Promise.resolve(0n), this.readMempool(), ...Array.from({ length: Math.min(3, addrs.length) }, worker)]);
       this.pub = pub;
       this.sh = found.sort((x, y) => (y.atoms > x.atoms ? 1 : -1));
       this.store.setJson(this.seenKey, [...new Set([...this.seen(), ...found.map((f) => f.address)])]);
@@ -214,6 +248,8 @@ export class LeafBook {
   async confirm(b) {
     await this.app.broadcast(b.hex);
     this.addPending({ txid: b.txid, from: b.senderAddress, atoms: b.atoms });
+    const to = b.kind === 'shielded' ? null : b.recipient;
+    this.unconfirmed = [...this.unconfirmed.filter((u) => u.txid !== b.txid), { txid: b.txid, from: b.senderAddress, to, atoms: b.atoms }];
     this.app.afterBroadcast(b.spent, [b.txid]);
     setTimeout(() => this.refresh(true), 4000);
   }

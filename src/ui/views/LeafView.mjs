@@ -12,11 +12,18 @@ export class LeafView extends View {
     const l = app.leaf;
     if (!l.on) return '';
     l.refresh();
-    const t = l.total(side);
-    if (!t) return '';
+    const t = l.total(side), inc = l.incoming(side), out = l.outgoing(side);
+    if (!t && !inc) return '';
+    const sub = inc ? `<span class="pend-t">+${fmtLeaf(inc)} incoming</span>` : out ? `<span class="pend-t">${fmtLeaf(out)} sending</span>` : 'in wallet';
     return `<button class="tok-line" data-go="leaf" data-leafside="${side}">${leafIcon()}
       <span class="bal-txt"><b class="tk">LEAF</b><span>CRC-20</span></span>
-      <span class="bal-amt"><b>${fmtLeaf(t)}</b><span>in wallet</span></span><span class="chev">›</span></button>`;
+      <span class="bal-amt"><b>${fmtLeaf(t)}</b><span>${sub}</span></span><span class="chev">›</span></button>`;
+  }
+
+  /** "+500 incoming" / "200 sending" under a balance while transfers wait for a block. */
+  static pendingLine(l, side) {
+    const inc = l.incoming(side), out = l.outgoing(side);
+    return [inc ? `+${fmtLeaf(inc)} incoming` : '', out ? `${fmtLeaf(out)} sending` : ''].filter(Boolean).map((t) => `<em class="leaf-pend">${t}</em>`).join('');
   }
 
   render() {
@@ -42,14 +49,15 @@ export class LeafView extends View {
       ${leafIcon(true)}
       <p class="hero-label">LEAF · CRC-20 on Bitcoin</p>
       <div class="leaf-sides">
-        <span><small>Public</small><b>${l.pub == null ? '…' : fmtLeaf(l.total('public'))}</b></span>
-        <span class="sh"><small>${I.shieldPlain} Shielded</small><b>${fmtLeaf(l.total('shielded'))}</b></span>
+        <span><small>Public</small><b>${l.pub == null ? '…' : fmtLeaf(l.total('public'))}</b>${LeafView.pendingLine(l, 'public')}</span>
+        <span class="sh"><small>${I.shieldPlain} Shielded</small><b>${fmtLeaf(l.total('shielded'))}</b>${LeafView.pendingLine(l, 'shielded')}</span>
       </div>
-      <button class="sync ${l.busy ? 'spin' : ''} ${l.error ? 'bad' : ''}" data-leafrefresh title="${esc(l.error)}">${I.refresh}<span>${l.busy ? 'Checking crc20.org…' : l.error ? 'crc20.org did not answer' : l.behind ? 'crc20.org is catching up' : l.at ? 'Confirmed balances' : 'Check balances'}</span></button>
+      <button class="sync ${l.busy ? 'spin' : ''} ${l.error ? 'bad' : ''}" data-leafrefresh title="${esc(l.error)}">${I.refresh}<span>${l.busy ? 'Checking crc20.org…' : l.error ? 'crc20.org did not answer' : l.behind ? 'crc20.org is catching up' : l.at ? (l.unconfirmed.length ? 'Confirmed balances · waiting for a block' : 'Confirmed balances') : 'Check balances'}</span></button>
     </section>
     <section class="card form">
       <div class="field"><span class="lbl">From</span>${seg('leafFrom', side, [['public', `Public · ${fmtLeaf(l.available('public'))}`], ['shielded', `${I.shieldPlain} Shielded · ${fmtLeaf(l.available('shielded'))}`]])}</div>
-      <label class="field"><span class="lbl">To</span><input id="leafTo" data-bind="leafTo" class="mono" spellcheck="false" autocomplete="off" value="${esc(f.leafTo)}" placeholder="bc1p…, bc1q… or a Shielded sp1…"></label>
+      <label class="field"><span class="lbl">To</span><input id="leafTo" data-bind="leafTo" class="mono" spellcheck="false" autocomplete="off" value="${esc(f.leafTo)}" placeholder="bc1p…, bc1q… or a Shielded sp1…">
+        <span class="addr-kind">${side === 'public' ? '<button class="link" data-leafself="shielded">Send to my own Shielded address</button>' : '<button class="link" data-leafself="public">Send to my Public address</button>'}</span></label>
       <label class="field"><span class="lbl">Amount <span class="lbl-r">${side === 'shielded' && max < avail ? `Up to ${fmtLeaf(max)} per send` : `Available ${fmtLeaf(avail)}`}</span></span>
         <div class="amount"><input id="leafAmt" data-bind="leafAmt" inputmode="decimal" autocomplete="off" value="${esc(f.leafAmt)}" placeholder="0"><span class="unit">LEAF</span><button class="max" data-leafmax>MAX</button></div>
       </label>
@@ -73,7 +81,7 @@ export class LeafView extends View {
       <p class="hero-bal">${esc(fmtLeaf(b.atoms))} <small>LEAF</small></p>
       <div class="kv">
         ${rowKV('From', b.from === 'shielded' ? `${shieldLogo}<b>Shielded</b>` : '<b>Public</b>')}
-        ${rowKV('To', `<span class="mono">${esc(short(b.recipient, 10))}</span>`)}
+        ${rowKV('To', b.recipient === this.account.shieldAddr() ? `${shieldLogo}<b>My Shielded balance</b>` : b.recipient === this.account.pubAddr() ? '<b>My Public address</b>' : `<span class="mono">${esc(short(b.recipient, 10))}</span>`)}
         ${rowKV('Privacy', b.kind === 'shielded' ? '<span class="good">Private: lands on a one-time address</span>' : '<span class="meh">Public address</span>')}
         ${rowKV('Network fee', `${fmtBtc(b.fee)} ${this.unit}`)}
         ${rowKV('BTC used', `${fmtBtc(btcOut)} ${this.unit}`)}
