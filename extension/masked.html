@@ -310,7 +310,8 @@ input.bad { border-color: var(--err); }
 .tokens { display: grid; gap: 8px; }
 .hero-usd { margin: -4px 0 6px; color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
 select#obBday { width: 100%; }
-.pills { display: flex; gap: 8px; margin: 2px 0 10px; flex-wrap: wrap; }
+.pills { display: flex; gap: 8px; margin: 2px 0 10px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.pills .pill { flex: none; }
 .pill { border: 0; background: var(--card-2); color: var(--muted); border-radius: 99px; padding: 7px 13px; font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
 .pill.on { background: var(--btc-soft); color: var(--btc-2); }
 .tok-list { display: grid; gap: 8px; margin-bottom: 12px; }
@@ -496,7 +497,6 @@ a.act, a.act:hover { text-decoration: none; color: inherit; }
 .leaf-ic { color: #5fd98a; border-color: #5fd98a; background: #0d1a12; }
 .leaf-ic svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .leaf-ic.big svg { width: 28px; height: 28px; }
-.leaf-home { margin-top: 0; }
 .leaf-hero { gap: 8px; }
 .leaf-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%; margin-top: 4px; }
 .leaf-sides > span { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 12px; background: var(--card); border: 1px solid var(--line); text-align: left; }

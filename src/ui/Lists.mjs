@@ -71,8 +71,8 @@ export class TokenList {
       <span class="bal-amt"><b>${t.held.toLocaleString()}</b><span>${t.listed ? `${t.listed.toLocaleString()} listed` : t.held ? 'in wallet' : 'none left'}</span></span><span class="chev">›</span></button>`).join('');
   }
 
-  /** Home: UniSat-style token list with All / BRC-20 / BRC2.0 tabs, for one side. */
-  home(side = null, hasOther = false) {
+  /** Home: UniSat-style token list with All / BRC-20 / BRC2.0 (/ CRC-20 when held) tabs, for one side. */
+  home(side = null, crc20 = '') {
     const book = this.app.tokens;
     const sideName = side === 'shielded' ? 'Shielded' : 'Public';
     const all = side
@@ -81,15 +81,21 @@ export class TokenList {
         return { ...t, held: amt, listed: side === 'shielded' ? t.listed : 0 };
       }).filter((t) => t.held > 0)
       : book.list();
-    if (side && !all.length) return `<section class="home-toks"><div class="list-h"><b>Tokens</b><span class="muted small">${sideName}</span></div>${hasOther ? '' : '<p class="muted small center">No tokens on this side yet.</p>'}</section>`;
-    if (!all.length) return '';
-    const f = this.app.state.f.homeTok || 'all';
+    const crc = crc20 ? 1 : 0;
+    if (side && !all.length && !crc) return `<section class="home-toks"><div class="list-h"><b>Tokens</b><span class="muted small">${sideName}</span></div><p class="muted small center">No tokens on this side yet.</p></section>`;
+    if (!all.length && !crc) return '';
+    let f = this.app.state.f.homeTok || 'all';
+    if (f === 'crc20' && !crc) f = 'all';
     const v1 = all.filter((t) => !t.v2), v2 = all.filter((t) => t.v2);
-    const shown = f === 'brc20' ? v1 : f === 'brc2' ? v2 : all;
+    const rows = f === 'brc20' ? this.rows(v1) : f === 'brc2' ? this.rows(v2) : f === 'crc20' ? crc20 : this.rows(all) + crc20;
+    // a kind you hold none of gets no tab (All always shows); four tabs still fit by scrolling sideways
+    const pills = /** @type {[string, number][]} */ ([['all', all.length + crc], ['brc20', v1.length], ['brc2', v2.length], ['crc20', crc]])
+      .filter(([k, n]) => k === 'all' || n > 0 || k === f)
+      .map(([k, n]) => [k, `${{ all: 'All', brc20: 'BRC-20', brc2: 'BRC2.0', crc20: 'CRC-20' }[k]} (${n})`]);
     return `<section class="home-toks">
     <div class="list-h"><b>Tokens</b>${side ? `<span class="muted small">${sideName}</span>` : ''}</div>
-    <div class="pills">${[['all', `All (${all.length})`], ['brc20', `BRC-20 (${v1.length})`], ['brc2', `BRC2.0 (${v2.length})`]].map(([k, l]) => `<button class="pill ${f === k ? 'on' : ''}" data-set="homeTok" data-val="${k}">${l}</button>`).join('')}</div>
-    <div class="tok-list">${this.rows(shown) || '<p class="muted small center">None yet.</p>'}</div>
+    <div class="pills">${pills.map(([k, l]) => `<button class="pill ${f === k ? 'on' : ''}" data-set="homeTok" data-val="${k}">${l}</button>`).join('')}</div>
+    <div class="tok-list">${rows || '<p class="muted small center">None yet.</p>'}</div>
   </section>`;
   }
 }

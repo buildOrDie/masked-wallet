@@ -7,16 +7,16 @@ export const leafIcon = (big = false) => `<span class="tok-ic leaf-ic ${big ? 'b
 
 /** LEAF (CRC-20): balances on both sides, and Send → review → done. */
 export class LeafView extends View {
-  /** The LEAF line on Home (Public always shows it on Mainnet, Shielded once it holds some). */
+  /** The LEAF line in Home's token list, only when this side holds some (like BRC-20 tokens). */
   static homeRow(app, side) {
     const l = app.leaf;
     if (!l.on) return '';
     l.refresh();
     const t = l.total(side);
-    if (side === 'shielded' && !t) return '';
-    return `<section class="home-toks leaf-home"><button class="tok-line" data-go="leaf" data-leafside="${side}">${leafIcon()}
+    if (!t) return '';
+    return `<button class="tok-line" data-go="leaf" data-leafside="${side}">${leafIcon()}
       <span class="bal-txt"><b class="tk">LEAF</b><span>CRC-20</span></span>
-      <span class="bal-amt"><b>${l.pub == null && side === 'public' ? '…' : fmtLeaf(t)}</b><span>${l.error && !l.at ? 'not checked' : 'in wallet'}</span></span><span class="chev">›</span></button></section>`;
+      <span class="bal-amt"><b>${fmtLeaf(t)}</b><span>in wallet</span></span><span class="chev">›</span></button>`;
   }
 
   render() {

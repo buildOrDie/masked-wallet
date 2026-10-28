@@ -54,7 +54,6 @@ export class HomeView extends View {
         <span class="bal-amt"><b>${fmtBtc(sh)}</b><span>${usd(sh) || unit}</span></span>
       </button>
     </section>
-    ${app.ui.tokens.home(side, !!leafRow)}
-    ${leafRow}`;
+    ${app.ui.tokens.home(side, leafRow)}`;
   }
 }
