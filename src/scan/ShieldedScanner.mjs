@@ -111,7 +111,9 @@ export class ShieldedScanner {
       for (const f of found) {
         const o = outs.find((x) => x[1] === f.output);
         const key = `${txid}:${o[0]}`;
-        if (list.some((c) => c.key === key)) continue;
+        const have = list.find((c) => c.key === key);
+        // found in a block: a coin we added from the mempool (our own change, say) is now confirmed
+        if (have) { have.pending = false; continue; }
         list.push({ key, txid, vout: o[0], sats: o[2], output: f.output, tweak: f.tweak, label: f.label, example: false, pending: false });
         hits++;
       }

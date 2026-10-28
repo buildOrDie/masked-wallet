@@ -5,11 +5,15 @@
 // Shielded: each silent payment lands on its own one-time address, so LEAF received there is held per
 // address. vin[0] must be that address's coin (a small coin, kept out of normal sends). A partial send
 // returns 330 sats to the same address in the same transaction, so the rest stays spendable.
+//
+// Privacy: asking crc20.org about Shielded addresses tells it they may belong together (same IP, same time).
+// So by default only the Public address and Shielded addresses already known to hold LEAF (ones this wallet
+// sent LEAF to) are looked up. Checking the other small Shielded coins is opt-in, per account.
 import { RawTransaction } from '../bitcoin/RawTransaction.mjs';
 import { p2trScript } from '../bitcoin/taproot.mjs';
 import { fmtBtc } from '../core/format.mjs';
 import { fetchWithin } from '../net/http.mjs';
-import { DUST_CHANGE } from '../ordinals/envelope.mjs';
+import { DUST_CHANGE, INSCRIPTION_MAX } from '../ordinals/envelope.mjs';
 import { SilentOutputs, inputOf } from '../wallet/TxBuilder.mjs';
 import { LEAF_API, balanceFromReply, fmtLeaf, indexerSynced, leafScript, leafTransferOf, parseLeaf, receiverKind, vsizeOf } from './leaf.mjs';
 
@@ -25,6 +29,7 @@ export class LeafBook {
   }
 
   reset() {
+    this.gen = (this.gen || 0) + 1; // a refresh started before a reset (another account) is thrown away
     /** @type {bigint|null} */ this.pub = null;
     /** Shielded addresses that hold LEAF: { address, atoms, coinKey|null } */
     this.sh = [];
@@ -38,6 +43,13 @@ export class LeafBook {
   get store() { return this.app.store; }
   get pendingKey() { return `wren.leaf.pending.${this.account.id}`; }
   get seenKey() { return `wren.leaf.addrs.${this.account.id}`; }
+  get scanKey() { return `wren.leaf.shielded.${this.account.id}`; }
+
+  /** Opt-in: also ask crc20.org about this account's small Shielded coins (to find LEAF others sent you). */
+  get scanShielded() { return this.store.get(this.scanKey) === '1'; }
+  setScanShielded(on) { if (on) this.store.set(this.scanKey, '1'); else this.store.remove(this.scanKey); this.refresh(true); }
+  /** A Shielded address now known to hold LEAF (we sent LEAF there ourselves). */
+  remember(address) { if (address) this.store.setJson(this.seenKey, [...new Set([...this.seen(), address])]); }
 
   async get(path) {
     let r;
@@ -80,6 +92,12 @@ export class LeafBook {
   }
   shieldedAddrs() { return this.app.coins.shielded.filter((c) => !c.example).map((c) => this.account.codec.trAddress(c.output)); }
 
+  /** The Shielded coins crc20.org may be asked about: known LEAF addresses, plus small coins when opted in. */
+  lookupCoins() {
+    const seen = this.seen(), codec = this.account.codec;
+    return this.app.coins.shielded.filter((c) => !c.example && (seen.has(codec.trAddress(c.output)) || (this.scanShielded && c.sats != null && c.sats <= INSCRIPTION_MAX)));
+  }
+
   /** Unconfirmed LEAF transfers: the Public address's mempool, and the transactions of Shielded coins still pending. */
   async readMempool() {
     const base = this.app.servers.base(), found = new Map();
@@ -89,11 +107,11 @@ export class LeafBook {
       const r = await this.fetch(`${base}address/${pub}/txs/mempool`);
       if (r.ok) for (const tx of await r.json()) take(tx);
     } catch {}
-    const txids = [...new Set(this.app.coins.shielded.filter((c) => c.pending && !c.example).map((c) => c.txid))].slice(0, 10);
+    const txids = [...new Set(this.lookupCoins().filter((c) => c.pending).map((c) => c.txid))].slice(0, 10);
     for (const id of txids) {
       try { const r = await this.fetch(`${base}tx/${id}`); if (r.ok) { const tx = await r.json(); if (!tx.status?.confirmed) take(tx); } } catch {}
     }
-    this.unconfirmed = [...found.values()];
+    return [...found.values()];
   }
 
   /** Sends crc20.org has applied leave the in-flight list (their LEAF is gone from the confirmed balance). */
@@ -116,12 +134,14 @@ export class LeafBook {
   async refresh(force = false) {
     if (!this.on || this.busy || (!force && Date.now() - this.at < STALE_MS)) return;
     this.busy = true;
+    const gen = this.gen, id = this.account.id;
+    const stale = () => gen !== this.gen || id !== this.account.id;
     try {
       this.behind = !indexerSynced(await this.get('/status'));
       await this.settlePending(); // first: a send applied meanwhile is then never counted twice the other way
-      const { account, app } = this, codec = account.codec;
+      const { account } = this, codec = account.codec;
       const pubAddr = account.pubAddr();
-      const coins = app.coins.shielded.filter((c) => !c.example);
+      const coins = this.lookupCoins();
       const byAddr = new Map(coins.map((c) => [codec.trAddress(c.output), c]));
       for (const a of this.seen()) if (!byAddr.has(a)) byAddr.set(a, null);
       const addrs = [...byAddr.keys()];
@@ -134,15 +154,16 @@ export class LeafBook {
           if (atoms > 0n) found.push({ address: a, atoms, coinKey: byAddr.get(a)?.key || null });
         }
       };
-      const [pub] = await Promise.all([pubAddr ? this.balanceOf(pubAddr) : Promise.resolve(0n), this.readMempool(), ...Array.from({ length: Math.min(3, addrs.length) }, worker)]);
-      this.pub = pub;
+      const [pub, unconfirmed] = await Promise.all([pubAddr ? this.balanceOf(pubAddr) : Promise.resolve(0n), this.readMempool(), ...Array.from({ length: Math.min(3, addrs.length) }, worker)]);
+      if (stale()) return; // the account or network changed meanwhile: these balances are not this one's
+      this.pub = pub; this.unconfirmed = unconfirmed;
       this.sh = found.sort((x, y) => (y.atoms > x.atoms ? 1 : -1));
       this.store.setJson(this.seenKey, [...new Set([...this.seen(), ...found.map((f) => f.address)])]);
       this.at = Date.now(); this.error = '';
     } catch (e) {
-      this.error = e.message;
+      if (!stale()) this.error = e.message;
     } finally {
-      this.busy = false;
+      if (gen === this.gen) this.busy = false;
       this.app.render();
     }
   }
@@ -168,6 +189,7 @@ export class LeafBook {
     if (!this.on) throw new Error('LEAF works on Mainnet.');
     if (!account.canSign) throw new Error('This wallet is watch-only.');
     const atoms = parseLeaf(amount);
+    if (!this.at) throw new Error('Checking your LEAF balance… try again in a moment.');
     const recipient = String(to || '').trim();
     const k = codec.kind(recipient);
     if (k.kind === 'empty') throw new Error('Enter who to send to.');
@@ -235,7 +257,7 @@ export class LeafBook {
         const fee = Math.ceil(sized.vsize * rate);
         if (inSum - need >= fee) {
           const done = make(fee);
-          if (done.fee >= Math.ceil(done.vsize * rate)) return { ...done, txid: done.tx.txid, atoms, from, recipient, kind: recv.kind === 'shielded' ? 'shielded' : 'public', senderAddress, partial, spent: inputs.map((c) => c.key) };
+          if (done.fee >= Math.ceil(done.vsize * rate)) return { ...done, txid: done.tx.txid, atoms, from, recipient, receiverAddress: codec.fromScript(done.tx.outputs[1].script), kind: recv.kind === 'shielded' ? 'shielded' : 'public', senderAddress, partial, account: account.id, spent: inputs.map((c) => c.key) };
         }
       }
       const more = pool.shift();
@@ -246,10 +268,12 @@ export class LeafBook {
 
   /** Broadcast a built transfer and remember it as in flight. */
   async confirm(b) {
+    if (b.account !== this.account.id) throw new Error('You switched account. Review the send again.');
     await this.app.broadcast(b.hex);
     this.addPending({ txid: b.txid, from: b.senderAddress, atoms: b.atoms });
-    const to = b.kind === 'shielded' ? null : b.recipient;
-    this.unconfirmed = [...this.unconfirmed.filter((u) => u.txid !== b.txid), { txid: b.txid, from: b.senderAddress, to, atoms: b.atoms }];
+    // LEAF sent to our own Shielded address: remember that one-time address, so it is looked up (and only it)
+    if (b.kind === 'shielded' && b.recipient.toLowerCase() === this.account.shieldAddr().toLowerCase()) this.remember(b.receiverAddress);
+    this.unconfirmed = [...this.unconfirmed.filter((u) => u.txid !== b.txid), { txid: b.txid, from: b.senderAddress, to: b.receiverAddress, atoms: b.atoms }];
     this.app.afterBroadcast(b.spent, [b.txid]);
     setTimeout(() => this.refresh(true), 4000);
   }

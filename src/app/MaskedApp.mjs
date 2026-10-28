@@ -127,6 +127,7 @@ export class MaskedApp {
     this.sync.loadProgress();
     this.coins.load();
     this.tokens.resetCache();
+    this.leaf?.reset(); // LEAF balances belong to one account on one network
   }
 
   /** A different wallet or network: drop what is on screen and load its records. */

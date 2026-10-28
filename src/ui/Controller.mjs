@@ -74,6 +74,7 @@ export class Controller {
   onChange(e) {
     const t = e.target, app = this.app;
     if (t.hasAttribute?.('data-rbf')) { TxPolicy.save(app.store, t.checked); this.toast(t.checked ? 'RBF on' : 'RBF off'); return; }
+    if (t.hasAttribute?.('data-leafscan')) { app.leaf.setScanShielded(t.checked); this.render(); return; }
     if (t.hasAttribute?.('data-backed')) { this.f.backed = t.checked; this.render(); return; }
     if (t.id === 'autoLockSel') { app.vault.setAutoLock(t.value); app.lock.refreshSession(); this.toast(`Auto-lock: ${t.selectedOptions[0].text}`); return; }
     if (t.hasAttribute?.('data-risk')) { this.f.apRisk = t.checked; this.state.status.approve = null; this.render(); return; }

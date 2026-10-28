@@ -52,6 +52,10 @@ export class LeafView extends View {
         <span><small>Public</small><b>${l.pub == null ? '…' : fmtLeaf(l.total('public'))}</b>${LeafView.pendingLine(l, 'public')}</span>
         <span class="sh"><small>${I.shieldPlain} Shielded</small><b>${fmtLeaf(l.total('shielded'))}</b>${LeafView.pendingLine(l, 'shielded')}</span>
       </div>
+      <div class="rbf-row leaf-scan"><span>Find LEAF sent to my Shielded address</span><label class="sw-tgl"><input type="checkbox" data-leafscan ${l.scanShielded ? 'checked' : ''}><span></span></label></div>
+      <p class="fee-note">${l.scanShielded
+        ? 'On: MASKED asks crc20.org about your small Shielded coins. crc20.org could guess they belong together (same time, same connection). Turn it off when you\'re done.'
+        : 'Off (more private). LEAF you send to yourself still shows. Turn on to find LEAF others sent to your sp1… address: crc20.org then sees which one-time addresses MASKED asks about.'}</p>
       <button class="sync ${l.busy ? 'spin' : ''} ${l.error ? 'bad' : ''}" data-leafrefresh title="${esc(l.error)}">${I.refresh}<span>${l.busy ? 'Checking crc20.org…' : l.error ? 'crc20.org did not answer' : l.behind ? 'crc20.org is catching up' : l.at ? (l.unconfirmed.length ? 'Confirmed balances · waiting for a block' : 'Confirmed balances') : 'Check balances'}</span></button>
     </section>
     <section class="card form">

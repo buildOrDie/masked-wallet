@@ -76,6 +76,7 @@ function setup() {
   leaf.pub = 2000n * LEAF;
   const aAddr = app.account.codec.trAddress(app.coins.shielded[0].output);
   leaf.sh = [{ address: aAddr, atoms: 100n * LEAF, coinKey: 's1' }];
+  leaf.at = Date.now();
   return { app, keys, leaf, f, aAddr };
 }
 

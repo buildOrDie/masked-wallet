@@ -8,6 +8,13 @@ import { Session, Vault } from '../wallet/Vault.mjs';
 
 import { $ } from '../ui/dom.mjs';
 const NET_KEY = 'wren.net';
+/**
+ * Lock epoch, shared by every wallet page (popup, side panel, approval windows: same origin, same storage).
+ * Locking anywhere changes it; a page holding keys from an older epoch drops them, and a session written
+ * under an older epoch is not accepted.
+ */
+export const EPOCH_KEY = 'wren.lock.epoch';
+const LOCK_CHANNEL = 'masked-lock';
 
 export class LockController {
   /** @param {import('./MaskedApp.mjs').MaskedApp} app */
@@ -19,6 +26,19 @@ export class LockController {
     this.started = false;
     this.lastActive = 0;
     this.lastTouch = 0;
+    /** @type {BroadcastChannel|null} */ this.channel = null; // opened by watch() (wallet pages only)
+  }
+
+  epochNow() { return this.app.store.get(EPOCH_KEY) || '0'; }
+  /** True when another page locked the wallet after this one unlocked. */
+  lockedElsewhere() { return !!this.secret && this.secret.epoch !== this.epochNow(); }
+
+  /** Another page locked: forget the keys here too, without touching the (already cleared) session. */
+  dropKeys() {
+    if (!this.secret && !this.state.wallet) return;
+    Keyring.forgetRoot();
+    this.state.wallet = null; this.secret = null;
+    location.reload();
   }
 
   get state() { return this.app.state; }
@@ -32,7 +52,7 @@ export class LockController {
     if (isNetwork(saved)) state.net = saved;
     if (!store.get(NET_KEY) && secret.net && isNetwork(secret.net)) state.net = secret.net;
     if (!isNetwork(store.get(NET_KEY))) store.set(NET_KEY, state.net); // the lock screen and restore use it
-    this.secret = { words: secret.words, passphrase: secret.passphrase || '', fresh: !!secret.fresh, restored: !!secret.restored, birthday: secret.birthday || null };
+    this.secret = { words: secret.words, passphrase: secret.passphrase || '', fresh: !!secret.fresh, restored: !!secret.restored, birthday: secret.birthday || null, epoch: this.epochNow() };
     // the account that was open last (Account 1 for a new or restored phrase)
     const fp = Keyring.root(secret.words, secret.passphrase || '').fingerprint.toString(16).padStart(8, '0');
     state.wallet = this.app.accountKeys(secret.words, secret.passphrase || '', state.net, this.app.accounts.active(fp));
@@ -53,6 +73,13 @@ export class LockController {
   }
 
   async lockNow() {
+    // tell every other wallet page first: a new epoch, and a message to those listening
+    this.app.store.set(EPOCH_KEY, `${Date.now()}.${Math.random().toString(36).slice(2)}`);
+    try {
+      const ch = this.channel || new BroadcastChannel(LOCK_CHANNEL);
+      ch.postMessage('lock');
+      if (ch !== this.channel) ch.close();
+    } catch {}
     await this.session.clear();
     Keyring.forgetRoot();
     this.state.wallet = null; this.secret = null;
@@ -62,16 +89,28 @@ export class LockController {
   /** Keep the session alive while the wallet is used (at most every 30 s). */
   touch() {
     if (this.state.lockState !== 'open') return;
+    if (this.lockedElsewhere()) { this.dropKeys(); return; }
     this.lastActive = Date.now();
     if (Date.now() - this.lastTouch > 30000 && this.secret) { this.lastTouch = Date.now(); this.session.set(this.secret); }
   }
 
-  refreshSession() { if (this.secret) this.session.set(this.secret); }
+  refreshSession() {
+    if (this.lockedElsewhere()) { this.dropKeys(); return; }
+    if (this.secret) this.session.set(this.secret);
+  }
 
   /** Activity tracking and the auto-lock timer. */
   watch(doc = document) {
     ['click', 'keydown'].forEach((ev) => doc.addEventListener(ev, () => this.touch(), true));
+    // locked in another window or the side panel: drop the keys here at once
+    if (typeof BroadcastChannel !== 'undefined') {
+      this.channel = new BroadcastChannel(LOCK_CHANNEL);
+      this.channel.onmessage = (m) => { if (m.data === 'lock') this.dropKeys(); };
+    }
+    window.addEventListener('storage', (e) => { if (e.key === EPOCH_KEY && this.lockedElsewhere()) this.dropKeys(); });
+    doc.addEventListener('visibilitychange', () => { if (doc.visibilityState === 'visible' && this.lockedElsewhere()) this.dropKeys(); });
     setInterval(() => {
+      if (this.lockedElsewhere()) { this.dropKeys(); return; }
       if (this.state.lockState === 'open' && this.vault.read() && Date.now() - (this.lastActive || 0) > this.vault.autoLockMins() * 60000) this.lockNow();
     }, 15000);
   }
@@ -81,7 +120,8 @@ export class LockController {
     const vault = this.vault.read(), legacy = this.vault.readLegacy();
     if (vault) {
       const s = await this.session.get();
-      if (s?.words && s.expires > Date.now()) { this.useSecret(s); await this.session.set(this.secret); this.startWallet(); return; }
+      // a session written before the last lock (by a page that had not heard of it yet) is not valid
+      if (s?.words && s.expires > Date.now() && (s.epoch ?? '0') === this.epochNow()) { this.useSecret(s); await this.session.set(this.secret); this.startWallet(); return; }
       await this.session.clear();
       const n = app.store.get(NET_KEY); if (isNetwork(n)) state.net = n; // the lock screen shows the wallet's network
       state.lockState = 'locked';

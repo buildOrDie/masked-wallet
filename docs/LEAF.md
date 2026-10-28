@@ -34,6 +34,15 @@ Each Shielded payment is its own address, so Shielded LEAF is held per address:
 - Sending part of an address's LEAF also returns 330 sats to that same address, so the rest stays spendable.
 - If an address holding LEAF has no coin left, the LEAF is safe; sending a little BTC to it makes it spendable again.
 
+## Privacy of balance lookups
+
+Asking crc20.org about an address tells crc20.org that someone is interested in it. Asking about several Shielded one-time addresses from the same connection, at the same time, would let it guess they belong together. So MASKED asks only about:
+
+- your **Public** address;
+- **Shielded addresses it knows hold LEAF**: ones you sent LEAF to from this wallet.
+
+To find LEAF that someone else sent to your `sp1…` address, turn on **Find LEAF sent to my Shielded address** on the LEAF page. MASKED then also asks about your small Shielded coins (LEAF arrives on 330-sat outputs; bigger BTC coins are never looked up). Turn it off again when you are done.
+
 ## Not supported yet
 
 AXBT, the AXBT/LEAF pool, marketplace sales and soft covenants.
