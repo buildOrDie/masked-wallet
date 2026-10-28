@@ -11,7 +11,7 @@ import { fmtBtc } from '../core/format.mjs';
 import { fetchWithin } from '../net/http.mjs';
 import { DUST_CHANGE } from '../ordinals/envelope.mjs';
 import { SilentOutputs, inputOf } from '../wallet/TxBuilder.mjs';
-import { LEAF_API, balanceFromReply, fmtLeaf, leafScript, parseLeaf, receiverKind, vsizeOf } from './leaf.mjs';
+import { LEAF_API, balanceFromReply, fmtLeaf, indexerSynced, leafScript, parseLeaf, receiverKind, vsizeOf } from './leaf.mjs';
 
 const STALE_MS = 60_000;
 const PENDING_MS = 3 * 86400_000; // forget an unconfirmed send after 3 days (it failed or was replaced)
@@ -28,7 +28,7 @@ export class LeafBook {
     /** @type {bigint|null} */ this.pub = null;
     /** Shielded addresses that hold LEAF: { address, atoms, coinKey|null } */
     this.sh = [];
-    this.at = 0; this.busy = false; this.error = '';
+    this.at = 0; this.busy = false; this.error = ''; this.behind = false;
   }
 
   get on() { return this.app.state.net === 'main' && !!this.app.account.keys; }
@@ -83,6 +83,7 @@ export class LeafBook {
     if (!this.on || this.busy || (!force && Date.now() - this.at < STALE_MS)) return;
     this.busy = true;
     try {
+      this.behind = !indexerSynced(await this.get('/status'));
       await this.settlePending(); // first: a send applied meanwhile is then never counted twice the other way
       const { account, app } = this, codec = account.codec;
       const pubAddr = account.pubAddr();

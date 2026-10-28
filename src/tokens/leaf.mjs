@@ -61,14 +61,15 @@ export function vsizeOf(fullHex, strippedHex) {
 }
 
 /**
- * The LEAF balance in an /addresses/{address} reply, as atoms. The API answers decimal strings
+ * The LEAF balance in an /addresses/{address} reply ({ address, leaf: { balance, decimals }, btc, height, axbt }),
+ * as atoms. The API answers decimal strings
  * (never JSON numbers); an address with no activity answers "0".
  */
 export function balanceFromReply(j) {
-  const candidates = [j?.leaf?.balance, j?.LEAF?.balance, j?.balances?.LEAF, j?.balances?.leaf, j?.balance?.leaf, j?.balance];
-  for (const v of candidates) {
-    if (typeof v === 'string' && /^\d+$/.test(v)) return BigInt(v);
-    if (v && typeof v === 'object' && typeof v.confirmed === 'string' && /^\d+$/.test(v.confirmed)) return BigInt(v.confirmed);
-  }
+  const v = j?.leaf?.balance;
+  if (typeof v === 'string' && /^\d+$/.test(v) && (j.leaf.decimals ?? LEAF_DECIMALS) === LEAF_DECIMALS) return BigInt(v);
   throw new Error('crc20.org answered in an unexpected format.');
 }
+
+/** /status: is the indexer at the chain tip? (Until then balances may be behind.) */
+export const indexerSynced = (j) => j?.network === 'bitcoin' && j?.token?.tick === 'LEAF' && j?.indexer?.synced === true;

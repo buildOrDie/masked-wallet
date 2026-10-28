@@ -45,7 +45,7 @@ export class LeafView extends View {
         <span><small>Public</small><b>${l.pub == null ? '…' : fmtLeaf(l.total('public'))}</b></span>
         <span class="sh"><small>${I.shieldPlain} Shielded</small><b>${fmtLeaf(l.total('shielded'))}</b></span>
       </div>
-      <button class="sync ${l.busy ? 'spin' : ''} ${l.error ? 'bad' : ''}" data-leafrefresh title="${esc(l.error)}">${I.refresh}<span>${l.busy ? 'Checking crc20.org…' : l.error ? 'crc20.org did not answer' : l.at ? 'Confirmed balances' : 'Check balances'}</span></button>
+      <button class="sync ${l.busy ? 'spin' : ''} ${l.error ? 'bad' : ''}" data-leafrefresh title="${esc(l.error)}">${I.refresh}<span>${l.busy ? 'Checking crc20.org…' : l.error ? 'crc20.org did not answer' : l.behind ? 'crc20.org is catching up' : l.at ? 'Confirmed balances' : 'Check balances'}</span></button>
     </section>
     <section class="card form">
       <div class="field"><span class="lbl">From</span>${seg('leafFrom', side, [['public', `Public · ${fmtLeaf(l.available('public'))}`], ['shielded', `${I.shieldPlain} Shielded · ${fmtLeaf(l.available('shielded'))}`]])}</div>

@@ -8,7 +8,7 @@ import { schnorr } from '@noble/curves/secp256k1';
 import { hex } from '@scure/base';
 import * as sp from '../src/crypto/sp-core.mjs';
 import { walletApp, Keyring } from './helpers/wallet-app.mjs';
-import { balanceFromReply, fmtLeaf, leafPayload, leafScript, parseLeaf, receiverKind } from '../src/tokens/leaf.mjs';
+import { balanceFromReply, fmtLeaf, indexerSynced, leafPayload, leafScript, parseLeaf, receiverKind } from '../src/tokens/leaf.mjs';
 import { LeafBook } from '../src/tokens/LeafBook.mjs';
 import { p2trScript } from '../src/bitcoin/taproot.mjs';
 
@@ -46,9 +46,16 @@ test('receivers: single-key only (bc1p, bc1q P2WPKH); P2WSH and others refused',
 });
 
 test('reading balances: decimal strings in the reply', () => {
-  assert.equal(balanceFromReply({ address: 'x', leaf: { balance: '150000000000', height: 9 }, axbt: { balance: '5' } }), 150_000_000_000n);
-  assert.equal(balanceFromReply({ balance: '0' }), 0n);
-  assert.throws(() => balanceFromReply({ balance: 12 }), /unexpected/);
+  // a real reply from crc20.org (28 Oct 2026)
+  const real = { address: 'bc1pnjm803d0erzgvvmx6ue99gunsht8vpl3kxa3k8d00pke32argr6syrvu6u', leaf: { balance: '2238672061904761', decimals: 8 }, btc: { balance: '108569', unconfirmed: '0', tx_count: 18 }, height: 973532, axbt: { balance: '1220', decimals: 8 } };
+  assert.equal(balanceFromReply(real), 2_238_672_061_904_761n);
+  assert.equal(fmtLeaf(balanceFromReply(real)), '22,386,720.61904761');
+  assert.equal(balanceFromReply({ leaf: { balance: '0', decimals: 8 } }), 0n);
+  assert.throws(() => balanceFromReply({ leaf: { balance: 12 } }), /unexpected/, 'never a JSON number');
+  assert.throws(() => balanceFromReply({ axbt: { balance: '5' } }), /unexpected/, 'AXBT is not LEAF');
+  const status = { network: 'bitcoin', token: { tick: 'LEAF', decimals: 8, max_supply: '100000000000000000', supply: '100000000000000000' }, indexer: { height: 973532, hash: '00'.repeat(32), synced: true } };
+  assert.ok(indexerSynced(status));
+  assert.ok(!indexerSynced({ ...status, indexer: { ...status.indexer, synced: false } }));
 });
 
 /** A mainnet wallet with ord switched off (coins count as checked) and LEAF balances set by hand. */
