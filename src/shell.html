@@ -504,6 +504,11 @@ a.act, a.act:hover { text-decoration: none; color: inherit; }
 .leaf-sides small svg { width: 12px; height: 12px; }
 .leaf-sides b { font-size: 18px; overflow-wrap: anywhere; }
 .leaf-sides .sh b { color: var(--sh-2); }
+.pending-row { background: rgba(245,185,74,.07); border-color: rgba(245,185,74,.28); color: #f3dcae; margin-bottom: 8px; }
+.pending-row b { color: var(--warn); }
+.pend-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--warn); flex: none; animation: pendp 1.6s ease-in-out infinite; }
+@keyframes pendp { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .pend-dot { animation: none; } }
 .leaf-scan { width: 100%; margin-top: 6px; }
 .leaf-hero .fee-note { text-align: left; width: 100%; margin: 0; }
 .leaf-pend { font-style: normal; font-size: 11.5px; font-weight: 600; color: var(--warn); }

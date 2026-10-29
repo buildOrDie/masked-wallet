@@ -54,28 +54,36 @@ export class TxBuilder {
     if (k.kind === 'empty') throw new Error('Enter who to send to.');
     if (k.kind !== 'public' && k.kind !== 'shielded') throw new Error(k.text + '.');
     if (!Number.isSafeInteger(amount) || amount < 546) throw new Error(`Minimum is 0.00000546 ${unit}.`);
-    const feeOne = estimateSimpleSend({ outputs: 1, feeRate: rate });
-    const feeTwo = estimateSimpleSend({ outputs: 2, feeRate: rate });
-    const coin = pickCoin(list, amount + feeTwo + DUST_CHANGE) || pickCoin(list, amount + feeOne);
-    if (!coin) throw new Error(`Not enough ${label} balance. You can send up to ${fmtBtc(this.coins.maxSendable(from, this.app.feeRate()))} ${unit}.`);
-    const privKey = this.privOf(coin);
-    const wantChange = coin.sats - amount - feeTwo >= DUST_CHANGE;
+    const feeOf = (n, outs) => estimateSimpleSend({ inputs: n, outputs: outs, feeRate: rate });
+    // one coin when one is enough (the usual case); otherwise several, largest first (small unlocked coins join in)
+    let coins = [pickCoin(list, amount + feeOf(1, 2) + DUST_CHANGE) || pickCoin(list, amount + feeOf(1, 1))].filter(Boolean);
+    if (!coins.length) {
+      const byValue = [...list].sort((a, b) => b.sats - a.sats);
+      let sum = 0;
+      for (const c of byValue) { coins.push(c); sum += c.sats; if (sum >= amount + feeOf(coins.length, 1)) break; }
+      if (sum < amount + feeOf(coins.length, 1)) coins = [];
+    }
+    if (!coins.length) throw new Error(`Not enough ${label} balance. You can send up to ${fmtBtc(this.coins.maxSendable(from, this.app.feeRate()))} ${unit}.`);
+    const n = coins.length, inSum = coins.reduce((a, c) => a + c.sats, 0);
+    const keys = coins.map((c) => this.privOf(c));
+    const feeTwo = feeOf(n, 2);
+    const wantChange = inSum - amount - feeTwo >= DUST_CHANGE;
     // Shielded change goes back to the wallet's own change address (label 0) so it stays private.
     const changeShielded = wantChange && from === 'shielded';
     const change = this.account.changeAddr();
     const silent = [];
     if (k.kind === 'shielded') silent.push(recipient);
     if (changeShielded) silent.push(change);
-    const derived = new SilentOutputs([{ txid: coin.txid, vout: coin.vout, privKey, taproot: true }], [{ txid: coin.txid, vout: coin.vout }], silent);
+    const derived = new SilentOutputs(coins.map((c, i) => ({ txid: c.txid, vout: c.vout, privKey: keys[i], taproot: true })), coins.map((c) => ({ txid: c.txid, vout: c.vout })), silent);
     const outputs = [{ value: amount, script: k.kind === 'shielded' ? derived.take(recipient) : this.account.codec.outputScript(recipient) }];
-    let fee = coin.sats - amount;
+    let fee = inSum - amount;
     if (wantChange) {
       fee = feeTwo;
-      outputs.push({ value: coin.sats - amount - feeTwo, script: changeShielded ? derived.take(change) : p2trScript(coin.output) });
+      outputs.push({ value: inSum - amount - feeTwo, script: changeShielded ? derived.take(change) : p2trScript(coins[0].output) });
     }
-    const tx = new RawTransaction({ inputs: [inputOf(coin)], outputs });
-    const hex = tx.toHex([[tx.signKeyPath(0, privKey)]]);
-    return { hex, txid: tx.txid, amount, fee, coin, from, recipient, kind: k.kind, toSelf: to === 'self' };
+    const tx = new RawTransaction({ inputs: coins.map(inputOf), outputs });
+    const hex = tx.toHex(keys.map((k2, i) => [tx.signKeyPath(i, k2)]));
+    return { hex, txid: tx.txid, amount, fee, coin: coins[0], coins, spent: coins.map((c) => c.key), from, recipient, kind: k.kind, toSelf: to === 'self' };
   }
 
   /**

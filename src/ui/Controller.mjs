@@ -29,7 +29,7 @@ export class Controller {
   get state() { return this.app.state; }
   get f() { return this.app.state.f; }
   render() { this.app.render(); }
-  toast(t) { this.app.toast(t); }
+  toast(t, ms) { this.app.toast(t, ms); }
 
   attach(doc = document) {
     doc.addEventListener('input', (e) => this.onInput(e));
@@ -168,6 +168,18 @@ export class Controller {
     }
     if (d.recover) { await this.recoverReservation(d.recover); return true; }
     if (d.lock) { app.coins.toggleLock(d.lock); this.render(); return true; }
+    if (d.relock) { app.coins.relockSmall(d.relock); this.render(); this.toast('Protected again'); return true; }
+    if (d.unlock) {
+      const [txid, vout] = d.unlock.split(':');
+      const c = app.coins.publicThenShielded().find((x) => x.txid === txid && x.vout === +vout);
+      if (!c) return true;
+      if (c.pending) { this.toast('Wait for a block, then unlock it.'); return true; }
+      this.toast('Checking with ord…');
+      const r = await app.coins.unlockSmall(c);
+      this.render();
+      this.toast({ freed: 'Unlocked: Send can use it now', inscription: 'ord found an inscription or rune on it. It stays protected.', leaf: 'This coin holds LEAF. It stays protected.', unchecked: "ord didn't answer. Try again in a minute." }[r], 3200);
+      return true;
+    }
     if (d.rescan === 'stop') { app.sync.stopHistory(); this.toast('History scan stopped'); this.render(); return true; }
     if (d.rescan) {
       const msg = app.sync.rescan(d.rescan);
@@ -299,10 +311,23 @@ export class Controller {
       case 'btnReviewTSend': await review('mint', () => app.tokenTx.send({ tick: f.tsTick, amt: f.tsAmt, to: f.tsTo, from: f.tsFrom, rate: app.feeRate() })); break;
       case 'btnConfirmMint': await this.confirmMint(); break;
       case 'btnScan': this.scanPasted(); break;
-      case 'btnResetScan':
-        sync.forgetProgress(); app.coins.forgetShielded();
-        app.setStatus('scan', 'Coin list cleared. Tap refresh to scan again.');
+      case 'btnResetScan': {
+        // ask once more, then rebuild the list from the chain since the wallet was made (coins never vanish)
+        if (!this.resetAsked || Date.now() - this.resetAsked > 8000) {
+          this.resetAsked = Date.now();
+          app.setStatus('scan', 'Tap Reset coin list again to confirm. MASKED then scans again from when this wallet was created; your coins come back as it goes.', 'err');
+          break;
+        }
+        this.resetAsked = 0;
+        const keys = account.keys, tip = sync.tip || sync.progress?.topHeight;
+        sync.cancel(); sync.forgetProgress(); app.coins.forgetShielded();
+        const since = keys?.birthday || Date.now() - 30 * 864e5;
+        if (keys) keys.fresh = false;
+        sync.tip = tip;
+        const msg = tip ? sync.rescan(Math.min(3650, Math.ceil((Date.now() - since) / 864e5) + 1)) : '';
+        app.setStatus('scan', tip ? `Coin list cleared. ${msg}` : 'Coin list cleared. Tap refresh to scan again.', 'ok');
         break;
+      }
       case 'btnReveal': await app.lock.reveal(); break;
       case 'btnUnlock': await app.lock.unlock(); break;
       case 'btnIdxSave': {
@@ -361,7 +386,7 @@ export class Controller {
       await app.broadcast(b.hex);
       state.send = { stage: 'done', built: b };
       f.sendAmount = ''; f.sendTo = '';
-      app.afterBroadcast([b.coin.key], [b.txid]);
+      app.afterBroadcast(b.spent || [b.coin.key], [b.txid]);
     } finally { state.busy = false; this.render(); }
   }
 

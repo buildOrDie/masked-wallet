@@ -84,7 +84,7 @@ export class MaskedApp {
   }
 
   render() { this.ui.render(); }
-  toast(text) { this.ui.toast(text); }
+  toast(text, ms) { this.ui.toast(text, ms); }
 
   setStatus(key, text, cls = '') {
     this.state.status[key] = text ? [text, cls] : null;

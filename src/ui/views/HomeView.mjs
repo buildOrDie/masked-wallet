@@ -21,7 +21,12 @@ export class HomeView extends View {
         : '';
     const protectedCount = coins.publicThenShielded().filter((c) => !c.example && coins.isProtected(c)).length;
     const protectedRow = protectedCount
-      ? `<button class="protect-row" data-go="activity" data-filter="brc2">${I.lock}<span><b>${protectedCount} inscription coin${protectedCount === 1 ? '' : 's'} protected</b> · never spent by Send, Shield or Mint</span><span class="chev">›</span></button>`
+      ? `<button class="protect-row" data-go="activity" data-filter="all">${I.lock}<span><b>${protectedCount} coin${protectedCount === 1 ? '' : 's'} protected</b> · inscriptions or small coins, never spent by Send, Shield or Mint. Tap to see or unlock</span><span class="chev">›</span></button>`
+      : '';
+    // coins still waiting for a block, on the side on show: right on Home, not only in Settings
+    const waiting = (shd ? coins.shielded : coins.public).filter((c) => c.pending && !c.example);
+    const pendingRow = waiting.length
+      ? `<button class="protect-row pending-row" data-go="activity" data-filter="all"><span class="pend-dot" aria-hidden="true"></span><span><b>${fmtBtc(sumSats(waiting))} ${unit} pending</b> · ${waiting.length} coin${waiting.length === 1 ? '' : 's'} waiting for a block</span><span class="chev">›</span></button>`
       : '';
     const usd = (s) => fees.usdOf(s);
     const leafRow = LeafView.homeRow(app, side);
@@ -41,6 +46,7 @@ export class HomeView extends View {
       </div>
     </section>
     ${hint}
+    ${pendingRow}
     ${protectedRow}
     <section class="balances" role="radiogroup" aria-label="Show">
       <button class="bal-row ${shd ? '' : 'on'}" data-side="public" role="radio" aria-checked="${!shd}">

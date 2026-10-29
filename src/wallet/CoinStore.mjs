@@ -30,6 +30,7 @@ export class CoinStore {
   get shieldedKey() { return `wren.coins.${this.account.id}`; }
   get publicKey() { return `wren.fund.${this.account.id}`; }
   get locksKey() { return `wren.locks.${this.account.id}`; }
+  get freeKey() { return `wren.free.${this.account.id}`; }
 
   /** Both sides; the order decides list and display order, so both orders exist. */
   publicThenShielded() { return [...this.public, ...this.shielded]; }
@@ -78,14 +79,44 @@ export class CoinStore {
     this.store.setJson(this.locksKey, [...l]);
   }
 
-  /** Small coins, coins ord found something on, and coins carrying a known inscription. */
+  /** Small coins (unless unlocked after an ord check), coins ord found something on, coins with a known inscription. */
   autoProtected(c) {
-    if (c.sats != null && c.sats <= INSCRIPTION_MAX) return true;
     const o = this.ord.of(c);
     if (o && (o.ins || o.runes)) return true;
     const i = this.app.inscriptions.of(c);
-    return !!i && !i.unknown;
+    if (i && !i.unknown) return true;
+    if (c.sats != null && c.sats <= INSCRIPTION_MAX) return !(this.freed().has(`${c.txid}:${c.vout}`) && o && this.safeToFree(c));
+    return false;
   }
+
+  // ---- unlocking a small coin (a 500-sat test payment, say) ----
+  freed() { return new Set(this.store.getJson(this.freeKey, []) || []); }
+
+  /** Never unlock a small Shielded coin that holds LEAF (its LEAF moves only with that coin). */
+  safeToFree(c) {
+    if (!c.tweak) return true;
+    const leaf = this.app.leaf;
+    if (!leaf) return true;
+    const a = this.account.codec.trAddress(c.output);
+    return !leaf.seen().has(a) && !leaf.sh.some((s) => s.address === a);
+  }
+
+  /**
+   * Make a small coin spendable: only after ord has checked it holds no inscription or rune.
+   * @returns {Promise<'freed'|'inscription'|'leaf'|'unchecked'>}
+   */
+  async unlockSmall(c) {
+    if (!this.safeToFree(c)) return 'leaf';
+    await this.ord.check([c], 12000, { force: true });
+    const o = this.ord.of(c);
+    if (!o) return 'unchecked';
+    if (o.ins || o.runes) return 'inscription';
+    const i = this.app.inscriptions.of(c);
+    if (i && !i.unknown) return 'inscription';
+    this.store.setJson(this.freeKey, [...new Set([...this.freed(), `${c.txid}:${c.vout}`])]);
+    return 'freed';
+  }
+  relockSmall(op) { const f = this.freed(); f.delete(op); this.store.setJson(this.freeKey, [...f]); }
 
   isProtected(c) { return this.autoProtected(c) || this.locks().has(`${c.txid}:${c.vout}`); }
 
@@ -138,12 +169,13 @@ export class CoinStore {
     return fmtBtc(n);
   }
 
-  /** Most that can be sent from one side in a single-coin transaction. */
+  /** Most that can be sent from one side: every free coin in one transaction, less its fee. */
   maxSendable(from, feeRate) {
     const list = this.spendable(from);
     if (!list.length) return 0;
-    const big = Math.max(...list.map((c) => c.sats));
-    return Math.max(0, big - estimateSimpleSend({ outputs: 1, feeRate }));
+    const all = sumSats(list) - estimateSimpleSend({ inputs: list.length, outputs: 1, feeRate });
+    const big = Math.max(...list.map((c) => c.sats)) - estimateSimpleSend({ outputs: 1, feeRate });
+    return Math.max(0, all, big);
   }
 
   /** A coin we hold, with its private key (Shielded ones marked `shielded`). */

@@ -38,7 +38,7 @@ export function estimateOrdinalMint({ inputValue, feeRate, bodyLength }) {
   return { commitVbytes, revealVbytes, commitFee, revealFee, revealValue, change, totalFee: commitFee + revealFee };
 }
 /** Fee of a one-input taproot transaction with `outputs` outputs. */
-export const estimateSimpleSend = ({ outputs, feeRate }) => Math.ceil((10.5 + 57.5 + outputs * 43) * feeRate);
+export const estimateSimpleSend = ({ outputs, feeRate, inputs = 1 }) => Math.ceil((10.5 + 57.5 * inputs + outputs * 43) * feeRate);
 
 /** Script → pushes (Uint8Array) and opcodes ({ op }). */
 export function parseScriptPushes(s) {

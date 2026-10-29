@@ -78,7 +78,7 @@ export class SendView extends View {
       <button class="btn ${offline ? 'ghost' : 'primary'} wide" id="btnConfirmSend" ${busy || offline ? 'disabled' : ''}>${busy ? 'Sending…' : b.toSelf ? 'Confirm & shield' : 'Confirm & send'}</button>
       ${b.toSelf ? '' : `<button class="btn ${offline ? 'primary' : 'ghost'} wide" id="btnSignOffline" ${busy ? 'disabled' : ''}>${I.lock}<span>Sign now, send later</span></button>`}
       <details class="adv"><summary>Transaction details</summary>
-        <div class="kv small">${rowKV('Txid', `<span class="mono">${short(b.txid, 8)}</span>`)}${rowKV('Coin used', `<span class="mono">${short(b.coin.txid, 6)}:${b.coin.vout}</span>`)}</div>
+        <div class="kv small">${rowKV('Txid', `<span class="mono">${short(b.txid, 8)}</span>`)}${rowKV(b.coins?.length > 1 ? 'Coins used' : 'Coin used', b.coins?.length > 1 ? `${b.coins.length} coins` : `<span class="mono">${short(b.coin.txid, 6)}:${b.coin.vout}</span>`)}</div>
         <textarea rows="3" class="mono" readonly>${b.hex}</textarea>${copyBtn(b.hex, 'Copy raw tx')}
       </details>
     </section>`;

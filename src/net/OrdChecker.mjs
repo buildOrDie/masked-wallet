@@ -35,10 +35,11 @@ export class OrdChecker {
   /** On Mainnet an unchecked big coin is not spent until ord has confirmed it is plain bitcoin. */
   unverified(c) { return this.netOf() === 'main' && this.needs(c) && !this.of(c); }
 
-  /** Ask ord about the coins it has not answered for yet; gives up waiting after `waitMs`. */
-  async check(list, waitMs = 9000) {
+  /** Ask ord about the coins it has not answered for yet; gives up waiting after `waitMs`. @param {any[]} list @param {number} [waitMs] @param {{ force?: boolean }} [o] */
+  async check(list, waitMs = 9000, { force = false } = {}) {
     const net = this.netOf();
-    let todo = list.filter((c) => this.needs(c) && !this.of(c) && !c.pending && (this.failed.get(`${net}:${c.txid}:${c.vout}`) || 0) < Date.now());
+    // force: also small coins (asked for when someone unlocks one)
+    let todo = list.filter((c) => (force ? c.sats != null && !c.example : this.needs(c)) && !this.of(c) && !c.pending && (force || (this.failed.get(`${net}:${c.txid}:${c.vout}`) || 0) < Date.now()));
     if (!todo.length) return;
     const save = (op, j) => {
       const runes = Array.isArray(j.runes) ? j.runes.length : j.runes ? Object.keys(j.runes).length : 0;

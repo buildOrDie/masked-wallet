@@ -87,10 +87,10 @@ export class Screen {
       : esc(gate ? (state.lockState === 'locked' ? 'Locked' : 'Set up') : account.keys ? (account.keys.source === 'example' ? 'Demo wallet' : 'Account 1') : 'No wallet');
   }
 
-  toast(text) {
+  toast(text, ms = 1400) {
     const t = $('#toast');
     t.textContent = text; t.classList.add('show');
     clearTimeout(this.toastTimer);
-    this.toastTimer = setTimeout(() => t.classList.remove('show'), 1400);
+    this.toastTimer = setTimeout(() => t.classList.remove('show'), ms);
   }
 }

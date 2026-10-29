@@ -50,7 +50,13 @@ export class CoinList {
     </div>`;
     }
     const ord = app.ord;
-    const note = locked ? `<span class="safe">${I.lock} ${auto ? 'Protected' : 'Locked'}</span>` : ord.unverified(c) ? '<span class="small pend-t">checking with ord…</span>' : ord.needs(c) && ord.of(c) ? '<span class="small muted">plain bitcoin · checked by ord</span>' : '';
+    // a small coin protected only for its size (no inscription known): it can be unlocked after an ord check
+    const o = ord.of(c), small = c.sats != null && c.sats <= INSCRIPTION_MAX && !(o && (o.ins || o.runes)) && !(ins && !ins.unknown);
+    const freed = small && coins.freed().has(op) && !auto;
+    const smallNote = small && auto
+      ? `<span class="safe">${I.lock} Protected (small coin)</span><button class="link small" data-unlock="${op}" title="MASKED asks ord first: only plain bitcoin is unlocked">Unlock</button>`
+      : freed ? `<span class="small muted">plain bitcoin · checked by ord · unlocked</span><button class="link small" data-relock="${op}">Protect again</button>` : '';
+    const note = smallNote || (locked ? `<span class="safe">${I.lock} ${auto ? 'Protected' : 'Locked'}</span>` : ord.unverified(c) ? '<span class="small pend-t">checking with ord…</span>' : ord.needs(c) && ord.of(c) ? '<span class="small muted">plain bitcoin · checked by ord</span>' : '');
     return `<div class="coin-row ${locked ? 'locked' : ''}">
     ${logo}
     <span class="bal-txt"><b>${t.title} ${t.badge}${pend}${c.example ? '<em class="pend">demo</em>' : ''}</b><span class="mono">${short(c.txid, 6)}:${c.vout}</span>

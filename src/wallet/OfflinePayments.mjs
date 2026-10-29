@@ -57,7 +57,7 @@ export class OfflinePayments {
     /** @type {OfflinePayment} */
     const p = {
       txid: built.txid, hex: built.hex, mine: true, amount: built.amount, recipient: built.recipient,
-      spent: [built.coin.key], outpoints: tx.inputs.map((x) => `${x.txid}:${x.vout}`), created: Date.now(), state: 'waiting',
+      spent: built.spent || [built.coin.key], outpoints: tx.inputs.map((x) => `${x.txid}:${x.vout}`), created: Date.now(), state: 'waiting',
     };
     this.save([p, ...this.list().filter((x) => x.txid !== p.txid)]);
     return p;

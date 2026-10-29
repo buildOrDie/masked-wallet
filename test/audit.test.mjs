@@ -89,3 +89,41 @@ test('LEAF: switching account clears its balances, and a refresh started before 
   assert.equal(leaf.pub, null, 'the old refresh did not write Account 1’s balance into Account 2');
   await assert.rejects(leaf.build({ from: 'public', to: 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4', amount: '1', rate: 2 }), /Checking your LEAF/);
 });
+
+test('a small coin (500 sats) can be unlocked once ord says it is plain bitcoin, then spent with another coin', async () => {
+  const keys = Keyring.fromMnemonic(WORDS, '', 'main');
+  const app = walletApp(keys);
+  app.coins.ensureOrd = async () => {};
+  const f = app.account.funding();
+  const pub = (key, txid, sats) => ({ key, kind: 'funding', txid, vout: 0, sats, output: f.outputX, privKey: f.outputPriv, address: f.address });
+  app.coins.public = [pub('small', '31'.repeat(32), 500), pub('big', '32'.repeat(32), 2000)];
+  app.ord.put(`${'32'.repeat(32)}:0`, { ins: 0, runes: 0, at: 1 });
+  assert.deepEqual(app.coins.spendable('public').map((c) => c.key), ['big'], 'small coins start protected');
+  // ord finds an inscription: stays protected
+  app.ord.check = async (list) => { for (const c of list) app.ord.put(`${c.txid}:${c.vout}`, { ins: 1, runes: 0, at: 1 }); };
+  assert.equal(await app.coins.unlockSmall(app.coins.public[0]), 'inscription');
+  assert.ok(app.coins.isProtected(app.coins.public[0]));
+  // a clean coin
+  app.coins.public[0] = pub('small', '33'.repeat(32), 500);
+  app.ord.check = async (list) => { for (const c of list) app.ord.put(`${c.txid}:${c.vout}`, { ins: 0, runes: 0, at: 1 }); };
+  assert.equal(await app.coins.unlockSmall(app.coins.public[0]), 'freed');
+  assert.deepEqual(app.coins.spendable('public').map((c) => c.key).sort(), ['big', 'small']);
+  // 2,200 sats needs both coins
+  const b = await app.builder.send({ from: 'public', to: 'bc1p4qhjn9zdvkux4e44uhx8tc55attvtyu358kutcqkudyccelu0was9fqzwh', amount: 2200, rate: 1 });
+  assert.deepEqual(b.spent.sort(), ['big', 'small']);
+  assert.equal(b.fee, 2500 - 2200, 'no change worth keeping: the rest is fee');
+  assert.ok(app.coins.maxSendable('public', 1) > 2000, 'max counts every free coin');
+  app.coins.relockSmall(`${'33'.repeat(32)}:0`);
+  assert.ok(app.coins.isProtected(app.coins.public[0]), 'protect again');
+});
+
+test('a small Shielded coin that holds LEAF is never unlocked', async () => {
+  const keys = Keyring.fromMnemonic(WORDS, '', 'main');
+  const app = walletApp(keys);
+  const tweak = '04'.repeat(32);
+  const c = { key: 'l', txid: '41'.repeat(32), vout: 0, sats: 330, tweak, output: hex.encode(schnorr.getPublicKey(hex.decode(keys.outputPriv(tweak)))) };
+  app.coins.shielded = [c];
+  app.leaf.remember(app.account.codec.trAddress(c.output));
+  assert.equal(await app.coins.unlockSmall(c), 'leaf');
+  assert.ok(app.coins.isProtected(c));
+});
