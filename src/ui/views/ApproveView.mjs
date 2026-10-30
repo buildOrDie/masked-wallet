@@ -1,4 +1,4 @@
-import { esc, fmtBtc, short } from '../../core/format.mjs';
+import { esc, fmtBtc, short, sumSats } from '../../core/format.mjs';
 import { NETWORKS } from '../../bitcoin/networks.mjs';
 import { TRADE_PADDING } from '../../trade/trade-core.mjs';
 import { NEEDS_PREP } from '../../dapp/ApprovalController.mjs';
@@ -49,7 +49,9 @@ export class ApproveView extends View {
         return `<p class="lbl">Message</p><pre class="msgbox">${esc(P.message)}</pre><div class="kv">${rowKV('Signature type', P.type === 'bip322-simple' ? 'BIP-322 (address)' : 'ECDSA (public key)')}${rowKV('Signing with', `<span class="mono">${esc(short(account.pubAddr(), 8))}</span>`)}</div><p class="info">Signing a message is free and does not move funds.</p>`;
       case 'sendBitcoin': {
         const k = account.codec.kind(P.toAddress);
+        const like = this.app.lookAlike(P.toAddress);
         return `<p class="hero-bal center">${fmtBtc(Number(P.satoshis))} <small>${unit}</small></p>
+        ${like ? `<label class="risk"><input type="checkbox" data-risk ${this.f.apRisk ? 'checked' : ''}><span><b>Look-alike address.</b> It starts and ends like <span class="mono">${esc(short(like, 6))}</span>, which you used before, but it's a different address. Scammers do this. Only continue if you checked every character.</span></label>` : ''}
         <div class="kv">${rowKV('To', `<span class="mono">${esc(short(P.toAddress || '', 10))}</span>`)}${rowKV('Address type', `<span class="addr-kind k-${k.kind}">${esc(k.text || '')}</span>`)}${rowKV('From', `${btcLogo}Public`)}
         ${this.feeRows(a, b?.fee, b && b.amount + b.fee)}</div>
         ${this.error(a)}`;
@@ -57,8 +59,9 @@ export class ApproveView extends View {
       case 'signPsbt': case 'signPsbts': {
         if (a.prepErr) return `<p class="msg err">${esc(a.prepErr)}</p>`;
         const risky = (b || []).some((p) => p.protectedCount);
+        const unusual = (b || []).some((p) => p.unusual);
         return (b || []).map((p, k) => this.psbtCard(p, k, b.length)).join('')
-          + (risky ? `<label class="risk"><input type="checkbox" data-risk ${this.f.apRisk ? 'checked' : ''}><span><b>This spends an inscription coin.</b> Only continue if you mean to sell or move that inscription (e.g. a marketplace listing).</span></label>` : '');
+          + (risky ? `<label class="risk"><input type="checkbox" data-risk ${this.f.apRisk ? 'checked' : ''}><span>${unusual ? '<b>This uses an unusual signature type (SIGHASH_SINGLE).</b> It only covers one output. ' : ''}${unusual && (b || []).some((p) => p.protectedCount > p.unusual) ? '<b>It also spends an inscription coin.</b> ' : !unusual ? '<b>This spends an inscription coin.</b> ' : ''}Only continue if you trust this site and mean to do this (e.g. a marketplace listing).</span></label>` : '');
       }
       case 'shareTrade':
         return `<div class="kv">${rowKV('Trade address it will see', b ? `<span class="mono">${esc(short(b.address, 8))}</span>` : a.prepErr ? '—' : 'finding it…')}${b ? rowKV('Shielded totals it will see', `${fmtBtc(b.shielded.sats)} ${unit}${b.shielded.tokens.length ? ` · ${b.shielded.tokens.length} token${b.shielded.tokens.length > 1 ? 's' : ''}` : ''}`) : ''}</div>
@@ -127,6 +130,7 @@ export class ApproveView extends View {
     <p class="lbl">Inputs</p>${p.inputs.map((x) => row(x, 'in ')).join('')}
     <p class="lbl">Outputs</p>${p.outputs.map((x) => row(x, 'out ')).join('')}
     <div class="kv">${rowKV('Your balance change', `<b class="${p.net < 0 ? 'neg' : 'good'}">${p.net > 0 ? '+' : ''}${fmtBtc(p.net)} ${this.unit}</b>`)}${rowKV('Inputs you sign', `${p.toSign.length}`)}</div>
+    ${p.net < 0 && -p.net >= 100000 && -p.net >= 0.5 * sumSats(this.app.coins.public) ? `<p class="info warn">This takes <b>${Math.round((-p.net / Math.max(1, sumSats(this.app.coins.public))) * 100)}%</b> of your Public balance. Make sure you know this site.</p>` : ''}
   </div>`;
   }
 }

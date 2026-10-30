@@ -23,6 +23,23 @@ MASKED is **experimental, unaudited software**. Treat it as a hot wallet for tes
 - The dApp provider holds no keys. Every signature, payment or inscription opens an approval in the MASKED popup that shows the requesting site.
 - Sites only see the Public address. Shielded coins are never exposed.
 - Coins holding inscriptions are excluded from automatic coin selection, and PSBTs that spend them need an extra explicit confirmation.
+- **Look-alike addresses:** MASKED remembers the addresses you paid (on this device only). If a new address starts and ends like one of them, or like your own, Send, LEAF send and site payment requests show a warning and wait until you tick that you checked every character. This catches address poisoning (scammers sending you dust from a look-alike, hoping you copy it).
+- **Dangerous signatures refused:** a site asking you to sign with `SIGHASH_NONE` (a signature that lets it send those coins anywhere) is refused outright. `SIGHASH_SINGLE` without `ANYONECANPAY` needs an explicit tick. Listings (`SINGLE|ANYONECANPAY`) and normal signatures are unchanged.
+- **Big moves flagged:** sending at least half of a balance (and 0.001 BTC or more), or a site PSBT that takes at least half of your Public balance, shows a warning on the review screen.
+- **Locking reaches every window:** locking in the popup also locks the side panel and approval windows; a page holding keys from before the lock drops them.
+- **Small coins and inscriptions:** coins of 1,000 sats or less are protected; you can unlock one only after ord confirms it holds no inscription or rune, and never a Shielded coin holding LEAF.
+
+## Verify a release
+
+Every release is built from a tag in this repository, and the build is reproducible. To check that the extension Chrome installed is this source:
+
+```sh
+git checkout v2.18.3 && npm ci && npm run build
+node scripts/hash-extension.mjs extension
+node scripts/hash-extension.mjs "<Chrome profile>/Extensions/pojmpfcbdmacabhckemelcbkmckhaoig/2.18.3_0"
+```
+
+The two "MASKED extension fingerprint" lines must match. Each GitHub release also lists the fingerprint. (Find your Chrome profile folder at `chrome://version` → *Profile Path*.)
 
 ## Reporting a vulnerability
 

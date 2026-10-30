@@ -21,7 +21,11 @@ MASKED builds every transfer the way the CRC-20 rules require, because a transac
 
 - Receivers: `bc1p…`, single-key `bc1q…`, or a Shielded `sp1…`. `1…`, `3…`, P2WSH and multisig are refused: LEAF sent there can never move again.
 - Amounts are exact (8 decimals, BigInt), never floats.
-- A send stays subtracted from your balance until crc20.org has applied it, so you can't spend the same LEAF twice while it confirms.
+- A send stays subtracted from your balance until crc20.org's indexer has reconciled it, so you can't spend the same LEAF twice while it confirms. The reservation is saved on your device, so it survives closing the wallet or restarting the browser, and a lagging indexer (`503`, or `synced: false`) keeps it in place. It is released when:
+  - crc20.org lists the transaction: the LEAF moved;
+  - the indexer is synced past the block that confirmed it and still lists no LEAF operation for it: it broke a rule and no LEAF moved (the LEAF page says so);
+  - Bitcoin no longer knows the transaction an hour after it was sent (dropped or replaced).
+- Unconfirmed LEAF transfers from or to your addresses (found in the mempool) show as "sending" or "incoming" until a block.
 
 ## Private LEAF (Shielded)
 

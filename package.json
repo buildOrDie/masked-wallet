@@ -1,6 +1,6 @@
 {
   "name": "masked-wallet",
-  "version": "2.18.2",
+  "version": "2.18.3",
   "private": true,
   "type": "module",
   "description": "MASKED: open-source Bitcoin wallet for Chrome with a Shielded balance (BIP 352 silent payments), BRC-20 / BRC2.0 and a UniSat-compatible window.masked provider",
@@ -8,7 +8,7 @@
     "build": "node scripts/build-extension.mjs extension",
     "lint": "eslint \"src/**/*.mjs\" \"test/**/*.mjs\" \"scripts/**/*.mjs\"",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node test/test.mjs && node test/fast.test.mjs && node test/trade.test.mjs && node --test test/wallet.test.mjs test/offline.test.mjs test/airdrop.test.mjs test/accounts.test.mjs test/leaf.test.mjs test/audit.test.mjs",
+    "test": "node test/test.mjs && node test/fast.test.mjs && node test/trade.test.mjs && node --test test/wallet.test.mjs test/offline.test.mjs test/airdrop.test.mjs test/accounts.test.mjs test/leaf.test.mjs test/audit.test.mjs test/security.test.mjs",
     "check": "npm run lint && npm run typecheck && npm test"
   },
   "dependencies": {

@@ -125,8 +125,10 @@ export class ApprovalController {
         return a.params.psbtHexs.map((h, k) => app.psbt.sign(h, (a.params.options || [])[k] || {}));
       case 'sendBitcoin': {
         const b = prepared();
+        if (app.lookAlike(a.params.toAddress) && !app.state.f.apRisk) throw new Error('Tick the box to confirm this look-alike address.');
         await app.broadcast(b.hex);
-        app.afterBroadcast([b.coin.key], [b.txid]);
+        app.afterBroadcast(b.spent || [b.coin.key], [b.txid]);
+        app.rememberRecipient(a.params.toAddress);
         return b.txid;
       }
       case 'shareTrade':

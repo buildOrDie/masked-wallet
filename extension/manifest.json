@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "MASKED Wallet",
-  "version": "2.18.2",
+  "version": "2.18.3",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzGyPzJEarjSiLK0MEsxK4BMde4kYt82B12d7QkjdTYxqnHJ7f/kfTiRlzuJz7+gwPLJVPAcy6mEbYsm3KD6ydbipktJkqSvgjcSaoZ9v8XYqwO+RNXsMggFnInglG/H3uP58GxqpXE7ooTs/OxyMWVkb2xV8UyqsvamQsOhLywf9QLwKTUf8JsXahA3afceciX2kD0ovLDh0ejCxB9LpIAX9xI07qQADyfg003878QaT8nQnFoG9hcvZOzdWU9+6BgpOs7x5zABfFUWmVh334wFm57ExbozCt1Sy8cvos8fqKZphm1EsaF+YzExqr1nTql/YD2RvGAl8YLorNtFPnQIDAQAB",
   "description": "Bitcoin wallet with a Public and a Shielded (silent payments) balance. Mint, deploy and trade BRC-20 and BRC2.0. Self-custody.",
   "action": {

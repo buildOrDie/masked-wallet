@@ -5,6 +5,7 @@ import * as btc from '@scure/btc-signer';
 import * as trade from '../trade/trade-core.mjs';
 import { fromHex, toHex } from '../core/bytes.mjs';
 import { INSCRIPTION_MAX } from '../ordinals/envelope.mjs';
+import { sighashRisk } from '../security/guard.mjs';
 
 export class PsbtSigner {
   /** @param {import('../app/MaskedApp.mjs').MaskedApp} app */
@@ -37,6 +38,8 @@ export class PsbtSigner {
       const tcoin = tk ? this.coins.trade.find((c) => c.txid === txid && c.vout === inp.index) : null;
       const prot = ours && (isRisky(coin) || isRisky(tcoin) || (value != null && value <= INSCRIPTION_MAX));
       const sighash = w?.sighashTypes?.length ? w.sighashTypes : inp.sighashType != null ? [inp.sighashType] : null;
+      // SIGHASH_NONE signs no outputs: the site could send these coins anywhere. Never.
+      if (sign && sighashRisk(sighash) === 'blank-cheque') throw new Error(`This site asks you to sign input ${i} with SIGHASH_NONE, which would let it send those coins anywhere. MASKED refuses to sign it.`);
       if (ours) spent += value || 0;
       inputs.push({ i, txid, vout: inp.index, value, address: spk ? codec.fromScript(fromHex(spk)) : null, ours, keyed: tk ? tk.kind : null, spk, trade: tk?.kind === 'trade' ? tk.index : null, sign, prot: !!prot, sighash, finalized: !!inp.finalScriptWitness });
     }
@@ -48,7 +51,8 @@ export class PsbtSigner {
       outputs.push({ i, value: Number(o.amount), address: codec.fromScript(o.script) || (o.script[0] === 0x6a ? 'OP_RETURN' : 'unknown'), ours, keyed: tk ? tk.kind : null, trade: tk?.kind === 'trade' ? tk.index : null });
     }
     const toSign = inputs.filter((x) => x.sign);
-    return { tx, inputs, outputs, toSign, net: received - spent, protectedCount: toSign.filter((x) => x.prot).length, trade: toSign.some((x) => x.keyed) };
+    const unusual = toSign.filter((x) => sighashRisk(x.sighash) === 'unusual').length;
+    return { tx, inputs, outputs, toSign, net: received - spent, protectedCount: toSign.filter((x) => x.prot).length + unusual, unusual, trade: toSign.some((x) => x.keyed) };
   }
 
   sign(psbtHex, options = {}) {

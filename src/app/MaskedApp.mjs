@@ -14,6 +14,7 @@ import { DeployRegistry, MintLog, PendingTransfers, TransferLog } from '../token
 import { TokenBook } from '../tokens/TokenBook.mjs';
 import { TokenTx } from '../tokens/TokenTx.mjs';
 import { LeafBook } from '../tokens/LeafBook.mjs';
+import { RecipientBook, lookAlike } from '../security/guard.mjs';
 import { TradeAccount } from '../trade/TradeAccount.mjs';
 import { ApprovalController } from '../dapp/ApprovalController.mjs';
 import { PsbtSigner } from '../dapp/PsbtSigner.mjs';
@@ -69,6 +70,7 @@ export class MaskedApp {
     this.tokens = new TokenBook(this);
     this.tokenTx = new TokenTx(this);
     this.leaf = new LeafBook(this);
+    this.recips = new RecipientBook(store);
 
     // dApps and private trading
     this.trade = new TradeAccount(this);
@@ -84,6 +86,14 @@ export class MaskedApp {
   }
 
   render() { this.ui.render(); }
+
+  /** A known address (one you paid before, or your own) that `to` imitates, or null. */
+  lookAlike(to) {
+    const a = this.account;
+    return lookAlike(to, [...this.recips.list(a.id), a.pubAddr(), a.shieldAddr()].filter(Boolean));
+  }
+  /** Remember who was paid, for later look-alike checks (stays on this device). */
+  rememberRecipient(to) { if (to && to !== this.account.shieldAddr()) this.recips.add(this.account.id, to); }
   toast(text, ms) { this.ui.toast(text, ms); }
 
   setStatus(key, text, cls = '') {

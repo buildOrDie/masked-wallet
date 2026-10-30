@@ -74,6 +74,7 @@ export class Controller {
   onChange(e) {
     const t = e.target, app = this.app;
     if (t.hasAttribute?.('data-rbf')) { TxPolicy.save(app.store, t.checked); this.toast(t.checked ? 'RBF on' : 'RBF off'); return; }
+    if (t.hasAttribute?.('data-poisonok')) { this.f.poisonOk = t.checked; this.render(); return; }
     if (t.hasAttribute?.('data-leafscan')) { app.leaf.setScanShielded(t.checked); this.render(); return; }
     if (t.hasAttribute?.('data-backed')) { this.f.backed = t.checked; this.render(); return; }
     if (t.id === 'autoLockSel') { app.vault.setAutoLock(t.value); app.lock.refreshSession(); this.toast(`Auto-lock: ${t.selectedOptions[0].text}`); return; }
@@ -265,10 +266,12 @@ export class Controller {
       case 'btnOlder': sync.run(24, { older: true }); break;
       case 'btnReviewSend': {
         const shield = state.view === 'shield';
+        f.poisonOk = false;
         await review('send', () => app.builder.send({ from: shield ? 'public' : f.sendFrom, to: shield ? 'self' : f.sendTo, amount: parseBtc(f.sendAmount, account.unit), rate: app.feeRate() }));
         break;
       }
       case 'btnLeafReview':
+        f.poisonOk = false;
         state.status.leaf = ['Building…', '']; this.render();
         state.leafSend = { stage: 'review', built: await app.leaf.build({ from: f.leafFrom === 'shielded' ? 'shielded' : 'public', to: f.leafTo, amount: f.leafAmt, rate: app.feeRate() }) };
         state.status.leaf = null; this.render(); break;
@@ -284,6 +287,8 @@ export class Controller {
       case 'btnConfirmDrop': await this.confirmDrop(); break;
       case 'btnSignOffline': {
         const b = state.send.built;
+        if (!b.toSelf && app.lookAlike(b.recipient) && !f.poisonOk) throw new Error('Tick the box to confirm the look-alike address.');
+        if (!b.toSelf) app.rememberRecipient(b.recipient);
         app.offline.keepSigned(b);
         state.send = { stage: 'offline', built: b };
         f.sendAmount = ''; f.sendTo = '';
@@ -381,11 +386,13 @@ export class Controller {
   async confirmSend() {
     const { app, state, f } = this;
     const b = state.send.built;
+    if (!b.toSelf && app.lookAlike(b.recipient) && !f.poisonOk) throw new Error('Tick the box to confirm the look-alike address.');
     state.busy = true; this.render();
     try {
       await app.broadcast(b.hex);
       state.send = { stage: 'done', built: b };
-      f.sendAmount = ''; f.sendTo = '';
+      f.sendAmount = ''; f.sendTo = ''; f.poisonOk = false;
+      if (!b.toSelf) app.rememberRecipient(b.recipient);
       app.afterBroadcast(b.spent || [b.coin.key], [b.txid]);
     } finally { state.busy = false; this.render(); }
   }

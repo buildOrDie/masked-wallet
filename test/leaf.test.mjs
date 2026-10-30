@@ -170,3 +170,33 @@ test('unconfirmed transfers: read from the mempool, shown as incoming or sending
   leaf.addPending({ txid: 'ef'.repeat(32), from: f.address, atoms: 7n * LEAF });
   assert.equal(leaf.available('public'), 1993n * LEAF, 'the same send is never subtracted twice');
 });
+
+test('a pending send stays reserved across a restart and a lagging indexer, until reconciled', async () => {
+  const { app, leaf, f } = setup();
+  leaf.store.setJson(leaf.pendingKey, []);
+  const txid = 'a1'.repeat(32);
+  leaf.addPending({ txid, from: f.address, atoms: 300n * LEAF });
+  // restart: a new LeafBook on the same storage still sees the reservation
+  const again = new LeafBook(app, { fetch: leaf.fetch });
+  again.pub = 2000n * LEAF; again.at = Date.now();
+  assert.equal(again.available('public'), 1700n * LEAF, 'still reserved after a restart');
+  app.servers.base = () => 'https://esplora.invalid/';
+  const reply = (status, body = {}) => new Response(JSON.stringify(body), { status });
+  // indexer catching up (503) → kept
+  again.fetch = async () => reply(503);
+  await again.settlePending({ synced: false, height: 100 });
+  assert.equal(again.pending().length, 1, '503: kept');
+  // confirmed at 101, indexer only at 100 → kept (it hasn't seen that block)
+  again.fetch = async (u) => (String(u).includes('crc20') ? reply(404) : reply(200, { confirmed: true, block_height: 101 }));
+  await again.settlePending({ synced: true, height: 100 });
+  assert.equal(again.pending().length, 1, 'indexer behind the block: kept');
+  // indexer past the block and still no LEAF operation → the send broke a rule, nothing moved: released
+  await again.settlePending({ synced: true, height: 105 });
+  assert.equal(again.pending().length, 0, 'released');
+  assert.deepEqual(again.failedSends, [txid]);
+  // applied by the indexer (200) → released
+  again.addPending({ txid: 'b2'.repeat(32), from: f.address, atoms: 1n });
+  again.fetch = async () => reply(200, { operations: [] });
+  await again.settlePending({ synced: true, height: 105 });
+  assert.equal(again.pending().length, 0, 'applied: released');
+});

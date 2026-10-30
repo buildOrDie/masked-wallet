@@ -7,7 +7,7 @@ export const FORM_DEFAULTS = {
   mintTick: '', mintAmt: '', mintTo: 'self', mintOther: '', mintFrom: 'public', mintMode: 'mint',
   depTick: '', depMax: '21000000', depLim: '1000', depFrom: 'public', depResTo: 'shielded', depWho: 'self', recTick: '', recSalt: '',
   tsTick: '', tsTo: '', tsAmt: '', tsFrom: 'public', trTick: '', trAmt: '', trFrom: 'public',
-  coinFilter: 'all', scanText: '', calcRecips: '', relayText: '', leafFrom: 'public', leafTo: '', leafAmt: '',
+  coinFilter: 'all', scanText: '', calcRecips: '', relayText: '', leafFrom: 'public', leafTo: '', leafAmt: '', poisonOk: false,
   sendMode: 'send', dropText: '', dropEach: '1000', dropFrom: 'public',
   // set by the screens that use them
   homeTok: 'all', tokTab: 'history', acctMenu: '-1', acctHidden: '', obMode: 'create', backed: false, apRisk: false, rbfInfo: false,

@@ -71,6 +71,7 @@ export class LeafView extends View {
       <p class="info">${side === 'shielded'
         ? 'Shielded LEAF sits on one-time addresses. One send moves LEAF from one of them; the fee is paid from your Shielded balance.'
         : 'Send to a Shielded sp1… address and the receiver gets it privately. LEAF can only go to bc1p… or bc1q… addresses, never 1… or 3….'}</p>
+      ${l.failedSends?.length ? `<p class="info warn">crc20.org says ${l.failedSends.length === 1 ? 'a LEAF send' : `${l.failedSends.length} LEAF sends`} confirmed on Bitcoin but moved no LEAF (${l.failedSends.map((t) => esc(short(t, 6))).join(', ')}). Your LEAF is still yours and spendable again.</p>` : ''}
       ${stuck ? `<p class="info warn">${esc(fmtLeaf(stuck))} Shielded LEAF sits on an address with no BTC left to move it. It's safe; sending a little BTC there makes it spendable again.</p>` : ''}
     </section>`;
   }
@@ -90,9 +91,10 @@ export class LeafView extends View {
         ${rowKV('Network fee', `${fmtBtc(b.fee)} ${this.unit}`)}
         ${rowKV('BTC used', `${fmtBtc(btcOut)} ${this.unit}`)}
       </div>
+      ${this.app.lookAlike(b.recipient) ? `<label class="risk"><input type="checkbox" data-poisonok ${this.f.poisonOk ? 'checked' : ''}><span><b>Look-alike address.</b> It starts and ends like <span class="mono">${esc(short(this.app.lookAlike(b.recipient), 6))}</span>, an address you used before, but it's different. Tick only if you checked every character.</span></label>` : ''}
       ${b.partial ? '<p class="info">330 sats go back to the same Shielded address, so the rest of its LEAF stays spendable.</p>' : ''}
       ${this.statusLine('leaf')}
-      <button class="btn primary wide" id="btnLeafConfirm" ${busy ? 'disabled' : ''}>${busy ? 'Sending…' : 'Confirm & send'}</button>
+      <button class="btn primary wide" id="btnLeafConfirm" ${busy || (this.app.lookAlike(b.recipient) && !this.f.poisonOk) ? 'disabled' : ''}>${busy ? 'Sending…' : 'Confirm & send'}</button>
       <details class="adv"><summary>Transaction details</summary>
         <div class="kv small">${rowKV('Txid', `<span class="mono">${short(b.txid, 8)}</span>`)}${rowKV('Size', `${b.vsize} vB`)}</div>
         <p class="muted small">Output 0 is the LEAF message, output 1 the receiver, as the CRC-20 rules require.</p>

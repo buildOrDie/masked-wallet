@@ -73,15 +73,28 @@ export class SendView extends View {
         ${rowKV('Network fee', `${fmtBtc(b.fee)} ${unit}`)}
         ${rowKV('Total', `<b>${fmtBtc(b.amount + b.fee)} ${unit}</b>`)}
       </div>
+      ${b.toSelf ? '' : this.guardNotes(b)}
       ${this.statusLine('send')}
       ${offline ? `<p class="info warn">You're offline. Sign it now; MASKED sends it the moment this device or the receiver gets online.</p>` : ''}
-      <button class="btn ${offline ? 'ghost' : 'primary'} wide" id="btnConfirmSend" ${busy || offline ? 'disabled' : ''}>${busy ? 'Sending…' : b.toSelf ? 'Confirm & shield' : 'Confirm & send'}</button>
-      ${b.toSelf ? '' : `<button class="btn ${offline ? 'primary' : 'ghost'} wide" id="btnSignOffline" ${busy ? 'disabled' : ''}>${I.lock}<span>Sign now, send later</span></button>`}
+      <button class="btn ${offline ? 'ghost' : 'primary'} wide" id="btnConfirmSend" ${busy || offline || this.blocked(b) ? 'disabled' : ''}>${busy ? 'Sending…' : b.toSelf ? 'Confirm & shield' : 'Confirm & send'}</button>
+      ${b.toSelf ? '' : `<button class="btn ${offline ? 'primary' : 'ghost'} wide" id="btnSignOffline" ${busy || this.blocked(b) ? 'disabled' : ''}>${I.lock}<span>Sign now, send later</span></button>`}
       <details class="adv"><summary>Transaction details</summary>
         <div class="kv small">${rowKV('Txid', `<span class="mono">${short(b.txid, 8)}</span>`)}${rowKV(b.coins?.length > 1 ? 'Coins used' : 'Coin used', b.coins?.length > 1 ? `${b.coins.length} coins` : `<span class="mono">${short(b.coin.txid, 6)}:${b.coin.vout}</span>`)}</div>
         <textarea rows="3" class="mono" readonly>${b.hex}</textarea>${copyBtn(b.hex, 'Copy raw tx')}
       </details>
     </section>`;
+  }
+
+  /** A send to an address that imitates one you used waits for an explicit tick. */
+  blocked(b) { return !b.toSelf && !!this.app.lookAlike(b.recipient) && !this.f.poisonOk; }
+
+  /** Look-alike address (address poisoning) and "most of your balance" warnings on the review screen. */
+  guardNotes(b) {
+    const like = this.app.lookAlike(b.recipient);
+    const side = sumSats(b.from === 'shielded' ? this.app.coins.shielded : this.app.coins.public);
+    const big = b.amount >= 100000 && b.amount >= 0.5 * side;
+    return `${like ? `<label class="risk"><input type="checkbox" data-poisonok ${this.f.poisonOk ? 'checked' : ''}><span><b>Look-alike address.</b> It starts and ends like <span class="mono">${esc(short(like, 6))}</span>, an address you used before, but it's different. Scammers send dust from look-alikes so you copy the wrong one. Tick only if you checked every character.</span></label>` : ''}
+      ${big ? `<p class="info warn">You're sending <b>${Math.round((b.amount / Math.max(1, side)) * 100)}%</b> of your ${b.from === 'shielded' ? 'Shielded' : 'Public'} balance. Check the address on the receiving side before you confirm.</p>` : ''}`;
   }
 
   /** A payment signed without broadcasting: QR and text to hand over, sent automatically when online. */

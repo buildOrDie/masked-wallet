@@ -115,14 +115,36 @@ export class LeafBook {
   }
 
   /** Sends crc20.org has applied leave the in-flight list (their LEAF is gone from the confirmed balance). */
-  async settlePending() {
+  /**
+   * Reconcile in-flight sends with crc20.org's indexer. The list lives in storage, so it survives a restart
+   * and an indexer that lags: a send stays reserved until one of these is true:
+   * - crc20.org lists the transaction (200): the LEAF moved, the confirmed balance already shows it;
+   * - the indexer is synced past the block that confirmed it and still has no LEAF operation for it (404):
+   *   it broke a rule, so no LEAF moved and nothing is reserved any more;
+   * - Bitcoin no longer knows the transaction an hour after it was sent (dropped or replaced).
+   * A 503 (indexer catching up), a timeout, or an indexer not past that block yet keeps the reservation.
+   * @param {{ synced?: boolean, height?: number }} [indexer] from /status
+   */
+  async settlePending(indexer = {}) {
     const list = this.pending();
     if (!list.length) return;
     const keep = [];
     for (const p of list) {
-      let applied = false;
-      try { const r = await this.fetch(`${LEAF_API}/transactions/${p.txid}`); applied = r.status === 200; } catch {}
-      if (!applied) keep.push(p);
+      let settled = false;
+      try {
+        const r = await this.fetch(`${LEAF_API}/transactions/${p.txid}`);
+        if (r.status === 200) settled = true;
+        else if (r.status === 404) {
+          const s = await this.fetch(`${this.app.servers.base()}tx/${p.txid}/status`);
+          if (s.status === 404) settled = Date.now() - p.at > 3600_000;
+          else if (s.ok) {
+            const st = await s.json();
+            if (st.confirmed && indexer.synced && Number.isInteger(indexer.height) && indexer.height >= st.block_height) { settled = true; p.failed = true; }
+          }
+        }
+      } catch {}
+      if (!settled) keep.push(p);
+      else if (p.failed) this.failedSends = [...(this.failedSends || []), p.txid];
     }
     this.store.setJson(this.pendingKey, keep);
   }
@@ -137,8 +159,9 @@ export class LeafBook {
     const gen = this.gen, id = this.account.id;
     const stale = () => gen !== this.gen || id !== this.account.id;
     try {
-      this.behind = !indexerSynced(await this.get('/status'));
-      await this.settlePending(); // first: a send applied meanwhile is then never counted twice the other way
+      const status = await this.get('/status');
+      this.behind = !indexerSynced(status);
+      await this.settlePending({ synced: !this.behind, height: status?.indexer?.height }); // first: a send applied meanwhile is then never counted twice the other way
       const { account } = this, codec = account.codec;
       const pubAddr = account.pubAddr();
       const coins = this.lookupCoins();
@@ -269,11 +292,14 @@ export class LeafBook {
   /** Broadcast a built transfer and remember it as in flight. */
   async confirm(b) {
     if (b.account !== this.account.id) throw new Error('You switched account. Review the send again.');
+    if (this.app.lookAlike(b.recipient) && !this.app.state.f.poisonOk) throw new Error('Tick the box to confirm the look-alike address.');
     await this.app.broadcast(b.hex);
     this.addPending({ txid: b.txid, from: b.senderAddress, atoms: b.atoms });
     // LEAF sent to our own Shielded address: remember that one-time address, so it is looked up (and only it)
     if (b.kind === 'shielded' && b.recipient.toLowerCase() === this.account.shieldAddr().toLowerCase()) this.remember(b.receiverAddress);
     this.unconfirmed = [...this.unconfirmed.filter((u) => u.txid !== b.txid), { txid: b.txid, from: b.senderAddress, to: b.receiverAddress, atoms: b.atoms }];
+    this.app.rememberRecipient(b.recipient);
+    this.app.state.f.poisonOk = false;
     this.app.afterBroadcast(b.spent, [b.txid]);
     setTimeout(() => this.refresh(true), 4000);
   }
