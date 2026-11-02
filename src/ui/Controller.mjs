@@ -8,6 +8,7 @@ import { FEE_MAX, FEE_MIN, FeeOracle } from '../net/FeeOracle.mjs';
 import { EsploraPool } from '../net/EsploraPool.mjs';
 import { Keyring } from '../wallet/Keyring.mjs';
 import { fmtLeaf } from '../tokens/leaf.mjs';
+import { normalizeMint, peekToken } from '../ecash/EcashBook.mjs';
 import { SendView } from './views/SendView.mjs';
 import { AirdropView } from './views/AirdropView.mjs';
 import { SettingsView } from './views/SettingsView.mjs';
@@ -18,7 +19,7 @@ import { I } from './html.mjs';
 const { b2n } = sp.util;
 
 /** Which status line an error goes to, by view. */
-const ERROR_SLOT = { send: 'send', shield: 'send', leaf: 'leaf', drop: 'drop', mint: 'mint', settings: 'wallet', activity: 'scan', relay: 'relay' };
+const ERROR_SLOT = { ecash: 'ecash', send: 'send', shield: 'send', leaf: 'leaf', drop: 'drop', mint: 'mint', settings: 'wallet', activity: 'scan', relay: 'relay' };
 
 export class Controller {
   /** @param {import('../app/MaskedApp.mjs').MaskedApp} app */
@@ -136,6 +137,7 @@ export class Controller {
     if (d.go) { this.go(t); return true; }
     if (d.set) {
       f[d.set] = d.val; state.status.send = null;
+      if (d.set === 'ecMode' || d.set === 'ecMint') { state.ecash = {}; state.status.ecash = null; }
       if (d.set === 'mintMode') state.status.mint = null;
       this.render();
       if (d.set === 'fee' && d.val === 'custom') $('#feeCustom')?.focus();
@@ -169,6 +171,20 @@ export class Controller {
     }
     if (d.recover) { await this.recoverReservation(d.recover); return true; }
     if (d.lock) { app.coins.toggleLock(d.lock); this.render(); return true; }
+    // Ecash
+    if (t.hasAttribute('data-ecnew')) { state.ecash = {}; state.status.ecash = null; app.ecash.stopWatching(); this.render(); return true; }
+    if (d.ecaddmint !== undefined) { f.ecNewMint = d.ecaddmint; await this.addEcashMint(); return true; }
+    if (d.ecrmmint) { await app.ecash.removeMint(d.ecrmmint); this.render(); this.toast('Mint removed'); return true; }
+    if (d.ecreclaim) {
+      try { const r = await app.ecash.reclaim(d.ecreclaim); this.toast(`${r.amount} sats back`); } catch (err) { this.toast(friendly(err.message), 3200); }
+      this.render(); return true;
+    }
+    if (t.hasAttribute('data-eccheck')) { await app.ecash.checkSent(); this.render(); this.toast(app.ecash.unclaimed().length ? 'Some tokens are not claimed yet' : 'All claimed'); return true; }
+    if (d.eccheckq) {
+      const s = await app.ecash.claimQuote(d.eccheckq);
+      if (s) this.ecashPaid(s); else app.setStatus('ecash', 'Not paid yet. It shows up here a few seconds after you pay.', '');
+      return true;
+    }
     if (d.relock) { app.coins.relockSmall(d.relock); this.render(); this.toast('Protected again'); return true; }
     if (d.unlock) {
       const [txid, vout] = d.unlock.split(':');
@@ -268,6 +284,60 @@ export class Controller {
         const shield = state.view === 'shield';
         f.poisonOk = false;
         await review('send', () => app.builder.send({ from: shield ? 'public' : f.sendFrom, to: shield ? 'self' : f.sendTo, amount: parseBtc(f.sendAmount, account.unit), rate: app.feeRate() }));
+        break;
+      }
+      case 'btnEcAddMint': await this.addEcashMint(); break;
+      case 'btnEcReceive': {
+        const peek = peekToken(f.ecToken);
+        if (!app.ecash.mints.some((m) => m.url === peek.mint)) await app.platform.requestOrigin(peek.mint);
+        state.busy = true; state.status.ecash = null; this.render();
+        try {
+          const r = await app.ecash.receive(f.ecToken);
+          f.ecToken = '';
+          this.toast(`Received ${r.amount.toLocaleString('en-US')} sats${r.fee > 0 ? ` (mint fee ${r.fee})` : ''}`, 3000);
+        } finally { state.busy = false; this.render(); }
+        break;
+      }
+      case 'btnEcSend': {
+        if (f.ecLock && app.lookAlike(f.ecLock.trim()) && !confirm('This address looks like one you used before but is different. Lock to it anyway?')) break;
+        state.busy = true; state.status.ecash = null; this.render();
+        try {
+          const r = await app.ecash.send({ url: f.ecMint, amount: f.ecAmt, lockTo: f.ecLock.trim() });
+          state.ecash = { sent: { token: r.token, amount: r.amount, lockTo: f.ecLock.trim() } };
+          if (f.ecLock.trim()) app.rememberRecipient(f.ecLock.trim());
+          f.ecAmt = ''; f.ecLock = '';
+        } finally { state.busy = false; this.render(); }
+        break;
+      }
+      case 'btnEcTopUp': {
+        state.busy = true; state.status.ecash = null; this.render();
+        try {
+          const q = await app.ecash.topUp({ url: f.ecMint, amount: f.ecAmt });
+          state.ecash = { quote: q }; f.ecAmt = '';
+          app.ecash.watchQuote(q.quote, (s) => this.ecashPaid(s));
+        } finally { state.busy = false; this.render(); }
+        break;
+      }
+      case 'btnEcQuote': {
+        state.busy = true; state.status.ecash = null; this.render();
+        try { state.ecash = { pay: await app.ecash.quotePay({ url: f.ecMint, invoice: f.ecInvoice }) }; } finally { state.busy = false; this.render(); }
+        break;
+      }
+      case 'btnEcPay': {
+        state.busy = true; state.status.ecash = null; this.render();
+        try {
+          const r = await app.ecash.pay(state.ecash.pay);
+          state.ecash = {}; f.ecInvoice = '';
+          this.toast(`Paid ${r.paid.toLocaleString('en-US')} sats${r.fee > 0 ? ` · fee ${r.fee}` : ''}`, 3000);
+        } finally { state.busy = false; this.render(); }
+        break;
+      }
+      case 'btnEcRestore': {
+        state.busy = true; state.status.ecmint = ['Asking your mints…', '']; this.render();
+        try {
+          const found = await app.ecash.restore();
+          state.status.ecmint = [found ? `Found ${found.toLocaleString('en-US')} sats of ecash.` : 'Nothing new found. Your ecash is all here.', 'ok'];
+        } catch (err) { state.status.ecmint = [friendly(err.message), 'err']; } finally { state.busy = false; this.render(); }
         break;
       }
       case 'btnLeafReview':
@@ -436,6 +506,30 @@ export class Controller {
       state.mint = { stage: 'done', built: b };
       app.afterBroadcast(b.spent, [b.commitTxid, b.revealTxid]);
     } finally { state.busy = false; this.render(); }
+  }
+
+  /** Ecash: add the typed mint (asks Chrome for permission to reach it first, in the click). */
+  async addEcashMint() {
+    const { app, state, f } = this;
+    try {
+      const url = normalizeMint(f.ecNewMint);
+      await app.platform.requestOrigin(url);
+      state.status.ecmint = ['Connecting…', '']; this.render();
+      await app.ecash.addMint(url);
+      f.ecNewMint = ''; f.ecMint = url; state.status.ecmint = null;
+      if (!f.ecMode) f.ecMode = 'topup';
+      this.toast('Mint added');
+    } catch (err) { state.status.ecmint = [friendly(err.message), 'err']; }
+    this.render();
+  }
+
+  /** An ecash top-up invoice was paid. */
+  ecashPaid(s) {
+    const { state } = this;
+    if (state.ecash?.quote) state.ecash = {};
+    state.status.ecash = null;
+    this.toast(`+${s.toLocaleString('en-US')} sats of ecash`, 3000);
+    this.render();
   }
 
   /** Settings → Coins → Find a payment manually. */

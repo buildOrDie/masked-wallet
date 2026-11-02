@@ -14,6 +14,7 @@ import { DeployRegistry, MintLog, PendingTransfers, TransferLog } from '../token
 import { TokenBook } from '../tokens/TokenBook.mjs';
 import { TokenTx } from '../tokens/TokenTx.mjs';
 import { LeafBook } from '../tokens/LeafBook.mjs';
+import { EcashBook } from '../ecash/EcashBook.mjs';
 import { RecipientBook, lookAlike } from '../security/guard.mjs';
 import { TradeAccount } from '../trade/TradeAccount.mjs';
 import { ApprovalController } from '../dapp/ApprovalController.mjs';
@@ -70,6 +71,7 @@ export class MaskedApp {
     this.tokens = new TokenBook(this);
     this.tokenTx = new TokenTx(this);
     this.leaf = new LeafBook(this);
+    this.ecash = new EcashBook(this);
     this.recips = new RecipientBook(store);
 
     // dApps and private trading
@@ -138,6 +140,7 @@ export class MaskedApp {
     this.coins.load();
     this.tokens.resetCache();
     this.leaf?.reset(); // LEAF balances belong to one account on one network
+    this.ecash?.stopWatching(); this.ecash?.reset(); this.state.ecash = {}; // ecash too
   }
 
   /** A different wallet or network: drop what is on screen and load its records. */

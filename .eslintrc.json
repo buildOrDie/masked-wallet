@@ -12,7 +12,7 @@
     "no-unreachable": "error",
     "no-self-assign": "error",
     "import/named": "error",
-    "import/no-unresolved": ["error", { "ignore": ["\\.wasm$"] }]
+    "import/no-unresolved": ["error", { "ignore": ["\\.wasm$", "^@cashu/cashu-ts$"] }]
   },
   "overrides": [
     { "files": ["test/**/*.mjs", "scripts/**/*.mjs"], "env": { "node": true, "browser": false } },
