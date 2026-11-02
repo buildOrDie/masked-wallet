@@ -3,8 +3,8 @@ import { ECASH_SOFT_LIMIT } from '../../ecash/EcashBook.mjs';
 import { View } from '../View.mjs';
 import { I, head, qrSvg, rowKV, seg } from '../html.mjs';
 
-/** Mints people often start with. MASKED doesn't run or vouch for any mint. */
-export const SUGGESTED_MINTS = [['mint.minibits.cash/Bitcoin', 'Minibits'], ['mint.coinos.io', 'Coinos']];
+/** The most used and reviewed mint, offered as a one-tap start. Any other mint can be added by address. MASKED doesn't run or vouch for any mint. */
+export const SUGGESTED_MINTS = [['mint.minibits.cash/Bitcoin', 'Minibits']];
 const sats = (v) => Number(v || 0).toLocaleString('en-US');
 export const ecashIcon = (big = false) => `<span class="tok-ic ec-ic ${big ? 'big' : ''}" aria-hidden="true"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="7" rx="7" ry="3"/><path d="M5 7v5c0 1.7 3.1 3 7 3s7-1.3 7-3V7"/><path d="M5 12v5c0 1.7 3.1 3 7 3s7-1.3 7-3v-5"/></svg></span>`;
 
@@ -227,10 +227,11 @@ export class EcashView extends View {
     return `
     <details class="card adv ec-mints" ${open ? 'open' : ''} data-k="ecmints"><summary>Mints${e.mints.length ? ` · ${e.mints.length}` : ''}</summary>
       ${e.mints.map((m) => `<div class="ec-mint"><span><b>${esc(e.mintName(m.url))}</b>${m.onchain ? ' <span class="badge">BTC deposits</span>' : ''}<span class="muted small mono">${esc(m.url.replace(/^https?:\/\//, ''))}</span></span><span><b>${sats(e.balance(m.url))}</b> ${e.balance(m.url) || e.pendingDeposits().some((d) => d.url === m.url) ? '' : `<button class="link" data-ecrmmint="${esc(m.url)}">Remove</button>`}</span></div>`).join('')}
-      ${e.mints.length ? '' : '<p class="small">Pick a mint to start. A mint turns Lightning payments into ecash and back. Anyone can run one; choose one you trust with small amounts.</p>'}
+      ${e.mints.length ? '' : '<p class="small">Pick a mint to start. A mint turns bitcoin into ecash and back. Minibits is the most used; you can add any other Cashu mint by its address. Choose one you trust with small amounts.</p>'}
       <label class="field"><span class="lbl">Add a mint</span>
         <div class="amount"><input id="ecNewMint" data-bind="ecNewMint" class="mono" spellcheck="false" autocomplete="off" value="${esc(f.ecNewMint)}" placeholder="mint.example.com"><button class="max" id="btnEcAddMint">Add</button></div></label>
-      <div class="chips">${SUGGESTED_MINTS.filter(([u]) => !e.mints.some((m) => m.url.endsWith(u))).map(([u, n]) => `<button class="chip" data-ecaddmint="${esc(u)}">${esc(n)} · ${esc(u)}</button>`).join('')}</div>
+      <div class="chips">${SUGGESTED_MINTS.filter(([u]) => !e.mints.some((m) => m.url.endsWith(u))).map(([u, n]) => `<button class="chip" data-ecaddmint="${esc(u)}">${esc(n)} · most used</button>`).join('')}</div>
+      <p class="muted small">Other mints and their reviews: <a href="https://cashumints.space" target="_blank" rel="noopener">cashumints.space</a>. Spreading ecash over two mints lowers the risk if one fails.</p>
       ${this.statusLine('ecmint')}
       ${e.mints.length ? `<button class="btn ghost wide" id="btnEcRestore" ${this.state.busy ? 'disabled' : ''}>Find my ecash again</button><p class="muted small">Asks each mint for ecash made by this wallet (after reinstalling, or on a new device with the same recovery phrase).</p>` : ''}
     </details>`;
