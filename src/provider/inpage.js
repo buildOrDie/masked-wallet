@@ -34,7 +34,7 @@
 
   const provider = Object.freeze({
     isMasked: true,
-    version: '1.2.0',
+    version: '1.3.0',
     // accounts
     requestAccounts: () => request('requestAccounts'),
     getAccounts: () => request('getAccounts'),
@@ -64,6 +64,17 @@
     cancelShieldedListing: (outpoint) => request('cancelShieldedListing', { outpoint }),
     returnToShielded: (ticker, amount) => request('returnToShielded', ticker ? { ticker, amount: String(amount) } : {}),
     pushTx: (rawtx) => request('pushTx', { rawtx: typeof rawtx === 'object' ? rawtx.rawtx : rawtx }),
+    // ecash (Cashu): every payment and claim is approved in MASKED
+    cashu: Object.freeze({
+      /** The key tokens are locked to for this wallet (its Public address key), hex "02…". */
+      getLockKey: () => request('cashuGetLockKey'),
+      /** Ask for an ecash token: { amount, mints?, lockTo?, memo? } → { token, mint, amount } */
+      pay: (o = {}) => request('cashuPay', { amount: o.amount, mints: o.mints, lockTo: o.lockTo, memo: o.memo }),
+      /** Pay a NUT-18 payment request (creqA… / creqB…) → { delivered, mint, amount } or { token, payload, … } */
+      payRequest: (paymentRequest) => request('cashuPayRequest', { request: paymentRequest }),
+      /** Give the wallet a token to claim (a refund, a reward) → { amount, mint } */
+      receive: (token) => request('cashuReceive', { token }),
+    }),
     // events: accountsChanged, networkChanged, chainChanged, tradeAccountChanged
     on: (event, fn) => { if (!listeners.has(event)) listeners.set(event, new Set()); listeners.get(event).add(fn); },
     removeListener: (event, fn) => { listeners.get(event)?.delete(fn); },

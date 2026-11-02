@@ -5,6 +5,8 @@ import assert from 'node:assert/strict';
 import { walletApp, Keyring } from './helpers/wallet-app.mjs';
 import { generateMnemonic } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english';
+import http from 'node:http';
+import { PaymentRequest, Wallet } from '@cashu/cashu-ts';
 import { EcashBook, lockKeyOf, normalizeMint, peekToken } from '../src/ecash/EcashBook.mjs';
 
 const A = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
@@ -65,7 +67,7 @@ test('end to end with a test mint: top up, locked send, claim, take back, pay, r
   assert.deepEqual(peek.locks, [b.myLock]);
   assert.ok(a.total() < 1700 && a.total() >= 1690, `A keeps the rest minus a small fee (${a.total()})`);
   await assert.rejects(a.receive(s.token), /someone else/, 'the sender cannot claim a token locked to B');
-  await assert.rejects(a.reclaim(a.unclaimed()[0].id), /only its owner/);
+  await assert.rejects(a.reclaim(a.unclaimed()[0].id), /until .*take it back/, 'locked to B: A waits for the refund time');
 
   // B claims exactly 300 (the fee was included by the sender)
   const got = await b.receive(s.token);
@@ -74,6 +76,11 @@ test('end to end with a test mint: top up, locked send, claim, take back, pay, r
   await assert.rejects(b.receive(s.token), /already claimed/);
   await a.checkSent();
   assert.equal(a.unclaimed().length, 0);
+
+  // a locked token B never claims comes back to A after the refund time (NUT-11 locktime + refund key)
+  const late = await a.send({ url: MINT, amount: 40, lockTo: appB.account.pubAddr(), refundAfter: -60 });
+  assert.ok(peekToken(late.token).locks.includes(a.myLock), 'past its locktime, the refund key (A) can claim too');
+  assert.equal((await a.reclaim(a.unclaimed()[0].id)).amount, 40);
 
   // an unlocked token nobody claims can be taken back
   const before = a.total();
@@ -111,4 +118,80 @@ test('end to end with a test mint: top up, locked send, claim, take back, pay, r
   const q3 = await a3.topUp({ url: MINT, amount: 100 });
   assert.equal(await a3.claimQuote(q3.quote), 100);
   assert.ok(a3.total() >= total - 15 + 100, `old ecash found again on the way (${a3.total()})`);
+});
+
+const creq = ({ amount, mints, post, lock, memo = 'Article #42' }) => new PaymentRequest(
+  post ? [{ type: 'post', target: post }] : undefined, 'req1', amount, 'sat', mints, memo, true,
+  lock ? { kind: 'P2PK', data: lock, tags: [] } : undefined).toEncodedRequest();
+
+test('payment requests (NUT-18): read, refuse what MASKED cannot do', () => {
+  const app = walletApp(Keyring.fromMnemonic(A, '', 'main'));
+  const e = new EcashBook(app);
+  const r = e.parseRequest(creq({ amount: 21, mints: [MINT], post: 'https://shop.example/pay' }));
+  assert.deepEqual([r.amount, r.mints, r.post, r.memo, r.id], [21, [MINT], 'https://shop.example/pay', 'Article #42', 'req1']);
+  assert.throws(() => e.parseRequest(creq({ amount: 21, post: 'http://shop.example/pay' })), /insecure/);
+  assert.throws(() => e.parseRequest(new PaymentRequest([{ type: 'nostr', target: 'nprofile1x' }], 'x', 5, 'sat').toEncodedRequest()), /Nostr/);
+  assert.throws(() => e.parseRequest(new PaymentRequest(undefined, 'x', 5, 'usd').toEncodedRequest()), /usd/);
+  assert.throws(() => e.parseRequest('creqAnope'), /not a Cashu payment request/);
+});
+
+test('dapp payments with a test mint: pick a mint, pay a request in-band, by POST, and locked', { skip: !up && 'no local test mint' }, async () => {
+  globalThis.fetch = realFetch;
+  const app = walletApp(Keyring.fromMnemonic(generateMnemonic(wordlist), '', 'main'));
+  const e = new EcashBook(app);
+  await e.addMint(MINT);
+  const q = await e.topUp({ url: MINT, amount: 1000 });
+  await e.claimQuote(q.quote);
+
+  assert.equal(e.pickMint(100), MINT);
+  assert.equal(e.pickMint(100, [MINT + '/']), MINT, 'mint lists compare in tidy form');
+  assert.throws(() => e.pickMint(100, ['https://other.mint']), /only takes ecash from other\.mint/);
+  assert.throws(() => e.pickMint(5000), /Not enough ecash/);
+
+  // a shop that redeems what it is sent
+  const shop = new Wallet(MINT, { unit: 'sat' }); await shop.loadMint();
+  const shopPub = lockKeyOf(walletApp(Keyring.fromMnemonic(A, '', 'main')).account.pubAddr());
+  const sum = (ps) => ps.reduce((x, p) => x + Number(String(p.amount)), 0);
+  // in-band: the token comes back to the page, which redeems it
+  const r1 = await e.payRequest(e.parseRequest(creq({ amount: 21, mints: [MINT] })), MINT);
+  assert.equal(r1.payload.id, 'req1');
+  assert.equal(sum(await shop.receive(r1.token)), 21);
+
+  // POST: the payload is delivered to the payee's server
+  let got = null;
+  const srv = http.createServer((req, res) => { let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => { got = JSON.parse(b); res.writeHead(200).end('{}'); }); });
+  await new Promise((ok) => srv.listen(0, '127.0.0.1', ok));
+  const post = `http://127.0.0.1:${srv.address().port}/pay`;
+  const r2 = await e.payRequest(e.parseRequest(creq({ amount: 34, post })), MINT);
+  assert.equal(r2.delivered, true);
+  assert.equal(got.mint, MINT); assert.equal(got.id, 'req1'); assert.equal(got.unit, 'sat');
+  assert.equal(sum(await shop.receive(got.proofs)), 34);
+
+  // a failed POST keeps the ecash takeable
+  srv.close();
+  await assert.rejects(e.payRequest(e.parseRequest(creq({ amount: 10, post })), MINT), /still yours/);
+  assert.equal(e.unclaimed()[0].amount, 10);
+  assert.equal((await e.reclaim(e.unclaimed()[0].id)).amount, 10);
+
+  // a request locked to the payee's key: only that key can claim it
+  const r3 = await e.payRequest(e.parseRequest(creq({ amount: 13, lock: shopPub })), MINT);
+  assert.deepEqual(peekToken(r3.token).locks, [shopPub]);
+  await assert.rejects(shop.receive(r3.token), /Witness|signature/i);
+  await assert.rejects(e.reclaim(e.unclaimed()[0].id), /only its owner|can't be taken back/);
+});
+
+test('the Taproot-lock spec test vectors (docs/NUT-taproot-lock.md) hold', async () => {
+  const { schnorr } = await import('@noble/curves/secp256k1');
+  const { sha256 } = await import('@noble/hashes/sha256');
+  const { hexToBytes, bytesToHex } = await import('@noble/hashes/utils');
+  const f = Keyring.fromMnemonic(A, '', 'main').funding('main');
+  assert.equal(f.address, 'bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr');
+  assert.equal(lockKeyOf(f.address), '02a60869f0dbcf1dc659c9cecbaf8050135ea9e8cdc487053f1dc6880949dc684c');
+  assert.equal(f.outputPriv, '1553fe90c9173e7cb804530fa5486997b1b2dffee10cae5f8d31c0bc6bd89109');
+  const secret = '["P2PK",{"nonce":"859d4935c4907062a6297cf4e663e2835d90d97ecdd510745d32f6816323a41f","data":"02a60869f0dbcf1dc659c9cecbaf8050135ea9e8cdc487053f1dc6880949dc684c","tags":[["locktime","1893456000"],["refund","0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"]]}]';
+  const msg = sha256(new TextEncoder().encode(secret));
+  assert.equal(bytesToHex(msg), '4e05f4ac7cb6d0674bd10ee143416582e48ee4839380ce8221f498a1bdda93ac');
+  const sig = schnorr.sign(msg, hexToBytes(f.outputPriv), new Uint8Array(32));
+  assert.equal(bytesToHex(sig), 'c5ae78fc9288c8c72c0e0f41d8386437b0be0aafc5792cafa670c213b57487a65410986655679aafde7bcbc75ed2f36ad17245017b3aac2863f2e7591a23894d');
+  assert.ok(schnorr.verify(sig, msg, hexToBytes(f.outputX)));
 });

@@ -134,6 +134,38 @@ Cancels a listing made straight from Shielded by moving its coin back into Shiel
 
 `signPsbt` also signs inputs of the trade address and of Shielded listings (maskedwallet.com only).
 
+## Ecash (Cashu) *(MASKED only)*
+
+`window.masked.cashu` lets a site take payments in [Cashu](https://cashu.space) ecash: instant, no transaction fee, and
+private (the mint can't link payer and payee). Every payment and claim is approved in MASKED. Sites never see the
+ecash balance. See [ECASH.md](ECASH.md) and the example paywall in [`examples/cashu-paywall.html`](../examples/cashu-paywall.html).
+
+### `cashu.pay({ amount, mints?, lockTo?, memo? }): Promise<{ token, mint, amount }>` 🔐
+Asks for `amount` sats as a `cashuB…` token. `mints` limits which mints you accept (MASKED pays from one where the user
+has enough). `lockTo` (a `bc1p…` address or a hex public key) locks the token so only that key can claim it, which makes
+a leaked token worthless. The user's mint fee is added on their side, so you receive exactly `amount`. Redeem the token
+at its mint (for example with [cashu-ts](https://github.com/cashubtc/cashu-ts) `wallet.receive(token)`) before treating
+it as paid. Until you do, the user can take it back.
+
+### `cashu.payRequest(paymentRequest): Promise<{ delivered, mint, amount } | { token, payload, mint, amount }>` 🔐
+Pays a [NUT-18](https://github.com/cashubtc/nuts/blob/main/18.md) payment request (`creqA…`/`creqB…`). Supported: a sat
+amount, a mint list, a P2PK lock, and the `post` transport: MASKED POSTs the payload `{ id, memo, mint, unit, proofs }`
+to your https endpoint and resolves `{ delivered: true }` once it answers 2xx. Without a transport, the payload and token
+come back to the page. Nostr delivery is not supported yet.
+
+### `cashu.receive(token): Promise<{ amount, mint }>` 🔐
+Gives the user a token to claim (a refund, a reward, a withdrawal). The approval shows the amount and the mint, and warns
+when it's a mint the user doesn't use yet.
+
+### `cashu.getLockKey(): Promise<string>`
+The key tokens are locked to for this wallet (`02…`, the key of its Public address). Lock a refund or a payout to it and
+only this wallet can claim it.
+
+```js
+const { token } = await window.masked.cashu.pay({ amount: 21, mints: ['https://mint.minibits.cash/Bitcoin'], memo: 'Article #42' });
+await fetch('/api/unlock', { method: 'POST', body: token }); // your server redeems it at the mint
+```
+
 ## Events
 
 ```js
@@ -154,4 +186,5 @@ const provider = window.masked ?? window.unisat;
 
 - Sites see the **Public** address, its public key and its balance. With private trading allowed, maskedwallet.com also sees the trade address and the Shielded totals, never the Shielded address or its payments.
 - Shielded coins are invisible to dApps. `getShieldedAddress()` only shares the reusable receive address.
+- Sites never see the ecash balance or mints; a payment shows only the token (or payload) it carries.
 - Provider calls never go to MASKED servers. `getBalance` reads mempool.space and `getInscriptions` reads ordinals.com, straight from the extension.

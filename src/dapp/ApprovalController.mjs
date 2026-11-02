@@ -5,9 +5,10 @@ import { friendly } from '../core/format.mjs';
 import { UNISAT_NET } from '../bitcoin/networks.mjs';
 import { signMessageBip322, signMessageEcdsa } from '../bitcoin/messages.mjs';
 import { TRADE_SITES } from '../trade/TradeAccount.mjs';
+import { lockKeyOf, peekToken } from '../ecash/EcashBook.mjs';
 
 /** Methods whose approve button waits for a prepared transaction. */
-export const NEEDS_PREP = ['sendBitcoin', 'inscribeTransfer', 'shareTrade', 'fundTrade', 'moveToTrade', 'returnToShielded', 'cancelShielded'];
+export const NEEDS_PREP = ['sendBitcoin', 'inscribeTransfer', 'shareTrade', 'fundTrade', 'moveToTrade', 'returnToShielded', 'cancelShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive'];
 
 export class ApprovalController {
   /** @param {import('../app/MaskedApp.mjs').MaskedApp} app */
@@ -66,6 +67,26 @@ export class ApprovalController {
       if (a.method === 'moveToTrade') once(() => trade.buildTokenMove({ tick: P.ticker, amt: P.amount, rate: rate() }));
       if (a.method === 'returnToShielded') once(() => (P.ticker ? trade.buildTokenMove({ tick: P.ticker, amt: P.amount, rate: rate(), back: true }) : trade.buildReturn({ rate: rate() })));
       if (trading) once(() => (P.options.account === 'shielded' ? trade.buildShieldedTransferInscribe({ tick: P.ticker, amt: P.amount, rate: rate() }) : trade.buildTransferInscribe({ tick: P.ticker, amt: P.amount, rate: rate() })));
+      // ecash: which mint pays, what the site asked for
+      const ecash = app.ecash;
+      const needEcash = async () => { if (!ecash.on) throw new Error('Ecash needs a wallet with its own keys (not watch-only or demo).'); await ecash.load(); };
+      if (a.method === 'cashuPay') once(async () => {
+        await needEcash();
+        if (P.lockTo) lockKeyOf(P.lockTo);
+        return { url: ecash.pickMint(Number(P.amount), P.mints), amount: Number(P.amount), lockTo: P.lockTo, memo: P.memo };
+      });
+      if (a.method === 'cashuPayRequest') once(async () => {
+        await needEcash();
+        const r = ecash.parseRequest(P.request);
+        return { ...r, url: ecash.pickMint(r.amount, r.mints) };
+      });
+      if (a.method === 'cashuReceive') once(async () => {
+        await needEcash();
+        const t = peekToken(P.token);
+        if (t.unit !== 'sat') throw new Error('Only sat ecash is supported.');
+        if (t.locks.length && !t.locks.some((k) => k.slice(2) === ecash.myLock.slice(2))) throw new Error('This token is locked to someone else.');
+        return { ...t, known: ecash.mints.some((m) => m.url === t.mint) };
+      });
       if (a.method === 'cancelShielded') once(() => trade.buildShieldedCancel({ outpoint: String(P.outpoint || ''), rate: rate() }));
       const psbt = a.method === 'signPsbt' || a.method === 'signPsbts';
       if (psbt && !a.tradeLoaded && trade.on) {
@@ -176,6 +197,22 @@ export class ApprovalController {
         return { txid: b.txid };
       }
       case 'switchNetwork': app.setNet(a.params.target); return UNISAT_NET[a.params.target];
+      case 'cashuPay': {
+        const b = prepared('');
+        const r = await app.ecash.send({ url: b.url, amount: b.amount, lockTo: b.lockTo, label: b.memo || `Paid to ${new URL(a.origin).host}` });
+        return { token: r.token, mint: b.url, amount: r.amount };
+      }
+      case 'cashuPayRequest': {
+        const b = prepared('');
+        if (b.post) await app.platform.requestOrigin(b.post);
+        return app.ecash.payRequest({ ...b, memo: b.memo || `Paid to ${new URL(a.origin).host}` }, b.url);
+      }
+      case 'cashuReceive': {
+        const b = prepared('');
+        if (!b.known) await app.platform.requestOrigin(b.mint);
+        const r = await app.ecash.receive(b.token);
+        return { amount: r.amount, mint: r.mint };
+      }
       default: throw new Error('Unsupported request.');
     }
   }

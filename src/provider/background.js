@@ -3,7 +3,7 @@
 // It never sees private keys. Anything that needs a key opens the wallet in an approval window,
 // where the user approves or rejects and the wallet page does the signing.
 import * as btc from '@scure/btc-signer';
-import { hex } from '@scure/base';
+import { bech32m, hex } from '@scure/base';
 
 const NETS = {
   main: { ord: 'https://ordinals.com', api: 'https://mempool.space/api/', unisat: 'livenet', chain: 'BITCOIN_MAINNET', name: 'Bitcoin Mainnet' },
@@ -12,7 +12,7 @@ const NETS = {
 // MASKED runs on Mainnet and Signet. UniSat reports Signet as "testnet", so that name maps to Signet.
 const FROM_UNISAT = { livenet: 'main', mainnet: 'main', testnet: 'signet', signet: 'signet' };
 const FROM_CHAIN = { BITCOIN_MAINNET: 'main', BITCOIN_SIGNET: 'signet' };
-const APPROVAL = new Set(['requestAccounts', 'signMessage', 'signPsbt', 'signPsbts', 'sendBitcoin', 'switchNetwork', 'switchChain', 'inscribeTransfer', 'getTradeAccount', 'fundTradeAccount', 'moveToTradeAccount', 'returnToShielded']);
+const APPROVAL = new Set(['requestAccounts', 'signMessage', 'signPsbt', 'signPsbts', 'sendBitcoin', 'switchNetwork', 'switchChain', 'inscribeTransfer', 'getTradeAccount', 'fundTradeAccount', 'moveToTradeAccount', 'returnToShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive']);
 
 const TRADE_SITES = new Set(['https://maskedwallet.com', 'https://www.maskedwallet.com']);
 const err = (code, message) => Object.assign(new Error(message), { code });
@@ -221,6 +221,30 @@ async function handle(origin, method, params) {
       try { tx.finalize(); } catch {}
       return (await api(net, 'tx', { method: 'POST', body: tx.hex })).trim();
     }
+    // ---- ecash (Cashu) ----
+    case 'cashuGetLockKey': {
+      needConnected();
+      const d = bech32m.decode(pub.address, 120);
+      return '02' + hex.encode(bech32m.fromWords(d.words.slice(1)));
+    }
+    case 'cashuPay': {
+      needConnected();
+      const amount = Number(params.amount);
+      if (!Number.isSafeInteger(amount) || amount <= 0 || amount > 10_000_000) throw err(4000, 'amount must be a whole number of sats (up to 10,000,000).');
+      const mints = params.mints == null ? [] : params.mints;
+      if (!Array.isArray(mints) || mints.length > 20 || mints.some((m) => typeof m !== 'string' || m.length > 200)) throw err(4000, 'mints must be a list of mint URLs.');
+      if (params.lockTo != null && (typeof params.lockTo !== 'string' || params.lockTo.length > 120)) throw err(4000, 'lockTo must be a bc1p… address or a public key.');
+      if (params.memo != null && (typeof params.memo !== 'string' || params.memo.length > 200)) throw err(4000, 'memo must be a short string.');
+      return openApproval(origin, 'cashuPay', { amount, mints, lockTo: params.lockTo || '', memo: params.memo || '' });
+    }
+    case 'cashuPayRequest':
+      needConnected();
+      if (typeof params.request !== 'string' || !/^(cashu:)?creq[ab]/i.test(params.request) || params.request.length > 5000) throw err(4000, 'paymentRequest must be a Cashu payment request (creqA… or creqB…).');
+      return openApproval(origin, 'cashuPayRequest', { request: params.request });
+    case 'cashuReceive':
+      needConnected();
+      if (typeof params.token !== 'string' || !/^(cashu:)?cashu[AB]/.test(params.token) || params.token.length > 50000) throw err(4000, 'token must be a Cashu token (cashuA… or cashuB…).');
+      return openApproval(origin, 'cashuReceive', { token: params.token });
     default: throw err(4200, `Method ${method} is not supported by MASKED.`);
   }
 }

@@ -5,8 +5,8 @@ import { NEEDS_PREP } from '../../dapp/ApprovalController.mjs';
 import { View } from '../View.mjs';
 import { I, btcLogo, rowKV } from '../html.mjs';
 
-const TITLES = { requestAccounts: 'Connect to MASKED', signMessage: 'Sign message', signPsbt: 'Sign transaction', signPsbts: 'Sign transactions', sendBitcoin: 'Send bitcoin', switchNetwork: 'Switch network', inscribeTransfer: 'Inscribe transfer', shareTrade: 'Trade from Shielded', fundTrade: 'Move BTC to trading', moveToTrade: 'Move tokens to trading', returnToShielded: 'Move back to Shielded', cancelShielded: 'Cancel listing' };
-const VERBS = { requestAccounts: 'Connect', sendBitcoin: 'Send', inscribeTransfer: 'Inscribe', switchNetwork: 'Switch', shareTrade: 'Allow', fundTrade: 'Move', moveToTrade: 'Move', returnToShielded: 'Move back', cancelShielded: 'Cancel listing' };
+const TITLES = { requestAccounts: 'Connect to MASKED', signMessage: 'Sign message', signPsbt: 'Sign transaction', signPsbts: 'Sign transactions', sendBitcoin: 'Send bitcoin', switchNetwork: 'Switch network', inscribeTransfer: 'Inscribe transfer', shareTrade: 'Trade from Shielded', fundTrade: 'Move BTC to trading', moveToTrade: 'Move tokens to trading', returnToShielded: 'Move back to Shielded', cancelShielded: 'Cancel listing', cashuPay: 'Pay with ecash', cashuPayRequest: 'Pay with ecash', cashuReceive: 'Receive ecash' };
+const VERBS = { requestAccounts: 'Connect', sendBitcoin: 'Send', inscribeTransfer: 'Inscribe', switchNetwork: 'Switch', shareTrade: 'Allow', fundTrade: 'Move', moveToTrade: 'Move', returnToShielded: 'Move back', cancelShielded: 'Cancel listing', cashuPay: 'Pay', cashuPayRequest: 'Pay', cashuReceive: 'Claim' };
 const SHIELDED = `${I.shieldPlain} Shielded`;
 
 /** The approval window for a dApp request: what it asks, what it costs, Reject / Approve. */
@@ -90,6 +90,27 @@ export class ApproveView extends View {
         ${this.error(a)}`;
       }
       case 'inscribeTransfer': return this.inscribeBody(a, P, b);
+      case 'cashuPay': case 'cashuPayRequest': {
+        const e = this.app.ecash, amount = b?.amount ?? Number(P.amount) ?? 0;
+        let to = 'This site';
+        if (b?.post) { try { to = `Sent to <span class="mono">${esc(new URL(b.post).host)}</span>`; } catch {} }
+        return `<p class="hero-bal center">${amount ? Number(amount).toLocaleString('en-US') : '…'} <small>sats</small></p>
+        ${b?.memo ? `<p class="lbl">For</p><pre class="msgbox">${esc(b.memo)}</pre>` : ''}
+        <div class="kv">${rowKV('From', b ? `Ecash · ${esc(e.mintName(b.url))}` : a.prepErr ? '—' : 'finding ecash…')}
+        ${b ? rowKV('You have there', `${e.balance(b.url).toLocaleString('en-US')} sats`) : ''}
+        ${rowKV('To', a.method === 'cashuPayRequest' ? to : 'This site gets a token')}
+        ${b?.lockTo ? rowKV('Locked to', `${I.lock} <span class="mono">${esc(short(b.lockTo, 8))}</span>`) : b?.p2pk ? rowKV('Locked to', `${I.lock} the payee's key`) : ''}
+        ${rowKV('Mint fee', 'a few sats at most, paid by you')}</div>
+        <p class="info">Ecash moves instantly and can't be reversed once the site claims it.${a.method === 'cashuPay' ? (b?.lockTo ? ' If nobody claims it within 7 days, you can take it back in Ecash.' : ' If the site never claims it, you can take it back in Ecash.') : ''}</p>
+        ${this.error(a)}`;
+      }
+      case 'cashuReceive': {
+        return `<p class="hero-bal center">${b ? b.amount.toLocaleString('en-US') : '…'} <small>sats</small></p>
+        <div class="kv">${rowKV('Mint', b ? `<span class="mono">${esc(b.mint.replace(/^https?:\/\//, ''))}</span>${b.known ? '' : ' <span class="badge">new</span>'}` : '…')}
+        ${b?.locks.length ? rowKV('Locked to', `${I.lock} you`) : ''}</div>
+        ${b && !b.known ? '<p class="info warn">You don\'t use this mint yet. Claiming adds it: the ecash is an IOU from this mint, so only claim from mints you\'re fine holding a little with.</p>' : '<p class="info">The token is swapped at its mint for fresh ecash only you know.</p>'}
+        ${this.error(a)}`;
+      }
       case 'switchNetwork':
         return `<div class="kv">${rowKV('From', esc(account.params.name))}${rowKV('To', `<b>${esc(NETWORKS[P.target]?.name || P.target)}</b>`)}</div>`;
       default: return '';

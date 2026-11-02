@@ -3,7 +3,7 @@
 // - Proofs are stored encrypted (AES-GCM, key derived from this account's keys), never in clear.
 // - Outputs are deterministic (NUT-13) from a per-account seed, so ecash can be restored from the recovery phrase.
 // - "Lock to an address" (NUT-11): a token locked to a bc1p… address can only be claimed by that address's key.
-import { Wallet, getEncodedToken, getTokenMetadata, getP2PKExpectedWitnessPubkeys } from '@cashu/cashu-ts';
+import { PaymentRequest, Wallet, getEncodedToken, getTokenMetadata, getP2PKExpectedWitnessPubkeys } from '@cashu/cashu-ts';
 import { bech32m } from '@scure/base';
 import { hmac } from '@noble/hashes/hmac';
 import { sha256 } from '@noble/hashes/sha256';
@@ -13,6 +13,8 @@ import { fromHex, toHex } from '../core/bytes.mjs';
 const enc = new TextEncoder(), dec = new TextDecoder();
 /** Above this, Ecash shows a reminder that a mint holds the bitcoin. */
 export const ECASH_SOFT_LIMIT = 100_000;
+/** A token locked to someone else comes back to the sender's key after this long if they never claim it (NUT-11 refund). */
+export const REFUND_AFTER = 7 * 86400;
 const n = (a) => Number(String(a ?? 0));
 /** Proofs as plain JSON (cashu-ts amounts are objects). */
 const plain = (ps) => ps.map((p) => ({ ...p, amount: n(p.amount) }));
@@ -213,24 +215,74 @@ export class EcashBook {
    * Make a token of `amount` sats from one mint. With `lockTo`, only that bc1p… address can claim it.
    * The receiver gets exactly `amount`: the mint's fee for their claim is included.
    */
-  async send({ url, amount, lockTo = '' }) {
+  async send({ url, amount, lockTo = '', p2pk = null, label = '', refundAfter = REFUND_AFTER }) {
     await this.load();
     const amt = Math.floor(Number(amount));
     if (!(amt > 0)) throw new Error('Enter an amount in sats.');
     const pubkey = lockTo ? lockKeyOf(lockTo) : '';
+    const foreign = !!pubkey && pubkey.slice(2) !== this.myLock.slice(2);
+    const refundAt = foreign ? Math.floor(Date.now() / 1000) + refundAfter : 0;
+    // locked to someone else: if they never claim it, this wallet's key can after `refundAfter`
+    const lock = p2pk || (pubkey ? (foreign ? { pubkey, locktime: refundAt, refundKeys: [this.myLock] } : { pubkey }) : null);
     if (amt > this.balance(url)) throw new Error(`Not enough ecash at ${this.mintName(url)}.`);
     const w = await this.wallet(url);
     let r;
     try {
-      r = await this.fresh(w, () => w.send(amt, this.proofsAt(url), { includeFees: true }, pubkey ? { send: { type: 'p2pk', options: { pubkey } } } : undefined));
+      r = await this.fresh(w, () => w.send(amt, this.proofsAt(url), { includeFees: true }, lock ? { send: { type: 'p2pk', options: lock } } : undefined));
     } catch (e) { await this.repair(url); throw new Error(/fee|enough|insufficient/i.test(e.message) ? 'Not enough ecash to cover the mint fee.' : e.message); }
     if (!r.send?.length) throw new Error('Could not make that amount. Try a slightly different one.');
     const token = getEncodedToken({ mint: url, proofs: r.send, unit: 'sat' });
     await this.setProofs(url, r.keep);
-    this.data.sent.unshift({ id: toHex(sha256(enc.encode(token))).slice(0, 16), url, token, amount: amt, lockTo: lockTo || '', at: Date.now(), claimed: '' });
+    this.data.sent.unshift({ id: toHex(sha256(enc.encode(token))).slice(0, 16), url, token, amount: amt, lockTo: lockTo || (p2pk ? 'locked by request' : ''), refundAt, label, at: Date.now(), claimed: '' });
     this.data.sent = this.data.sent.slice(0, 50);
     await this.save();
-    return { token, amount: amt, fee: sumAmt(r.send) - amt };
+    return { token, proofs: plain(r.send), amount: amt, fee: sumAmt(r.send) - amt };
+  }
+
+  /**
+   * The mint to pay `amount` from: one of `allowed` (the payee's list, any when empty) where this wallet holds
+   * enough, the fullest first. A little room is kept for the mint's input fee.
+   */
+  pickMint(amount, allowed = []) {
+    const ok = (allowed || []).map((u) => { try { return normalizeMint(u); } catch { return ''; } }).filter(Boolean);
+    const list = this.mints.filter((m) => !ok.length || ok.includes(m.url)).map((m) => m.url).sort((a, b) => this.balance(b) - this.balance(a));
+    const url = list.find((u) => this.balance(u) >= amount + Math.ceil(this.proofsAt(u).length / 10) + 1) || list.find((u) => this.balance(u) >= amount);
+    if (url) return url;
+    if (ok.length && !this.mints.some((m) => ok.includes(m.url))) throw new Error(`This site only takes ecash from ${ok.map((u) => u.replace(/^https?:\/\//, '')).join(', ')}. You have none there.`);
+    throw new Error(`Not enough ecash: ${amount.toLocaleString('en-US')} sats needed.`);
+  }
+
+  /**
+   * A NUT-18 payment request (creqA… / creqB…): what it asks for and where the ecash goes.
+   * Supported: sat amounts, an optional mint list, a P2PK lock, and delivery by HTTP POST or back to the page.
+   */
+  parseRequest(text) {
+    const raw = String(text || '').trim().replace(/^cashu:/i, '');
+    let pr;
+    try { pr = PaymentRequest.fromEncodedRequest(raw); } catch { throw new Error('That is not a Cashu payment request.'); }
+    const amount = n(pr.amount);
+    if (!(amount > 0)) throw new Error('The payment request has no amount.');
+    if (pr.unit && pr.unit !== 'sat') throw new Error(`The payment request asks for ${pr.unit}; MASKED pays in sats.`);
+    let p2pk = null;
+    if (pr.nut10) {
+      if (pr.nut10.kind !== 'P2PK') throw new Error('This payment request uses a lock MASKED does not support yet.');
+      p2pk = pr.toP2PKOptions();
+    }
+    const post = pr.transport?.find((t) => String(t.type) === 'post')?.target || '';
+    if (!post && pr.transport?.length) throw new Error('This payment request is delivered over Nostr, which MASKED does not support yet.');
+    if (post) { const u = new URL(post); if (u.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(u.hostname)) throw new Error('The payment request sends ecash to an insecure address.'); }
+    return { request: raw, id: pr.id || '', amount, mints: pr.mints || [], memo: String(pr.description || '').slice(0, 200), p2pk, post };
+  }
+
+  /** Pay a parsed request from `url`: POST the ecash to the payee, or hand it back to the page. */
+  async payRequest(r, url) {
+    const s = await this.send({ url, amount: r.amount, p2pk: r.p2pk, label: r.memo });
+    const payload = { ...(r.id ? { id: r.id } : {}), ...(r.memo ? { memo: r.memo } : {}), mint: url, unit: 'sat', proofs: s.proofs };
+    if (!r.post) return { amount: s.amount, mint: url, token: s.token, payload };
+    let res;
+    try { res = await fetch(r.post, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) }); } catch { res = null; }
+    if (!res?.ok) throw new Error(`The payee's server did not take the payment${res ? ` (${res.status})` : ''}. The ecash is still yours: take it back under "Not claimed yet".`);
+    return { amount: s.amount, mint: url, delivered: true };
   }
 
   /** Take back a token nobody claimed yet (or learn that it was claimed). */
@@ -238,13 +290,20 @@ export class EcashBook {
     await this.load();
     const s = this.data.sent.find((x) => x.id === id);
     if (!s) throw new Error('That token is gone.');
-    if (s.lockTo && lockKeyOf(s.lockTo).slice(2) !== this.myLock.slice(2)) {
-      throw new Error('Locked to another address: only its owner can claim it, so it can\'t be taken back.');
+    if (!this.canReclaim(s)) {
+      throw new Error(s.refundAt ? `Locked to another address until ${new Date(s.refundAt * 1000).toLocaleString()}. If they haven't claimed it by then, you can take it back.` : 'Locked to another address: only its owner can claim it, so it can\'t be taken back.');
     }
     try { return await this.receive(s.token); } catch (e) {
       if (/already claimed/.test(e.message)) { s.claimed = 'yes'; await this.save(); }
       throw e;
     }
+  }
+
+  /** Can this wallet take a sent token back now? Unlocked, locked to itself, or past its refund time. */
+  canReclaim(s, now = Date.now() / 1000) {
+    if (!s.lockTo) return true;
+    if (s.refundAt) return now >= s.refundAt;
+    return /^(bc|tb|bcrt)1p|^0[23]/i.test(s.lockTo) && lockKeyOf(s.lockTo).slice(2) === this.myLock.slice(2);
   }
 
   /** Which sent tokens were claimed (asks the mint; it learns nothing it didn't already see). */

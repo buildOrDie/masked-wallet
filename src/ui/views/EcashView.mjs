@@ -83,7 +83,7 @@ export class EcashView extends View {
         ${out.token.length <= 1800 ? `<div class="qr-wrap">${qrSvg(out.token)}</div>` : ''}
         <textarea class="mono" rows="4" readonly>${esc(out.token)}</textarea>
         <button class="btn primary wide" data-copy="${esc(out.token)}">${I.copy} Copy token</button>
-        <p class="info">${out.lockTo ? 'Only the owner of that address can claim it, in MASKED.' : 'Whoever has this token can claim it, so share it only with the person you\'re paying. Until they claim it, you can take it back below.'}</p>
+        <p class="info">${out.lockTo ? 'Only the owner of that address can claim it, in MASKED. If they haven\'t claimed it within 7 days, you can take it back.' : 'Whoever has this token can claim it, so share it only with the person you\'re paying. Until they claim it, you can take it back below.'}</p>
         <button class="btn ghost wide" data-ecnew>Send another</button>
       </section>`;
     }
@@ -162,8 +162,8 @@ export class EcashView extends View {
     <section class="card">
       <div class="card-head"><h2>Not claimed yet</h2><button class="link" data-eccheck>Check</button></div>
       ${list.slice(0, 8).map((s) => `<div class="ec-sent">
-        <span><b>${sats(s.amount)} sats</b><span class="muted small">${s.lockTo ? `${I.lock} ${esc(short(s.lockTo, 6))}` : 'unlocked'} · ${new Date(s.at).toLocaleDateString()}</span></span>
-        <span class="ec-sent-btns"><button class="btn ghost sm" data-copy="${esc(s.token)}">Copy</button>${s.lockTo && s.lockTo !== e.myLockAddr ? '' : `<button class="btn ghost sm" data-ecreclaim="${esc(s.id)}">Take back</button>`}</span>
+        <span><b>${sats(s.amount)} sats</b><span class="muted small">${s.label ? `${esc(s.label.slice(0, 40))} · ` : ''}${s.lockTo ? `${I.lock} ${esc(/^(bc|tb)1p/.test(s.lockTo) ? short(s.lockTo, 6) : s.lockTo)}` : 'unlocked'} · ${new Date(s.at).toLocaleDateString()}</span></span>
+        <span class="ec-sent-btns"><button class="btn ghost sm" data-copy="${esc(s.token)}">Copy</button>${e.canReclaim(s) ? `<button class="btn ghost sm" data-ecreclaim="${esc(s.id)}">Take back</button>` : s.refundAt ? `<span class="muted small">back after ${new Date(s.refundAt * 1000).toLocaleDateString()}</span>` : ''}</span>
       </div>`).join('')}
     </section>`;
   }
