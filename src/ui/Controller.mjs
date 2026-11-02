@@ -13,6 +13,7 @@ import { SendView } from './views/SendView.mjs';
 import { AirdropView } from './views/AirdropView.mjs';
 import { SettingsView } from './views/SettingsView.mjs';
 import { TokenSendView } from './views/TokenSendView.mjs';
+import { EcashView } from './views/EcashView.mjs';
 
 import { $, $$ } from './dom.mjs';
 import { I } from './html.mjs';
@@ -54,6 +55,7 @@ export class Controller {
     if (b === 'mintTick') { clearTimeout(this.tickTimer); this.tickTimer = setTimeout(() => { if (state.view === 'mint') this.render(); }, 450); }
     if (b === 'mintOther') { const k = codec.kind(e.target.value), el = $('#mintKind'); if (el) { el.className = `addr-kind k-${k.kind}`; el.textContent = k.text || ''; } }
     if (b === 'feeCustom') this.customFeeHint(e.target.value);
+    if (b === 'ecLock') { const el = $('#ecLockNote'); if (el) el.textContent = EcashView.lockNote(e.target.value); }
     if (b === 'dropText') { const el = $('#dropCount'); if (el) { const pv = this.app.ui.view('send').drop.preview(); el.innerHTML = AirdropView.countNote(pv); el.className = `addr-kind ${pv.n ? 'k-shielded' : ''}`; } }
     if (b === 'dropText' || b === 'dropEach') { clearTimeout(this.dropTimer); this.dropTimer = setTimeout(() => { if (state.view === 'send') this.render(); }, 400); }
     if (state.status.drop) state.status.drop = null;

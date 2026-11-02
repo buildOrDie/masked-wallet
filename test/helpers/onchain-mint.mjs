@@ -7,8 +7,8 @@ import http from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { verifyMintQuoteSignature } from '@cashu/cashu-ts';
 
-/** @param {{ upstream: string, address: (i: number) => string, port?: number }} o */
-export async function startOnchainMint({ upstream, address, port = 0 }) {
+/** @param {{ upstream: string, address: (i: number) => string, port?: number, name?: string }} o */
+export async function startOnchainMint({ upstream, address, port = 0, name = 'Test mint (on-chain)' }) {
   const quotes = new Map();
   let n = 0;
   const up = async (method, path, body) => {
@@ -26,7 +26,7 @@ export async function startOnchainMint({ upstream, address, port = 0 }) {
       const url = new URL(req.url, 'http://x');
       if (req.method === 'GET' && url.pathname === '/v1/info') {
         const { json } = await up('GET', '/v1/info');
-        json.name = 'Test mint (on-chain)';
+        json.name = name;
         json.nuts['4'].methods.push({ method: 'onchain', unit: 'sat', min_amount: 1000, options: { confirmations: 1 } });
         json.nuts['20'] = { supported: true };
         return send(200, json);

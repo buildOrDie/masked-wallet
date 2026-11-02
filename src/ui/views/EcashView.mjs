@@ -52,6 +52,11 @@ export class EcashView extends View {
     <p class="info">Ecash is an IOU from the mint you choose: fast and private, but the mint holds the bitcoin. Keep amounts small. MASKED doesn't run or vouch for any mint. Your ecash is stored encrypted and can be found again from your recovery phrase.</p>`;
   }
 
+  /** The line under "Lock to an address" (updated while typing). */
+  static lockNote(v) {
+    return String(v || '').trim() ? 'Locked: only that address\'s MASKED wallet can claim it. A copied or intercepted token is useless. Not claimed in 7 days? It comes back to you.' : 'Unlocked: works in any Cashu wallet. Whoever has the token can claim it.';
+  }
+
   static bolt = '<svg viewBox="0 0 24 24"><path d="M13 3 5 14h6l-1 7 8-11h-6l1-7Z"/></svg>';
 
   mintSeg() {
@@ -96,7 +101,7 @@ export class EcashView extends View {
         <div class="amount"><input id="ecAmt" data-bind="ecAmt" inputmode="numeric" autocomplete="off" value="${esc(f.ecAmt)}" placeholder="0"><span class="unit">sats</span></div></label>
       <label class="field"><span class="lbl">Lock to an address <span class="lbl-r">optional</span></span>
         <input id="ecLock" data-bind="ecLock" class="mono" spellcheck="false" autocomplete="off" value="${esc(f.ecLock)}" placeholder="bc1p… of the person you pay"></label>
-      <p class="fee-note">${f.ecLock ? 'Locked: only that address\'s MASKED wallet can claim it. A copied or intercepted token is useless.' : 'Unlocked: works in any Cashu wallet. Whoever has the token can claim it.'}</p>
+      <p class="fee-note" id="ecLockNote">${EcashView.lockNote(f.ecLock)}</p>
       ${this.statusLine('ecash')}
       <button class="btn primary wide" id="btnEcSend" ${this.state.busy ? 'disabled' : ''}>${this.state.busy ? 'Making token…' : 'Make token'}</button>
     </section>`;
