@@ -1,5 +1,15 @@
 # Ecash (Cashu) in MASKED
 
+<p align="center"><a href="img/masked-ecash.mp4"><img src="img/masked-ecash-preview.gif" width="480" alt="MASKED ecash in 47 seconds: top up with BTC, pay Lightning, lock a token to a bc1p address, pay a website"></a><br><a href="img/masked-ecash.mp4"><b>▶ Watch the video (47 s)</b></a></p>
+
+| Top up with BTC | On its way | Pay Lightning |
+|:-:|:-:|:-:|
+| <img src="img/ecash-topup-btc.png" width="240" alt="Top up with Bitcoin from Public or Shielded"> | <img src="img/ecash-on-its-way.png" width="240" alt="A deposit waiting for confirmation"> | <img src="img/ecash-pay-lightning.png" width="240" alt="Paying a Lightning invoice from ecash"> |
+| **Locked to a bc1p address** | **Ecash balance** | **A website asks, you approve** |
+| <img src="img/ecash-locked.png" width="240" alt="A token locked to a bc1p address"> | <img src="img/ecash-home.png" width="240" alt="Ecash balance after a top-up"> | <img src="img/ecash-pay-site.png" width="240" alt="A website asking for 21 sats"> |
+
+<sub>Screens from the test setup; BTC → ecash was also run on mainnet with Minibits.</sub>
+
 Ecash is bitcoin as bearer tokens, issued by a **mint** ([Cashu](https://cashu.space)). It's instant, and private between
 people: the mint signs tokens blind, so it can't link who paid whom.
 

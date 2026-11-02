@@ -6,7 +6,7 @@
 
 - **Public**: a normal taproot address (`bc1p…`) for exchanges, marketplaces and dApps.
 - **Shielded**: a reusable [silent payment](https://github.com/bitcoin/bips/blob/master/bip-0352.mediawiki) address (`sp1…`, BIP 352). Every payment lands on a new one-time output, so nobody can look up what you hold or link your payments.
-- **Ecash** (new in 2.19, BTC top-up in 2.20): [Cashu](https://cashu.space) ecash for instant, private payments in any chat. **Lock a token to a `bc1p…` address** so only its owner can claim it, and a leaked token is worthless. **Top up straight from your BTC** (mints with on-chain deposits) and pay any Lightning invoice, with no swap service. Pay websites, and restore it from your recovery phrase. See [docs/ECASH.md](docs/ECASH.md).
+- **Ecash** (new in 2.19, BTC top-up in 2.20): [Cashu](https://cashu.space) ecash for instant, private payments in any chat. **Lock a token to a `bc1p…` address** so only its owner can claim it, and a leaked token is worthless. **Top up straight from your BTC** (mints with on-chain deposits) and pay any Lightning invoice, with no swap service. Pay websites, and restore it from your recovery phrase. See [docs/ECASH.md](docs/ECASH.md) · [▶ video (47 s)](docs/img/masked-ecash.mp4).
 
 It also does:
 
