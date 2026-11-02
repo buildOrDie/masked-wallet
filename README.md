@@ -2,10 +2,11 @@
 
 # MASKED
 
-**A Bitcoin wallet with a private side.** MASKED is an open-source Chrome extension with two balances:
+**A Bitcoin wallet with a private side.** MASKED is an open-source Chrome extension with two balances, plus ecash:
 
 - **Public**: a normal taproot address (`bc1p…`) for exchanges, marketplaces and dApps.
 - **Shielded**: a reusable [silent payment](https://github.com/bitcoin/bips/blob/master/bip-0352.mediawiki) address (`sp1…`, BIP 352). Every payment lands on a new one-time output, so nobody can look up what you hold or link your payments.
+- **Ecash** (new in 2.19): [Cashu](https://cashu.space) ecash for instant, private payments in any chat. **Lock a token to a `bc1p…` address** so only its owner can claim it, and a leaked token is worthless. Top up and pay over Lightning, pay websites, and restore it from your recovery phrase. See [docs/ECASH.md](docs/ECASH.md).
 
 It also does:
 
@@ -15,7 +16,7 @@ It also does:
 - **Several accounts:** add, rename, hide and switch accounts from one recovery phrase. Account N uses the Public address UniSat shows for its account N (`m/86'/coin'/0'/0/N`) and its own BIP 352 account for Shielded. See [docs/ACCOUNTS.md](docs/ACCOUNTS.md).
 - **BRC-20 and BRC2.0:** mint, deploy, inscribe and send.
 - **LEAF (CRC-20):** balances and sends on both sides, read from crc20.org with no node. Send to an `sp1…` and the receiver gets LEAF privately. See [docs/LEAF.md](docs/LEAF.md).
-- **`window.masked`:** a UniSat-compatible provider for websites.
+- **`window.masked`:** a UniSat-compatible provider for websites, now with ecash payments (`window.masked.cashu`).
 
 [**Add to Chrome**](https://chromewebstore.google.com/detail/masked-wallet/pojmpfcbdmacabhckemelcbkmckhaoig) · [maskedwallet.com](https://maskedwallet.com) · [@masked_wallet](https://x.com/masked_wallet)
 
@@ -28,6 +29,8 @@ It also does:
 | <img src="docs/img/home-public.png" width="250" alt="Home on the Public side"> | <img src="docs/img/home-shielded.png" width="250" alt="Home on the Shielded side"> | <img src="docs/img/token-shielded.png" width="250" alt="A BRC2.0 token held in Shielded"> |
 | **Receive privately** | **Trade from Shielded** | **List straight from Shielded** |
 | <img src="docs/img/receive-shielded.png" width="250" alt="Shielded receive address"> | <img src="docs/img/approve-trade.png" width="250" alt="Approval to trade from Shielded"> | <img src="docs/img/approve-list.png" width="250" alt="Approval to inscribe a transfer on a Shielded coin"> |
+| **Ecash** (2.19) | **Locked to an address** (2.19) | **Pay a website with ecash** (2.19) |
+| <img src="docs/img/ecash-home.png" width="250" alt="Ecash balance with Receive, Send, Top up and Pay"> | <img src="docs/img/ecash-locked.png" width="250" alt="An ecash token locked to a bc1p address"> | <img src="docs/img/ecash-pay-site.png" width="250" alt="A website asking for 21 sats of ecash"> |
 | **Offline send** (2.14) | **Silent airdrop** (2.15) | **Share on X** (2.14) |
 | <img src="docs/img/offline-signed.png" width="250" alt="A payment signed offline, as a QR code"> | <img src="docs/img/airdrop.png" width="250" alt="Airdrop: 12 people found in a pasted X thread"> | <img src="docs/img/share-on-x.png" width="250" alt="Share the Shielded address on X"> |
 
@@ -42,7 +45,7 @@ Node 20+:
 
 ```sh
 npm ci
-npm run check   # lint, type check, and the tests (BIP 352 vectors, fast scanner, private trading, wallet services, offline send, airdrop, accounts, LEAF)
+npm run check   # lint, type check, and the tests (BIP 352 vectors, fast scanner, private trading, wallet services, offline send, airdrop, accounts, LEAF, ecash)
 npm run build   # rebuilds extension/ from src/
 ```
 
@@ -59,7 +62,8 @@ The build is reproducible: the same source always gives the same `extension/`. T
 | [`v2.18.0`](../../tree/v2.18.0) | LEAF (CRC-20): balances and sends, Public and Shielded | Chrome Web Store |
 | [`v2.18.1`](../../tree/v2.18.1) | review fixes: locking reaches every open wallet window; confirmed Shielded change is spendable; Shielded LEAF lookups are opt-in; LEAF balances per account | GitHub |
 | [`v2.18.2`](../../tree/v2.18.2) | small coins (1,000 sats or less) can be unlocked once ord confirms they're plain bitcoin; sends can use several coins; Reset coin list asks first and rescans since the wallet was created | GitHub |
-| [`v2.18.3`](../../tree/v2.18.3) | security: look-alike address warnings, SIGHASH_NONE refused, big-move warnings, extension fingerprint to verify a release ([SECURITY.md](SECURITY.md)); LEAF reservations reconciled with the indexer | `main` |
+| [`v2.18.3`](../../tree/v2.18.3) | security: look-alike address warnings, SIGHASH_NONE refused, big-move warnings, extension fingerprint to verify a release ([SECURITY.md](SECURITY.md)); LEAF reservations reconciled with the indexer | GitHub |
+| [`v2.19.0`](../../tree/v2.19.0) | Ecash (Cashu): receive, send, lock to a `bc1p…` address with a 7-day refund, Lightning top up and pay, restore from the phrase; `window.masked.cashu` for websites; [Taproot-lock spec](docs/NUT-taproot-lock.md) | `main` |
 | [`v2.15.2`](../../tree/v2.15.2) | redesigned unlock screen (show-password button, clearer wrong-password state); a side panel button in the header | GitHub |
 
 ## Use it from your website: `window.masked`
@@ -91,6 +95,10 @@ const { inscriptionId } = await wallet.inscribeTransfer('ordi', '100');
 // MASKED extras
 const shielded = await wallet.getShieldedAddress();   // sp1… (receive privately)
 
+// ecash (Cashu): ask for 21 sats as a token, then redeem it at the mint on your server
+const { token } = await wallet.cashu.pay({ amount: 21, memo: 'Article #42' });
+await wallet.cashu.payRequest('creqA…');              // or pay a NUT-18 payment request
+
 wallet.on('accountsChanged', (accounts) => {});
 wallet.on('networkChanged', (network) => {});
 ```
@@ -103,7 +111,7 @@ window.addEventListener('masked#initialized', () => start(window.masked), { once
 
 Every call that signs, pays or inscribes opens an approval in the MASKED popup that shows your site's name. Errors carry a `code`: `4001` rejected by the user, `4100` not connected, `4200` not supported, `4000` anything else.
 
-Full reference: [docs/PROVIDER.md](docs/PROVIDER.md). A test page that calls every method: [examples/demo.html](examples/demo.html) (serve it over http(s)).
+Full reference: [docs/PROVIDER.md](docs/PROVIDER.md). A test page that calls every method: [examples/demo.html](examples/demo.html). An ecash paywall: [examples/cashu-paywall.html](examples/cashu-paywall.html) (serve them over http(s)).
 
 ### Private trading
 
