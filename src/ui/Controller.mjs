@@ -137,7 +137,7 @@ export class Controller {
     if (d.go) { this.go(t); return true; }
     if (d.set) {
       f[d.set] = d.val; state.status.send = null;
-      if (d.set === 'ecMode' || d.set === 'ecMint') { state.ecash = {}; state.status.ecash = null; }
+      if (['ecMode', 'ecMint', 'ecVia', 'ecFrom'].includes(d.set)) { state.ecash = {}; state.status.ecash = null; }
       if (d.set === 'mintMode') state.status.mint = null;
       this.render();
       if (d.set === 'fee' && d.val === 'custom') $('#feeCustom')?.focus();
@@ -180,6 +180,12 @@ export class Controller {
       this.render(); return true;
     }
     if (t.hasAttribute('data-eccheck')) { await app.ecash.checkSent(); this.render(); this.toast(app.ecash.unclaimed().length ? 'Some tokens are not claimed yet' : 'All claimed'); return true; }
+    if (t.hasAttribute('data-eccheckdep')) {
+      let s = 0;
+      for (const p of app.ecash.pendingDeposits()) s += await app.ecash.claimQuote(p.quote).catch(() => 0);
+      if (s) this.ecashPaid(s); else this.toast('Not confirmed yet. It usually takes 10–30 minutes.');
+      return true;
+    }
     if (d.eccheckq) {
       const s = await app.ecash.claimQuote(d.eccheckq);
       if (s) this.ecashPaid(s); else app.setStatus('ecash', 'Not paid yet. It shows up here a few seconds after you pay.', '');
@@ -306,6 +312,34 @@ export class Controller {
           state.ecash = { sent: { token: r.token, amount: r.amount, lockTo: f.ecLock.trim() } };
           if (f.ecLock.trim()) app.rememberRecipient(f.ecLock.trim());
           f.ecAmt = ''; f.ecLock = '';
+        } finally { state.busy = false; this.render(); }
+        break;
+      }
+      case 'btnEcBtcReview': {
+        const oc = app.ecash.onchain(f.ecMint), amt = Math.floor(Number(f.ecAmt));
+        if (!(amt > 0)) throw new Error('Enter an amount in sats.');
+        if (oc?.min && amt < oc.min) throw new Error(`This mint takes deposits of at least ${oc.min.toLocaleString('en-US')} sats.`);
+        if (oc?.max && amt > oc.max) throw new Error(`This mint takes deposits of at most ${oc.max.toLocaleString('en-US')} sats.`);
+        state.busy = true; state.status.ecash = ['Getting your deposit address…', '']; this.render();
+        try {
+          const d = await app.ecash.depositAddress(f.ecMint);
+          const from = f.ecFrom === 'shielded' ? 'shielded' : 'public';
+          const built = await app.builder.send({ from, to: d.request, amount: amt, rate: app.feeRate() });
+          state.ecash = { btc: { built, from, url: f.ecMint, address: d.request, quote: d.quote } };
+          state.status.ecash = null;
+        } finally { state.busy = false; this.render(); }
+        break;
+      }
+      case 'btnEcBtcSend': {
+        const b = state.ecash.btc;
+        state.busy = true; this.render();
+        try {
+          await app.broadcast(b.built.hex);
+          app.afterBroadcast(b.built.spent || [b.built.coin.key], [b.built.txid]);
+          await app.ecash.noteDeposit(b.quote, { txid: b.built.txid, amount: b.built.amount });
+          app.ecash.watchQuote(b.quote, (s) => this.ecashPaid(s), { every: 30e3, forMs: 12 * 3600e3 });
+          state.ecash = {}; f.ecAmt = '';
+          this.toast('Sent. Your ecash appears once it confirms.', 3200);
         } finally { state.busy = false; this.render(); }
         break;
       }

@@ -6,7 +6,7 @@ import { walletApp, Keyring } from './helpers/wallet-app.mjs';
 import { generateMnemonic } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english';
 import http from 'node:http';
-import { PaymentRequest, Wallet } from '@cashu/cashu-ts';
+import { PaymentRequest, Wallet, signMintQuote } from '@cashu/cashu-ts';
 import { EcashBook, lockKeyOf, normalizeMint, peekToken } from '../src/ecash/EcashBook.mjs';
 
 const A = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
@@ -194,4 +194,60 @@ test('the Taproot-lock spec test vectors (docs/NUT-taproot-lock.md) hold', async
   const sig = schnorr.sign(msg, hexToBytes(f.outputPriv), new Uint8Array(32));
   assert.equal(bytesToHex(sig), 'c5ae78fc9288c8c72c0e0f41d8386437b0be0aafc5792cafa670c213b57487a65410986655679aafde7bcbc75ed2f36ad17245017b3aac2863f2e7591a23894d');
   assert.ok(schnorr.verify(sig, msg, hexToBytes(f.outputX)));
+});
+
+test('top up with BTC (NUT-30): deposit address, confirmed deposits become ecash, then pay Lightning', { skip: !up && 'no local test mint' }, async () => {
+  globalThis.fetch = realFetch;
+  const { startOnchainMint } = await import('./helpers/onchain-mint.mjs');
+  const app = walletApp(Keyring.fromMnemonic(generateMnemonic(wordlist), '', 'main'));
+  const e = new EcashBook(app);
+  const om = await startOnchainMint({ upstream: MINT, address: (i) => app.account.pubAddr().slice(0, -6) + String(i).padStart(6, 'q') });
+  try {
+    // a Lightning-only mint has no deposit address
+    await e.addMint(MINT);
+    assert.equal(e.onchain(MINT), null);
+    await assert.rejects(e.depositAddress(MINT), /doesn't take Bitcoin deposits/);
+
+    await e.addMint(om.url);
+    assert.deepEqual(e.onchain(om.url), { min: 1000, max: 0, confirmations: 1 });
+    const d = await e.depositAddress(om.url);
+    assert.ok(d.request && d.method === 'onchain');
+    assert.equal((await e.depositAddress(om.url)).quote, d.quote, 'one address per mint, reused');
+    assert.equal(om.quotes.get(d.quote).pubkey, e.quotePub, 'locked to the quote key');
+    assert.notEqual(e.quotePub.slice(2), e.myLock.slice(2), 'not the Public address key');
+
+    // sent, not confirmed yet: shown as pending, nothing to mint
+    await e.noteDeposit(d.quote, { txid: 'a'.repeat(64), amount: 5000 });
+    assert.equal(e.pendingDeposits().length, 1);
+    assert.equal(await e.claimQuote(d.quote), 0);
+
+    // confirmed: 5,000 sats of ecash, and the deposit is no longer pending
+    await fetch(`${om.url}/test/pay`, { method: 'POST', body: JSON.stringify({ quote: d.quote, amount: 5000 }) });
+    assert.equal(await e.claimQuote(d.quote), 5000);
+    assert.equal(e.balance(om.url), 5000);
+    assert.equal(e.pendingDeposits().length, 0);
+    assert.equal(await e.claimQuote(d.quote), 0, 'nothing is minted twice');
+
+    // a second deposit to the same address adds more
+    await e.noteDeposit(d.quote, { txid: 'b'.repeat(64), amount: 2000 });
+    await fetch(`${om.url}/test/pay`, { method: 'POST', body: JSON.stringify({ quote: d.quote, amount: 2000 }) });
+    assert.equal(await e.claimQuote(d.quote), 2000);
+
+    // someone else can't mint from our quote: the mint wants our quote key's signature
+    const thief = new Wallet(om.url, { unit: 'sat' }); await thief.loadMint();
+    await fetch(`${om.url}/test/pay`, { method: 'POST', body: JSON.stringify({ quote: d.quote, amount: 1000 }) });
+    const st = await thief.checkMintQuoteOnchain(d.quote);
+    await assert.rejects(thief.mintProofs('onchain', 1000, st, { privkey: '1'.repeat(64) }), /No private key matches/, 'cashu-ts refuses');
+    const outputs = [{ amount: 1000, id: thief.keysetId, B_: e.myLock }];
+    const forged = await fetch(`${om.url}/v1/mint/onchain`, { method: 'POST', body: JSON.stringify({ quote: d.quote, outputs, signature: signMintQuote('1'.repeat(64), d.quote, outputs) }) });
+    assert.equal(forged.status, 400, 'and so does the mint');
+    assert.equal(await e.claimQuote(d.quote), 1000, 'and the owner still gets it');
+
+    // BTC → Lightning: pay an invoice from the ecash that came from BTC
+    const other = new EcashBook(walletApp(Keyring.fromMnemonic(generateMnemonic(wordlist), '', 'main')));
+    await other.addMint(om.url);
+    const inv = await other.topUp({ url: om.url, amount: 3000 });
+    await e.pay(await e.quotePay({ url: om.url, invoice: inv.request }));
+    assert.equal(await other.claimQuote(inv.quote), 3000);
+  } finally { om.close(); }
 });

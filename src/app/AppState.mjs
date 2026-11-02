@@ -8,7 +8,7 @@ export const FORM_DEFAULTS = {
   depTick: '', depMax: '21000000', depLim: '1000', depFrom: 'public', depResTo: 'shielded', depWho: 'self', recTick: '', recSalt: '',
   tsTick: '', tsTo: '', tsAmt: '', tsFrom: 'public', trTick: '', trAmt: '', trFrom: 'public',
   coinFilter: 'all', scanText: '', calcRecips: '', relayText: '', leafFrom: 'public', leafTo: '', leafAmt: '', poisonOk: false,
-  ecMode: '', ecMint: '', ecAmt: '', ecLock: '', ecToken: '', ecInvoice: '', ecNewMint: '',
+  ecMode: '', ecMint: '', ecVia: '', ecFrom: 'public', ecAmt: '', ecLock: '', ecToken: '', ecInvoice: '', ecNewMint: '',
   sendMode: 'send', dropText: '', dropEach: '1000', dropFrom: 'public',
   // set by the screens that use them
   homeTok: 'all', tokTab: 'history', acctMenu: '-1', acctHidden: '', obMode: 'create', backed: false, apRisk: false, rbfInfo: false,
@@ -32,7 +32,7 @@ export class AppState {
     this.mint = { stage: 'form' };
     this.drop = { stage: 'form' };   // Send → Airdrop
     this.leafSend = { stage: 'form' }; // LEAF (CRC-20): form | review | done
-    /** @type {{ sent?: any, quote?: any, pay?: any }} Ecash: the token just made, the open invoice, the payment under review */
+    /** @type {{ sent?: any, quote?: any, pay?: any, btc?: any }} Ecash: the token just made, the open invoice, the payment or BTC top-up under review */
     this.ecash = {};
     this.busy = false;
     this.reveal = false;             // recovery phrase on show in Settings

@@ -1,4 +1,4 @@
-import { esc, short } from '../../core/format.mjs';
+import { esc, fmtBtc, short } from '../../core/format.mjs';
 import { ECASH_SOFT_LIMIT } from '../../ecash/EcashBook.mjs';
 import { View } from '../View.mjs';
 import { I, head, qrSvg, rowKV, seg } from '../html.mjs';
@@ -28,6 +28,7 @@ export class EcashView extends View {
       e.load().then(() => app.render()).catch((err) => app.setStatus('ecash', `Could not open your ecash: ${err.message}`, 'err'));
       return `${head('Ecash')}<section class="card"><p class="muted">Opening your ecash…</p>${this.statusLine('ecash')}</section>`;
     }
+    if (e.resumedFor !== e.key) { e.resumedFor = e.key; e.resumeWatching((s) => app.controller.ecashPaid(s)); }
     const mints = e.mints;
     if (!f.ecMint || !mints.some((m) => m.url === f.ecMint)) f.ecMint = mints[0]?.url || '';
     const mode = mints.length ? f.ecMode || 'receive' : 'mints';
@@ -45,6 +46,7 @@ export class EcashView extends View {
     </section>
     ${t > ECASH_SOFT_LIMIT ? `<p class="info warn">You hold ${sats(t)} sats as ecash. A mint holds the bitcoin behind it: for larger amounts, Shielded is safer.</p>` : ''}
     ${mode === 'receive' ? this.receive() : mode === 'send' ? this.send() : mode === 'topup' ? this.topUp() : mode === 'pay' ? this.pay() : ''}
+    ${this.onTheWay()}
     ${this.unclaimed()}
     ${this.mintsCard(mode === 'mints')}
     <p class="info">Ecash is an IOU from the mint you choose: fast and private, but the mint holds the bitcoin. Keep amounts small. MASKED doesn't run or vouch for any mint. Your ecash is stored encrypted and can be found again from your recovery phrase.</p>`;
@@ -115,14 +117,66 @@ export class EcashView extends View {
         <button class="link" data-ecnew>Cancel</button>
       </section>`;
     }
+    const oc = e.onchain(f.ecMint);
+    const via = oc ? f.ecVia || 'btc' : 'ln';
+    if (via === 'btc') return this.topUpBtc(oc);
     return `
     <section class="card form">
       ${this.mintSeg()}
+      ${oc ? `<div class="field"><span class="lbl">With</span>${seg('ecVia', via, [['btc', 'Bitcoin'], ['ln', 'Lightning']])}</div>` : ''}
       <label class="field"><span class="lbl">Amount</span>
         <div class="amount"><input id="ecAmt" data-bind="ecAmt" inputmode="numeric" autocomplete="off" value="${esc(f.ecAmt)}" placeholder="0"><span class="unit">sats</span></div></label>
       ${this.statusLine('ecash')}
       <button class="btn primary wide" id="btnEcTopUp" ${this.state.busy ? 'disabled' : ''}>Get Lightning invoice</button>
-      <p class="info">Pay the invoice from any Lightning wallet or exchange; ${esc(e.mintName(f.ecMint))} issues the same amount as ecash.</p>
+      <p class="info">Pay the invoice from any Lightning wallet or exchange; ${esc(e.mintName(f.ecMint))} issues the same amount as ecash.${oc ? '' : ' This mint doesn\'t take Bitcoin deposits: pick a mint that does to top up straight from your balance.'}</p>
+    </section>`;
+  }
+
+  /** Top up from this wallet's own BTC: a deposit to the mint's address (NUT-30), sent and watched here. */
+  topUpBtc(oc) {
+    const { app, f, state } = this, e = app.ecash, unit = this.unit;
+    const b = state.ecash?.btc;
+    if (b) {
+      return `
+      <section class="card review">
+        <p class="hero-label">Top up with Bitcoin</p>
+        <p class="hero-bal">${sats(b.built.amount)} <small>sats</small></p>
+        <div class="kv">
+          ${rowKV('From', b.from === 'shielded' ? `${I.shieldPlain} Shielded` : 'Public')}
+          ${rowKV('To', `Ecash at ${esc(e.mintName(b.url))}`)}
+          ${rowKV('Deposit address', `<span class="mono">${esc(short(b.address, 8))}</span>`)}
+          ${rowKV('Network fee', `${fmtBtc(b.built.fee)} ${unit}`)}
+          ${rowKV('Ecash after', oc.confirmations ? `${oc.confirmations} confirmation${oc.confirmations === 1 ? '' : 's'}` : 'the deposit confirms')}
+        </div>
+        <p class="info">The mint gave this address for your wallet only. Once the payment confirms, ${esc(e.mintName(b.url))} issues the same amount as ecash, and then you can pay any Lightning invoice with it. Until then you'll see it under "On its way".</p>
+        ${this.statusLine('ecash')}
+        <button class="btn primary wide" id="btnEcBtcSend" ${state.busy ? 'disabled' : ''}>${state.busy ? 'Sending…' : 'Confirm & send'}</button>
+        <button class="link" data-ecnew>Cancel</button>
+      </section>`;
+    }
+    return `
+    <section class="card form">
+      ${this.mintSeg()}
+      <div class="field"><span class="lbl">With</span>${seg('ecVia', 'btc', [['btc', 'Bitcoin'], ['ln', 'Lightning']])}</div>
+      <div class="field"><span class="lbl">From</span>${this.fromSeg('ecFrom')}</div>
+      <label class="field"><span class="lbl">Amount ${oc.min ? `<span class="lbl-r">at least ${sats(oc.min)} sats</span>` : ''}</span>
+        <div class="amount"><input id="ecAmt" data-bind="ecAmt" inputmode="numeric" autocomplete="off" value="${esc(f.ecAmt)}" placeholder="0"><span class="unit">sats</span></div></label>
+      <div class="field"><span class="lbl">Network fee</span>${this.feeChips()}</div>
+      ${this.statusLine('ecash')}
+      <button class="btn primary wide" id="btnEcBtcReview" ${state.busy ? 'disabled' : ''}>Review</button>
+      <p class="info">Turns bitcoin from your wallet into ecash at ${esc(e.mintName(f.ecMint))}, with nothing to copy. Then pay any Lightning invoice from Ecash → Pay. No swap service involved.</p>
+    </section>`;
+  }
+
+  /** Deposits sent from this wallet that the mint hasn't turned into ecash yet. */
+  onTheWay() {
+    const e = this.app.ecash, list = e.pendingDeposits();
+    if (!list.length) return '';
+    return `
+    <section class="card">
+      <div class="card-head"><h2>On its way</h2><button class="link" data-eccheckdep>Check</button></div>
+      ${list.map((d) => `<div class="ec-sent"><span><b>${sats(d.amount)} sats</b><span class="muted small"><span class="pend-dot" aria-hidden="true"></span> waiting for confirmation · ${esc(e.mintName(d.url))}</span></span>
+        <a class="btn ghost sm" href="${this.account.explorer.tx(d.txid)}" target="_blank" rel="noopener">View</a></div>`).join('')}
     </section>`;
   }
 
@@ -172,7 +226,7 @@ export class EcashView extends View {
     const { app, f } = this, e = app.ecash;
     return `
     <details class="card adv ec-mints" ${open ? 'open' : ''} data-k="ecmints"><summary>Mints${e.mints.length ? ` · ${e.mints.length}` : ''}</summary>
-      ${e.mints.map((m) => `<div class="ec-mint"><span><b>${esc(e.mintName(m.url))}</b><span class="muted small mono">${esc(m.url.replace(/^https?:\/\//, ''))}</span></span><span><b>${sats(e.balance(m.url))}</b> ${e.balance(m.url) ? '' : `<button class="link" data-ecrmmint="${esc(m.url)}">Remove</button>`}</span></div>`).join('')}
+      ${e.mints.map((m) => `<div class="ec-mint"><span><b>${esc(e.mintName(m.url))}</b>${m.onchain ? ' <span class="badge">BTC deposits</span>' : ''}<span class="muted small mono">${esc(m.url.replace(/^https?:\/\//, ''))}</span></span><span><b>${sats(e.balance(m.url))}</b> ${e.balance(m.url) || e.pendingDeposits().some((d) => d.url === m.url) ? '' : `<button class="link" data-ecrmmint="${esc(m.url)}">Remove</button>`}</span></div>`).join('')}
       ${e.mints.length ? '' : '<p class="small">Pick a mint to start. A mint turns Lightning payments into ecash and back. Anyone can run one; choose one you trust with small amounts.</p>'}
       <label class="field"><span class="lbl">Add a mint</span>
         <div class="amount"><input id="ecNewMint" data-bind="ecNewMint" class="mono" spellcheck="false" autocomplete="off" value="${esc(f.ecNewMint)}" placeholder="mint.example.com"><button class="max" id="btnEcAddMint">Add</button></div></label>

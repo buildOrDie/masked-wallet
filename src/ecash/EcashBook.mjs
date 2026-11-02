@@ -8,6 +8,7 @@ import { bech32m } from '@scure/base';
 import { hmac } from '@noble/hashes/hmac';
 import { sha256 } from '@noble/hashes/sha256';
 import { sha512 } from '@noble/hashes/sha512';
+import { secp256k1 } from '@noble/curves/secp256k1';
 import { fromHex, toHex } from '../core/bytes.mjs';
 
 const enc = new TextEncoder(), dec = new TextDecoder();
@@ -73,6 +74,7 @@ export class EcashBook {
     this.loadedFor = '';
     this.busy = '';
     this.polls = new Set();
+    this.resumedFor = '';
   }
 
   get account() { return this.app.account; }
@@ -85,6 +87,12 @@ export class EcashBook {
   /** The key tokens are locked to when sent to this wallet: the Public address's key. */
   get myLock() { return '02' + this.account.funding().outputX; }
   get myLockAddr() { return this.account.pubAddr(); }
+  /** The key on-chain deposit quotes are locked to (NUT-20): its own key, so it links to no address. */
+  get quotePriv() {
+    const d = BigInt('0x' + toHex(sha256(new Uint8Array([...enc.encode('MASKED ecash quote key v1'), ...this.secret])))) % secp256k1.CURVE.n;
+    return d.toString(16).padStart(64, '0');
+  }
+  get quotePub() { return toHex(secp256k1.getPublicKey(this.quotePriv, true)); }
 
   async cryptoKey() {
     const raw = sha256(new Uint8Array([...enc.encode('MASKED ecash storage v1'), ...this.secret]));
@@ -143,8 +151,25 @@ export class EcashBook {
     const w = this.makeWallet(url, { unit: 'sat', bip39seed: this.seed, counterSource });
     await w.loadMint();
     this.wallets.set(url, w);
+    // what the mint offers: on-chain deposits (NUT-30) need its "onchain" mint method and NUT-20
+    const rec = this.mints.find((m) => m.url === url);
+    if (rec) {
+      const oc = EcashBook.onchainOf(w);
+      if (JSON.stringify(rec.onchain || null) !== JSON.stringify(oc)) { rec.onchain = oc; await this.save(); }
+    }
     return w;
   }
+
+  /** The mint's on-chain deposit terms ({ min, confirmations }), or null when it has none. */
+  static onchainOf(w) {
+    try {
+      const info = w.getMintInfo(), m = info.isSupported(4), sig = info.isSupported(20);
+      const p = !m.disabled && m.params?.find((x) => x.method === 'onchain' && x.unit === 'sat');
+      if (!p || !sig?.supported) return null;
+      return { min: n(p.min_amount) || 0, max: n(p.max_amount) || 0, confirmations: Number(p.options?.confirmations) || 0 };
+    } catch { return null; }
+  }
+  onchain(url) { return this.mints.find((m) => m.url === url)?.onchain || null; }
 
   /**
    * Run a mint request. If the mint already knows the outputs, this device's counters are behind (a reinstall
@@ -170,7 +195,7 @@ export class EcashBook {
     if (!this.mints.some((m) => m.url === url)) {
       let name = '';
       try { name = String((await w.mint.getInfo())?.name || '').slice(0, 40); } catch {}
-      this.data.mints.push({ url, name });
+      this.data.mints.push({ url, name, onchain: EcashBook.onchainOf(w) });
       this.data.proofs[url] ||= [];
       await this.save();
     }
@@ -180,6 +205,7 @@ export class EcashBook {
   async removeMint(url) {
     await this.load();
     if (this.balance(url)) throw new Error('Move the ecash out of this mint first.');
+    if (this.pendingDeposits().some((d) => d.url === url)) throw new Error('A deposit to this mint is still on its way.');
     this.data.mints = this.data.mints.filter((m) => m.url !== url);
     delete this.data.proofs[url];
     await this.save();
@@ -347,12 +373,44 @@ export class EcashBook {
     return entry;
   }
 
+  /**
+   * A Bitcoin address at `url` that turns deposits into ecash (NUT-30). One per mint, reused: every confirmed
+   * deposit to it adds ecash. The quote is locked to this wallet's quote key, so nobody else can mint from it.
+   */
+  async depositAddress(url) {
+    await this.load();
+    const w = await this.wallet(url);
+    if (!this.onchain(url)) throw new Error(`${this.mintName(url)} doesn't take Bitcoin deposits. Top up with Lightning instead.`);
+    const open = this.data.quotes.find((q) => q.url === url && q.method === 'onchain');
+    if (open) return open;
+    const q = await w.createMintQuoteOnchain(this.quotePub);
+    if (!q.request || q.pubkey?.toLowerCase() !== this.quotePub) throw new Error('The mint answered with an unusable deposit address.');
+    const entry = { url, method: 'onchain', quote: q.quote, request: q.request, expiry: q.expiry || 0, at: Date.now(), sent: [] };
+    this.data.quotes = [entry, ...this.data.quotes].slice(0, 12);
+    await this.save();
+    return entry;
+  }
+
+  /** Note a deposit sent from this wallet, so Ecash shows it and keeps watching for its confirmation. */
+  async noteDeposit(quoteId, { txid, amount }) {
+    const q = this.data.quotes.find((x) => x.quote === quoteId);
+    if (!q) return;
+    q.sent = [...(q.sent || []), { txid, amount, at: Date.now() }].slice(-10);
+    await this.save();
+  }
+
+  /** Deposits sent and not yet turned into ecash, per mint: [{ url, amount, txid, at }]. */
+  pendingDeposits() {
+    return (this.data?.quotes || []).filter((q) => q.method === 'onchain').flatMap((q) => (q.sent || []).filter((s) => !s.done).map((s) => ({ ...s, url: q.url, quote: q.quote })));
+  }
+
   /** Has the invoice been paid? Then mint the ecash. Returns the sats added, or 0. */
   async claimQuote(quoteId) {
     await this.load();
     const q = this.data.quotes.find((x) => x.quote === quoteId);
     if (!q) return 0;
     const w = await this.wallet(q.url);
+    if (q.method === 'onchain') return this.claimDeposit(q, w);
     const st = await w.checkMintQuoteBolt11(q.quote);
     if (st.state === 'ISSUED') { this.data.quotes = this.data.quotes.filter((x) => x !== q); await this.save(); return 0; }
     if (st.state !== 'PAID') return 0;
@@ -361,6 +419,28 @@ export class EcashBook {
     this.data.quotes = this.data.quotes.filter((x) => x !== q);
     await this.save();
     return sumAmt(got);
+  }
+
+  /** On-chain quote: mint whatever was paid and not issued yet (confirmed deposits). */
+  async claimDeposit(q, w) {
+    const st = await w.checkMintQuoteOnchain(q.quote);
+    const ready = n(st.amount_paid) - n(st.amount_issued);
+    if (ready <= 0) return 0;
+    const got = await this.fresh(w, () => w.mintProofs('onchain', ready, st, { privkey: this.quotePriv }));
+    await this.setProofs(q.url, [...this.proofsAt(q.url), ...got]);
+    // mark the oldest deposits that this covers as done
+    let left = sumAmt(got);
+    for (const s of q.sent || []) if (!s.done && s.amount <= left) { s.done = true; left -= s.amount; }
+    await this.save();
+    return sumAmt(got);
+  }
+
+  /** Watch every open invoice and unconfirmed deposit (after reopening the wallet too). */
+  resumeWatching(onPaid) {
+    for (const q of this.data?.quotes || []) {
+      if (q.method === 'onchain') { if ((q.sent || []).some((s) => !s.done)) this.watchQuote(q.quote, onPaid, { every: 30e3, forMs: 12 * 3600e3 }); }
+      else if (Date.now() - q.at < 86400e3) this.watchQuote(q.quote, onPaid);
+    }
   }
 
   /** Check every open invoice every few seconds for a while; `onPaid(sats)` when one lands. */

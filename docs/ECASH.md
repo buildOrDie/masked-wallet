@@ -13,7 +13,8 @@ for savings, use Shielded. MASKED doesn't run or vouch for any mint.
 | **Receive** | Paste a `cashuA…`/`cashuB…` token. MASKED swaps it at its mint for fresh ecash only you know. |
 | **Send** | Make a token for any amount and share it in any chat or as a QR code. The receiver gets exactly that amount (the mint's fee is included). Until someone claims it, you can take it back. |
 | **Lock to an address** | Lock a token to someone's `bc1p…` address. Only that address's key can claim it, so a copied or intercepted token is useless. If they don't claim it within 7 days, you can take it back. Your own lock address is your Public address. Spec: [NUT-taproot-lock.md](NUT-taproot-lock.md). |
-| **Top up** | Get a Lightning invoice from your mint, pay it from any Lightning wallet or exchange, and receive the same amount as ecash. |
+| **Top up with Bitcoin** | With a mint that takes on-chain deposits ([NUT-30](https://cashubtc.github.io/nuts/)), MASKED sends from your Public or Shielded balance to the mint's deposit address, with nothing to copy. Once it confirms, the same amount arrives as ecash, and you can pay any Lightning invoice with it: **BTC → Lightning inside the wallet, with no swap service**. The deposit address is locked to a key of its own (NUT-20), so only this wallet can mint from it. Deposits show under "On its way" and are watched even after you close and reopen MASKED. |
+| **Top up with Lightning** | Get a Lightning invoice from your mint, pay it from any Lightning wallet or exchange, and receive the same amount as ecash. |
 | **Pay** | Pay any Lightning invoice with ecash. The unused part of the fee reserve comes back. |
 | **Pay websites** | Sites ask through `window.masked.cashu` (pay, NUT-18 payment requests, refunds), and you approve each payment in MASKED. See [PROVIDER.md](PROVIDER.md#ecash-cashu-masked-only) and [`examples/cashu-paywall.html`](../examples/cashu-paywall.html). |
 | **Find my ecash again** | After reinstalling, or on a new device with the same recovery phrase, ask your mints for the ecash this wallet made. |
@@ -29,6 +30,7 @@ for savings, use Shielded. MASKED doesn't run or vouch for any mint.
   BIP-340 signature from the address's key-path key. A NUT-11 locktime and a refund key of the sender are added, so an
   unclaimed token comes back after 7 days. Note that the mint sees the lock key when the token is claimed.
 - **Mints:** MASKED only talks to the mints you add, and Chrome asks you before each new one. Mints must use https.
+- **On-chain deposits** need a mint that offers the `onchain` mint method and NUT-20. MASKED shows "Top up with Bitcoin" only for those, and Lightning top-up stays available everywhere. While a deposit waits for its confirmation, the mint holds the bitcoin, as with any ecash.
 - Built on [cashu-ts](https://github.com/cashubtc/cashu-ts). Watch-only and demo wallets have no ecash.
 
 ## Testing locally
@@ -41,5 +43,7 @@ uv tool install --python 3.12 cashu --with 'marshmallow<4' --with 'limits<4'
 MINT_BACKEND_BOLT11_SAT=FakeWallet MINT_PRIVATE_KEY=test MINT_LISTEN_PORT=3338 MINT_INPUT_FEE_PPK=100 mint
 npm test
 ```
+
+For on-chain deposits, `test/helpers/onchain-mint.mjs` puts a NUT-30 test mint in front of nutshell: it hands out deposit addresses, checks the NUT-20 signature, and `POST /test/pay` stands in for a confirmed deposit.
 
 Without the test mint, the end-to-end part is skipped.
