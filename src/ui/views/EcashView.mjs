@@ -31,7 +31,7 @@ export class EcashView extends View {
     if (e.resumedFor !== e.key) { e.resumedFor = e.key; e.resumeWatching((s) => app.controller.ecashPaid(s)); }
     const mints = e.mints;
     if (!f.ecMint || !mints.some((m) => m.url === f.ecMint)) f.ecMint = mints[0]?.url || '';
-    const mode = mints.length ? f.ecMode || 'receive' : 'mints';
+    const mode = mints.length ? f.ecMode || 'receive' : 'receive';
     const t = e.total();
     return `
     ${head('Ecash')}
@@ -48,7 +48,7 @@ export class EcashView extends View {
     ${mode === 'receive' ? this.receive() : mode === 'send' ? this.send() : mode === 'topup' ? this.topUp() : mode === 'pay' ? this.pay() : ''}
     ${this.onTheWay()}
     ${this.unclaimed()}
-    ${this.mintsCard(mode === 'mints')}
+    ${this.mintsCard(!mints.length)}
     <p class="info">Ecash is an IOU from the mint you choose: fast and private, but the mint holds the bitcoin. Keep amounts small. MASKED doesn't run or vouch for any mint. Your ecash is stored encrypted and can be found again from your recovery phrase.</p>`;
   }
 
@@ -73,6 +73,7 @@ export class EcashView extends View {
         <textarea id="ecToken" data-bind="ecToken" class="mono" rows="3" spellcheck="false" placeholder="cashuB…">${esc(f.ecToken)}</textarea></label>
       ${this.statusLine('ecash')}
       <button class="btn primary wide" id="btnEcReceive" ${this.state.busy ? 'disabled' : ''}>${this.state.busy ? 'Claiming…' : 'Claim'}</button>
+      ${app.ecash.mints.length ? '' : '<p class="fee-note">Got a token? Paste it and tap Claim: MASKED adds its mint for you. To top up or send, pick a mint below.</p>'}
       <div class="ec-lock">
         <p class="small"><b>${I.lock} Get ecash only you can claim.</b> Ask the sender to lock it to your Public address. Anyone who copies the token gets nothing.</p>
         <button class="addr-chip mono" data-copy="${esc(app.ecash.myLockAddr)}">${esc(short(app.ecash.myLockAddr, 10))} ${I.copy}</button>

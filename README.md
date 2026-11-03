@@ -66,7 +66,8 @@ The build is reproducible: the same source always gives the same `extension/`. T
 | [`v2.19.0`](../../tree/v2.19.0) | Ecash (Cashu): receive, send, lock to a `bc1p…` address with a 7-day refund, Lightning top up, pay Lightning invoices, restore from the phrase; `window.masked.cashu` for websites; [Taproot-lock spec](docs/NUT-taproot-lock.md) | GitHub |
 | [`v2.20.0`](../../tree/v2.20.0) | **Top up ecash with BTC** (NUT-30 on-chain deposits): send from Public or Shielded to the mint, then pay any Lightning invoice. BTC → Lightning in the wallet, no swap service | GitHub |
 | [`v2.20.1`](../../tree/v2.20.1) | Ecash suggests one mint, Minibits (the most used); any other mint can be added by address, with a link to mint reviews | GitHub |
-| [`v2.20.2`](../../tree/v2.20.2) | Ecash Send: the lock note updates as you type; paywall demo hides its gate once paid | `main` |
+| [`v2.20.2`](../../tree/v2.20.2) | Ecash Send: the lock note updates as you type; paywall demo hides its gate once paid | GitHub |
+| [`v2.20.3`](../../tree/v2.20.3) | Ecash: claim a token before adding any mint (MASKED adds it); the claim toast no longer shows the sender's fee | `main` |
 | [`v2.15.2`](../../tree/v2.15.2) | redesigned unlock screen (show-password button, clearer wrong-password state); a side panel button in the header | GitHub |
 
 ## Use it from your website: `window.masked`

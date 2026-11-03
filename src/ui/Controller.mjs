@@ -302,7 +302,7 @@ export class Controller {
         try {
           const r = await app.ecash.receive(f.ecToken);
           f.ecToken = '';
-          this.toast(`Received ${r.amount.toLocaleString('en-US')} sats${r.fee > 0 ? ` (mint fee ${r.fee})` : ''}`, 3000);
+          this.toast(`Received ${r.amount.toLocaleString('en-US')} sats`, 3000);
         } finally { state.busy = false; this.render(); }
         break;
       }
