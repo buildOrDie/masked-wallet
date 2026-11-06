@@ -6,6 +6,7 @@
 
 - **Public**: a normal taproot address (`bc1p…`) for exchanges, marketplaces and dApps.
 - **Shielded**: a reusable [silent payment](https://github.com/bitcoin/bips/blob/master/bip-0352.mediawiki) address (`sp1…`, BIP 352). Every payment lands on a new one-time output, so nobody can look up what you hold or link your payments.
+- **Ordinals** (new in 2.21): see your inscriptions on both sides and send them, also **privately to a Shielded address**, so nobody on-chain can tell who received the NFT. The inscription keeps its own output and value; the fee never comes from it.
 - **Ecash** (new in 2.19, BTC top-up in 2.20): [Cashu](https://cashu.space) ecash for instant, private payments in any chat. **Lock a token to a `bc1p…` address** so only its owner can claim it, and a leaked token is worthless. **Top up straight from your BTC** (mints with on-chain deposits) and pay any Lightning invoice, with no swap service. Pay websites, and restore it from your recovery phrase. See [docs/ECASH.md](docs/ECASH.md) · [▶ video (47 s)](docs/img/masked-ecash.mp4).
 
 It also does:
@@ -67,7 +68,8 @@ The build is reproducible: the same source always gives the same `extension/`. T
 | [`v2.20.0`](../../tree/v2.20.0) | **Top up ecash with BTC** (NUT-30 on-chain deposits): send from Public or Shielded to the mint, then pay any Lightning invoice. BTC → Lightning in the wallet, no swap service | GitHub |
 | [`v2.20.1`](../../tree/v2.20.1) | Ecash suggests one mint, Minibits (the most used); any other mint can be added by address, with a link to mint reviews | GitHub |
 | [`v2.20.2`](../../tree/v2.20.2) | Ecash Send: the lock note updates as you type; paywall demo hides its gate once paid | GitHub |
-| [`v2.20.3`](../../tree/v2.20.3) | Ecash: claim a token before adding any mint (MASKED adds it); the claim toast no longer shows the sender's fee | `main` |
+| [`v2.21.0`](../../tree/v2.21.0) | Ordinals gallery on both sides (images, text, BRC-20), and send an inscription to any address or **privately to a Shielded address**: the inscription keeps its own output and value, and the fee comes only from plain coins of the same side | `main` |
+| [`v2.20.3`](../../tree/v2.20.3) | Ecash: claim a token before adding any mint (MASKED adds it); the claim toast no longer shows the sender's fee | |
 | [`v2.15.2`](../../tree/v2.15.2) | redesigned unlock screen (show-password button, clearer wrong-password state); a side panel button in the header | GitHub |
 
 ## Use it from your website: `window.masked`

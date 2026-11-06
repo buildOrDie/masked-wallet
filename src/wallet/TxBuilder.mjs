@@ -87,6 +87,60 @@ export class TxBuilder {
   }
 
   /**
+   * Send the coin holding an inscription to someone (or to a Shielded address, privately).
+   * The inscription coin goes in first and comes out first with exactly its value, so every sat on it
+   * (the inscription's, at any offset) lands on the recipient's output. The fee comes from other, plain
+   * coins of the same side, so a Shielded inscription is never linked to the Public address. Never burns
+   * the inscription as fee.
+   */
+  async sendInscription({ coinKey, to, rate }) {
+    this.requireSigner('send');
+    const coin = this.coins.publicThenShielded().find((c) => c.key === coinKey && !c.example);
+    if (!coin) throw new Error('That inscription is no longer in this wallet. Refresh the gallery.');
+    const from = this.coins.shielded.includes(coin) ? 'shielded' : 'public';
+    if (from === 'shielded' && !this.coins.safeToFree(coin)) throw new Error('This coin also holds LEAF. Send the LEAF first, then the inscription.');
+    await this.coins.ensureOrd(from);
+    const account = this.account, codec = account.codec;
+    const recipient = to === 'self' ? account.shieldAddr() : String(to || '').trim();
+    const k = codec.kind(recipient);
+    if (k.kind === 'empty') throw new Error('Enter who to send it to.');
+    if (k.kind !== 'public' && k.kind !== 'shielded') throw new Error(k.text + '.');
+    const own = from === 'public' ? coin.address || codec.trAddress(coin.output) : '';
+    if (k.kind === 'public' && own && recipient === own) throw new Error('That is the address it is already on.');
+    const list = this.coins.spendable(from).filter((c) => c.key !== coin.key);
+    const feeOf = (n, outs) => estimateSimpleSend({ inputs: n, outputs: outs, feeRate: rate });
+    // fee coins: one when one is enough, otherwise the largest first
+    let fund = [pickCoin(list, feeOf(2, 2) + DUST_CHANGE) || pickCoin(list, feeOf(2, 1))].filter(Boolean);
+    if (!fund.length) {
+      let sum = 0;
+      for (const c of [...list].sort((a, b) => b.sats - a.sats)) { fund.push(c); sum += c.sats; if (sum >= feeOf(1 + fund.length, 1)) break; }
+      if (sum < feeOf(1 + fund.length, 1)) fund = [];
+    }
+    if (!fund.length) throw new Error(`Not enough plain ${sideName(from)} bitcoin to pay the network fee (about ${fmtBtc(feeOf(2, 2))} ${account.unit}). The inscription itself is never used for the fee.`);
+    const coins = [coin, ...fund];
+    const keys = coins.map((c) => this.privOf(c));
+    const fundSum = fund.reduce((a, c) => a + c.sats, 0);
+    const feeTwo = feeOf(coins.length, 2);
+    const wantChange = fundSum - feeTwo >= DUST_CHANGE;
+    const change = account.changeAddr();
+    const silent = [];
+    if (k.kind === 'shielded') silent.push(recipient);
+    if (wantChange && from === 'shielded') silent.push(change);
+    const derived = new SilentOutputs(coins.map((c, i) => ({ txid: c.txid, vout: c.vout, privKey: keys[i], taproot: true })), coins.map((c) => ({ txid: c.txid, vout: c.vout })), silent);
+    const outputs = [{ value: coin.sats, script: k.kind === 'shielded' ? derived.take(recipient) : codec.outputScript(recipient) }];
+    let fee = fundSum;
+    if (wantChange) {
+      fee = feeTwo;
+      outputs.push({ value: fundSum - feeTwo, script: from === 'shielded' ? derived.take(change) : p2trScript(fund[0].output) });
+    }
+    // the inscription output must carry exactly the inscription coin's sats
+    if (outputs[0].value !== coin.sats || fee < 0 || fee > fundSum) throw new Error('Could not build a safe transaction.');
+    const tx = new RawTransaction({ inputs: coins.map(inputOf), outputs });
+    const hex = tx.toHex(keys.map((k2, i) => [tx.signKeyPath(i, k2)]));
+    return { hex, txid: tx.txid, fee, coin, coins, spent: coins.map((c) => c.key), from, recipient, kind: k.kind, toSelf: recipient === account.shieldAddr(), postage: coin.sats };
+  }
+
+  /**
    * Commit + reveal of one inscription.
    * - `parent`: also spend this inscription in the reveal and return it to its owner (BRC2.0 deploys, self-mints).
    * - `rawRecipientScript`: inscribe onto an exact output script we control (e.g. a BRC-20 balance holder).
