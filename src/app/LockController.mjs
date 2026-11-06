@@ -69,6 +69,7 @@ export class LockController {
     app.sites.loadSites().then(() => app.render());
     app.render();
     app.sync.run(6);
+    app.rgb.resume(); // RGB opens with the wallet on Signet (its test keys are encrypted with a key from the wallet's words)
     setInterval(() => { if (state.lockState === 'open' && !app.sync.syncing && document.visibilityState === 'visible') app.sync.run(4); }, 60000);
   }
 
@@ -82,6 +83,7 @@ export class LockController {
     } catch {}
     await this.session.clear();
     Keyring.forgetRoot();
+    await this.app.rgb.forget();
     this.state.wallet = null; this.secret = null;
     location.reload(); // drops every key from memory
   }

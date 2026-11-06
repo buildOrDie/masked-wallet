@@ -97,14 +97,27 @@ export class EsploraPool {
 
   /** Route every fetch to one of our servers through the failover; everything else goes out as is. */
   install(target = globalThis) {
-    target.fetch = (input, init = {}) => {
+    target.fetch = async (input, init = {}) => {
       const url = typeof input === 'string' ? input : /** @type {any} */ (input)?.url;
       if (typeof url === 'string') {
         const base = this.list().find((b) => url.startsWith(b));
-        if (base) return this.request(url.slice(base.length), init);
+        if (base) return this.request(url.slice(base.length), await EsploraPool.initOf(input, init));
       }
       return timedFetch(input, init);
     };
+  }
+
+  /**
+   * The method, headers and body of a request, whether they came in `init` or inside a Request object (the RGB
+   * engine sends Request objects: without this a broadcast POST would go out as a GET).
+   * @param {RequestInfo | URL} input @param {RequestInit} init
+   */
+  static async initOf(input, init = {}) {
+    if (typeof Request === 'undefined' || !(input instanceof Request)) return init;
+    const method = init.method || input.method;
+    const body = init.body ?? (method === 'GET' || method === 'HEAD' ? undefined : await input.clone().arrayBuffer());
+    // a Request always has a signal; only pass one the caller set, so the usual 15 s deadline still applies
+    return { method, headers: init.headers || input.headers, body, ...(init.signal ? { signal: init.signal } : {}) };
   }
 
   /**

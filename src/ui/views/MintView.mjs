@@ -4,6 +4,7 @@ import { TRANSFER_POSTAGE } from '../../ordinals/envelope.mjs';
 import { View } from '../View.mjs';
 import { I, btcLogo, head, headWith, rowKV, seg, shieldLogo, sideLogo, tokBadge, copyBtn } from '../html.mjs';
 import { TokenSendView, TransferView } from './TokenSendView.mjs';
+import { RgbMint } from './RgbViews.mjs';
 
 const OP_TITLE = { mint: 'Mint', predeploy: 'Reserve ticker', deploy: 'Deploy BRC2.0', tsend: 'Send', transfer: 'Inscribe transfer' };
 const T = (tick) => esc(String(tick || '').toUpperCase());
@@ -27,8 +28,11 @@ export class MintView extends View {
     const mode = this.f.mintMode;
     if (mode === 'send') return `${headWith(`data-tok="${esc(this.f.tsTick || '')}"`, `Send ${T(this.f.tsTick)}`)}${this.tokenSend.render()}`;
     if (mode === 'transfer') return `${headWith(`data-tok="${esc(this.f.trTick || '')}"`, `Inscribe ${T(this.f.trTick)}`)}${this.transfer.render()}`;
-    const top = `${head('Mint & deploy')}${seg('mintMode', mode, [['mint', 'Mint'], ['deploy', 'Deploy BRC2.0']])}`;
-    return mode === 'deploy' ? top + this.deployTab() : top + this.mintTab();
+    const rgb = this.app.rgb.available;
+    const tab = mode === 'rgb' && !rgb ? 'mint' : mode;
+    const top = `${head('Mint & deploy')}${seg('mintMode', tab, [['mint', 'Mint'], ['deploy', 'Deploy BRC2.0'], ...(rgb ? [['rgb', 'RGB token']] : [])])}`;
+    if (tab === 'rgb') return top + RgbMint.render(this.app);
+    return tab === 'deploy' ? top + this.deployTab() : top + this.mintTab();
   }
 
   doneScreen(b) {

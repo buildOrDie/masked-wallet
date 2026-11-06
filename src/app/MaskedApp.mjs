@@ -1,5 +1,6 @@
 // The composition root: builds every service once, wires them to each other through `app`, and starts
 // the wallet. Services reach their neighbours as `this.app.<name>`; nothing else is global.
+import { WalletRgb } from '../rgb/WalletRgb.mjs';
 import { BROADCAST } from '../bitcoin/networks.mjs';
 import { TxPolicy, broadcastHex } from '../bitcoin/RawTransaction.mjs';
 import { localStore } from '../core/LocalStore.mjs';
@@ -62,6 +63,7 @@ export class MaskedApp {
     this.accounts = new AccountBook(store);
     this.offline = new OfflinePayments(this);
     this.airdrop = new Airdrop(this);
+    this.rgb = new WalletRgb(this);
 
     // tokens
     this.deploys = new DeployRegistry(this);
@@ -188,6 +190,7 @@ export class MaskedApp {
   setNet(n) {
     const state = this.state, keys = state.wallet;
     state.net = n;
+    this.rgb.close().catch(() => {}); this.rgb.tried = ''; this.rgb.phase = ''; // RGB is per network
     this.inscriptions.reset();
     if (keys?.source === 'mnemonic') {
       const next = this.accountKeys(keys.mnemonic, keys.passphrase, n, keys.index || 0);

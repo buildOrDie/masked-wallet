@@ -37,6 +37,18 @@ export class Platform {
   async sessionSet(obj) { if (!this.hasSession) return; try { await chrome.storage.session.set(obj); } catch {} }
   async sessionRemove(key) { if (!this.hasSession) return; try { await chrome.storage.session.remove(key); } catch {} }
 
+  /**
+   * Ask once (one Chrome prompt) to reach several servers, e.g. the RGB transfer server named in an invoice.
+   * Must be called straight from a click. Already-allowed servers do not prompt.
+   * @param {string[]} urls
+   */
+  async requestOrigins(urls) {
+    if (!urls.length || !this.hasExt || !chrome.permissions?.request) return;
+    const origins = [...new Set(urls.map((u) => new URL(u).origin + '/*'))];
+    const ok = await chrome.permissions.request({ origins });
+    if (!ok) throw new Error('MASKED needs permission to reach the transfer server in this invoice.');
+  }
+
   /** Ask for permission to reach a server the user typed in Settings. */
   async requestOrigin(url) {
     if (!this.hasExt || !chrome.permissions?.request) return;

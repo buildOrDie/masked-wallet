@@ -1,3 +1,4 @@
+import { RgbHome } from './RgbViews.mjs';
 import { esc, fmtBtc, sumSats } from '../../core/format.mjs';
 import { INSCRIPTION_MAX } from '../../ordinals/envelope.mjs';
 import { View } from '../View.mjs';
@@ -62,6 +63,7 @@ export class HomeView extends View {
       </button>
     </section>
     ${account.isTest ? '' : `<section class="ec-home">${EcashView.homeRow(app)}</section>`}
-    ${app.ui.tokens.home(side, leafRow)}`;
+    ${app.ui.tokens.home(side, leafRow)}
+    ${RgbHome.render(app)}`;
   }
 }

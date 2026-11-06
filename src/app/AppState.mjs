@@ -11,7 +11,7 @@ export const FORM_DEFAULTS = {
   ecMode: '', ecMint: '', ecVia: '', ecFrom: 'public', ecAmt: '', ecLock: '', ecToken: '', ecInvoice: '', ecNewMint: '',
   sendMode: 'send', dropText: '', dropEach: '1000', dropFrom: 'public',
   // set by the screens that use them
-  homeTok: 'all', tokTab: 'history', acctMenu: '-1', acctHidden: '', obMode: 'create', backed: false, apRisk: false, rbfInfo: false,
+  homeTok: 'all', tokTab: 'history', rgbTab: 'history', acctMenu: '-1', acctHidden: '', obMode: 'create', backed: false, apRisk: false, rbfInfo: false,
 };
 
 export class AppState {
