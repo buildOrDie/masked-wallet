@@ -6,7 +6,7 @@
 
 - **Public**: a normal taproot address (`bc1p…`) for exchanges, marketplaces and dApps.
 - **Shielded**: a reusable [silent payment](https://github.com/bitcoin/bips/blob/master/bip-0352.mediawiki) address (`sp1…`, BIP 352). Every payment lands on a new one-time output, so nobody can look up what you hold or link your payments.
-- **Ordinals** (new in 2.21): see your inscriptions on both sides and send them, also **privately to a Shielded address**, so nobody on-chain can tell who received the NFT. The inscription keeps its own output and value; the fee never comes from it.
+- **Ordinals** (new in 2.21): see your inscriptions on both sides and send them, also **privately to a Shielded address**, so nobody on-chain can tell who received the NFT. The inscription keeps its own output and value; the fee never comes from it. See [docs/ORDINALS.md](docs/ORDINALS.md) · [▶ video (18 s)](docs/img/masked-ordinals.mp4).
 - **Ecash** (new in 2.19, BTC top-up in 2.20): [Cashu](https://cashu.space) ecash for instant, private payments in any chat. **Lock a token to a `bc1p…` address** so only its owner can claim it, and a leaked token is worthless. **Top up straight from your BTC** (mints with on-chain deposits) and pay any Lightning invoice, with no swap service. Pay websites, and restore it from your recovery phrase. See [docs/ECASH.md](docs/ECASH.md) · [▶ video (47 s)](docs/img/masked-ecash.mp4).
 
 It also does:
@@ -32,6 +32,8 @@ It also does:
 | <img src="docs/img/receive-shielded.png" width="250" alt="Shielded receive address"> | <img src="docs/img/approve-trade.png" width="250" alt="Approval to trade from Shielded"> | <img src="docs/img/approve-list.png" width="250" alt="Approval to inscribe a transfer on a Shielded coin"> |
 | **Ecash** (2.19) | **Locked to an address** (2.19) | **Pay a website with ecash** (2.19) |
 | <img src="docs/img/ecash-home.png" width="250" alt="Ecash balance with Receive, Send, Top up and Pay"> | <img src="docs/img/ecash-locked.png" width="250" alt="An ecash token locked to a bc1p address"> | <img src="docs/img/ecash-pay-site.png" width="250" alt="A website asking for 21 sats of ecash"> |
+| **Ordinals** (2.21) | **One inscription** (2.21) | **Shield an ordinal** (2.21) |
+| <img src="docs/img/ordinals-grid.png" width="250" alt="Ordinals gallery"> | <img src="docs/img/ordinals-detail.png" width="250" alt="One inscription with its details"> | <img src="docs/img/ordinals-review.png" width="250" alt="Moving an inscription to the Shielded side"> |
 | **Offline send** (2.14) | **Silent airdrop** (2.15) | **Share on X** (2.14) |
 | <img src="docs/img/offline-signed.png" width="250" alt="A payment signed offline, as a QR code"> | <img src="docs/img/airdrop.png" width="250" alt="Airdrop: 12 people found in a pasted X thread"> | <img src="docs/img/share-on-x.png" width="250" alt="Share the Shielded address on X"> |
 
