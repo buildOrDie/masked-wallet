@@ -25,7 +25,7 @@ export function plain(x) {
 }
 const balance = (b) => ({ settled: num(b?.settled), future: num(b?.future), spendable: num(b?.spendable) });
 const asset = (a) => ({
-  assetId: String(a?.assetId ?? ''), ticker: String(a?.ticker ?? ''), name: String(a?.name ?? ''),
+  assetId: String(a?.assetId ?? ''), ticker: String(a?.ticker ?? a?.name ?? '').slice(0, 12), name: String(a?.name ?? a?.ticker ?? ''),
   precision: num(a?.precision), issuedSupply: num(a?.issuedSupply), balance: balance(a?.balance),
 });
 
@@ -52,7 +52,8 @@ export class LiteWallet {
       dataDir, bitcoinNetwork: this.net, databaseType: 'Sqlite', maxAllocationsPerUtxo: 5,
       accountXpubVanilla: k.accountXpubVanilla, accountXpubColored: k.accountXpubColored,
       mnemonic, masterFingerprint: k.masterFingerprint, vanillaKeychain: null,
-      supportedSchemas: ['Nia', 'Ifa'], reuseAddresses: true, // one stable funding address
+      // mainnet: NIA (standard RGB tokens) only; this engine has no CFA/UDA, and IFA/BFA are test-network only for now
+      supportedSchemas: this.net === 'Mainnet' ? ['Nia'] : ['Nia', 'Ifa'], reuseAddresses: true, // one stable funding address
     };
     this.w = await this.lib.WasmWallet.create(JSON.stringify(data));
   }

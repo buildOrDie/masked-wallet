@@ -1,4 +1,4 @@
-import { RGB_PROFILE_KEY, fromBase, newAsset, profileOf, toBase } from './config.mjs';
+import { RGB_BETA_KEY, RGB_MAINNET, RGB_PROFILE_KEY, fromBase, newAsset, profileOf, toBase } from './config.mjs';
 import { toHex, enc } from '../core/bytes.mjs';
 import { encryptRgb } from './backup.mjs';
 
@@ -24,6 +24,7 @@ export function rgbError(error, profile = profileOf('utexo')) {
     return `RGB is still setting up. Wait for one block (about 10 minutes), then try again. (${text})`;
   }
   if (/insufficient|not enough/i.test(text)) {
+    if (profile.id === 'mainnet') return `Not enough confirmed BTC in RGB for the network fee. Tap Add BTC for RGB on Home, wait for a block, then try again. (${text})`;
     return profile.id === 'utexo'
       ? `Not enough test BTC for this. Get some with /getbtc at the Utexo faucet, then Refresh. (${text})`
       : `Not enough confirmed test BTC for RGB. Tap Add test BTC on Home, wait for a block, then try again. (${text})`;
@@ -85,9 +86,17 @@ export class WalletRgb {
     this.fields = EMPTY_FIELDS();
   }
 
-  get available() { return this.app.state.net === 'signet' && this.app.state.lockState === 'open' && !!this.app.lock?.secret?.words; }
-  /** The RGB test network in use: Public Signet unless Utexo Signet was picked. */
+  get unlocked() { return this.app.state.lockState === 'open' && !!this.app.lock?.secret?.words; }
+  get available() { return this.unlocked && (this.app.state.net === 'signet' || (this.app.state.net === 'main' && this.betaOn)); }
+  /** Mainnet, beta not switched on yet: Home offers it. */
+  get offerable() { return this.unlocked && this.app.state.net === 'main' && !this.betaOn; }
+  get betaOn() { try { return localStorage.getItem(RGB_BETA_KEY) === '1'; } catch { return false; } }
+  get isMain() { return this.profile.id === 'mainnet'; }
+  /** sat/vB for RGB's own transactions: the wallet's fee choice on mainnet, 2 on the test networks. */
+  fee() { return this.isMain ? String(Math.min(100, Math.max(1, Math.ceil(this.app.feeRate())))) : RGB_FEE; }
+  /** The RGB network in use: mainnet on mainnet; on Signet, Public Signet unless Utexo Signet was picked. */
   get profile() {
+    if (this.app.state.net === 'main') return RGB_MAINNET;
     let id = null;
     try { id = localStorage.getItem(RGB_PROFILE_KEY); } catch { /* storage blocked: use the default */ }
     return profileOf(id);
@@ -101,6 +110,13 @@ export class WalletRgb {
     const s = this.app.lock?.secret;
     if (!s?.words) throw new Error('Unlock your wallet first.');
     const d = await crypto.subtle.digest('SHA-256', enc.encode(`MASKED/rgb-vault/v1\n${s.words}\n${s.passphrase || ''}`));
+    return toHex(new Uint8Array(d));
+  }
+
+  /** Mainnet RGB's own keys: from the MASKED phrase on a path of their own, never MASKED's own addresses. */
+  async mainSeed() {
+    const s = this.app.lock?.secret;
+    const d = await crypto.subtle.digest('SHA-256', enc.encode(`MASKED/rgb-mainnet-keys/v1\n${s.words}\n${s.passphrase || ''}`));
     return toHex(new Uint8Array(d));
   }
 
@@ -158,7 +174,8 @@ export class WalletRgb {
     try {
       const runtime = await this.runtime();
       const service = await this.serviceFor();
-      await service.open(password, runtime.newTestMnemonic, backup);
+      const seed = this.isMain ? await this.mainSeed() : '';
+      await service.open(password, this.isMain ? () => runtime.mnemonicFrom(seed) : runtime.newTestMnemonic, backup);
       this.ready = true;
       if (keyed) this.markKeyed();
       this.startTimer();
@@ -245,9 +262,9 @@ export class WalletRgb {
     try { return await fn(); } catch (e) {
       const text = typeof e === 'string' ? e : e?.message || '';
       if (!NEEDS_OUTPUTS.test(text)) throw e;
-      if (this.btc().settled < 1500) throw new Error('Add test BTC first: tap Add test BTC on Home, then wait for a block.');
+      if (this.btc().settled < 1500) throw new Error(this.isMain ? 'Add BTC for RGB first: tap Add BTC for RGB on Home, then wait for a block.' : 'Add test BTC first: tap Add test BTC on Home, then wait for a block.');
       this.message = 'Setting up RGB…'; this.app.render();
-      await this.service.createUtxos(RGB_FEE);
+      await this.service.createUtxos(this.fee());
       await this.refresh();
       try { return await fn(); } catch (e2) {
         if (NEEDS_OUTPUTS.test(typeof e2 === 'string' ? e2 : e2?.message || '')) throw new Error('RGB is set up. Wait for one block (about 10 minutes), then tap again.');
@@ -259,7 +276,20 @@ export class WalletRgb {
   // ---- actions (data-rgb="…") ----
   async action(name, arg = '') {
     const app = this.app, state = app.state, f = state.f;
+    if (name === 'beta') {
+      if (!this.offerable) return undefined;
+      if (!confirm('RGB on mainnet is a beta.\n\n• RGB tokens can only be restored from an RGB backup file, not from your recovery phrase alone. MASKED asks you to save one before every receive and send.\n• Keep amounts small.\n\nTurn on RGB beta?')) return undefined;
+      try { localStorage.setItem(RGB_BETA_KEY, '1'); } catch { /* stays off */ }
+      this.tried = ''; this.phase = '';
+      return this.action('on');
+    }
     if (!this.available) throw new Error('Open your wallet on Signet first.');
+    if (this.isMain && name === 'issue') throw new Error('Creating tokens is off in the mainnet beta.');
+    // mainnet: no receive or send while the backup is out of date, so tokens are never only in this browser
+    if (this.isMain && ['invoice', 'review', 'confirm'].includes(name) && this.service?.backupRequired) {
+      this.message = 'Save your RGB backup first: Home → Save your RGB backup, or Settings → RGB. On mainnet your recovery phrase alone can\'t bring RGB tokens back.';
+      return app.render();
+    }
     if (['fund', 'mint', 'token', 'receive', 'send'].includes(name)) this.message = ''; // a new screen starts clean
     switch (name) {
       case 'on': return this.run(async () => {
@@ -364,7 +394,7 @@ export class WalletRgb {
         return this.run(async () => {
           this.message = 'Sending…'; app.render();
           if (!p.check?.ok) throw new Error('Check the transfer server first.');
-          const r = await this.service.send({ invoice: p.invoice, assetId: p.assetId, amount: String(p.amount), fee: RGB_FEE });
+          const r = await this.service.send({ invoice: p.invoice, assetId: p.assetId, amount: String(p.amount), fee: this.fee() });
           this.sent = { txid: r?.txid || '', shown: p.shown, ticker: p.ticker };
           this.pending = null;
           await this.refresh();
@@ -373,7 +403,7 @@ export class WalletRgb {
       case 'backup': return this.run(async () => {
         const backup = await this.service.backup();
         const url = URL.createObjectURL(new Blob([JSON.stringify(backup)], { type: 'application/json' }));
-        const link = document.createElement('a'); link.href = url; link.download = `masked-rgb-${this.profile.id}-signet-backup.json`; link.click();
+        const link = document.createElement('a'); link.href = url; link.download = `masked-rgb-${this.profile.id}-backup.json`; link.click();
         setTimeout(() => URL.revokeObjectURL(url), 10000);
         this.service.backupSaved();
         app.toast('RGB backup saved');
@@ -398,6 +428,7 @@ export class WalletRgb {
         return app.render();
       }
       case 'off': return this.run(async () => { await this.close(); this.tried = this.profile.id; app.toast('RGB is off until you reopen the wallet'); });
+      case 'betaOff': return this.run(async () => { await this.close(); try { localStorage.setItem(RGB_BETA_KEY, '0'); } catch { /* */ } app.toast('RGB beta is off. Your RGB wallet stays saved in this browser.'); });
       default: return undefined;
     }
   }

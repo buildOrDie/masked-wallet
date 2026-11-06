@@ -20,7 +20,7 @@ import { I } from './html.mjs';
 const { b2n } = sp.util;
 
 /** Which status line an error goes to, by view. */
-const ERROR_SLOT = { ecash: 'ecash', send: 'send', shield: 'send', leaf: 'leaf', drop: 'drop', mint: 'mint', settings: 'wallet', activity: 'scan', relay: 'relay' };
+const ERROR_SLOT = { ordinals: 'ord', ecash: 'ecash', send: 'send', shield: 'send', leaf: 'leaf', drop: 'drop', mint: 'mint', settings: 'wallet', activity: 'scan', relay: 'relay' };
 
 export class Controller {
   /** @param {import('../app/MaskedApp.mjs').MaskedApp} app */
@@ -57,6 +57,7 @@ export class Controller {
     if (b === 'mintTick') { clearTimeout(this.tickTimer); this.tickTimer = setTimeout(() => { if (state.view === 'mint') this.render(); }, 450); }
     if (b === 'mintOther') { const k = codec.kind(e.target.value), el = $('#mintKind'); if (el) { el.className = `addr-kind k-${k.kind}`; el.textContent = k.text || ''; } }
     if (b === 'feeCustom') this.customFeeHint(e.target.value);
+    if (b === 'ordTo') { const el = $('#ordKind'), v = e.target.value.trim(); if (el) { const k = this.app.account.codec.kind(v); el.className = `addr-kind k-${k.kind}`; el.textContent = k.kind === 'empty' ? '' : v === this.app.account.shieldAddr() ? 'Your own Shielded address' : k.text; } }
     if (b === 'ecLock') { const el = $('#ecLockNote'); if (el) el.textContent = EcashView.lockNote(e.target.value); }
     if (b === 'dropText') { const el = $('#dropCount'); if (el) { const pv = this.app.ui.view('send').drop.preview(); el.innerHTML = AirdropView.countNote(pv); el.className = `addr-kind ${pv.n ? 'k-shielded' : ''}`; } }
     if (b === 'dropText' || b === 'dropEach') { clearTimeout(this.dropTimer); this.dropTimer = setTimeout(() => { if (state.view === 'send') this.render(); }, 400); }
@@ -177,6 +178,12 @@ export class Controller {
     }
     if (d.recover) { await this.recoverReservation(d.recover); return true; }
     if (d.lock) { app.coins.toggleLock(d.lock); this.render(); return true; }
+    // Ordinals
+    if (d.ordsel) { state.ord = { sel: d.ordsel }; state.status.ord = null; f.ordTo = ''; f.poisonOk = false; this.render(); window.scrollTo?.(0, 0); return true; }
+    if (t.hasAttribute('data-ordback')) { state.ord = {}; state.status.ord = null; this.render(); return true; }
+    if (t.hasAttribute('data-ordreviewback')) { state.ord = { sel: state.ord.sel }; this.render(); return true; }
+    if (t.hasAttribute('data-ordrefresh')) { const r = app.gallery.refresh(); this.render(); await r; this.render(); return true; }
+    if (t.hasAttribute('data-ordself')) { f.ordTo = account.shieldAddr(); this.render(); return true; }
     // Ecash
     if (t.hasAttribute('data-ecnew')) { state.ecash = {}; state.status.ecash = null; app.ecash.stopWatching(); this.render(); return true; }
     if (d.ecaddmint !== undefined) { f.ecNewMint = d.ecaddmint; await this.addEcashMint(); return true; }
@@ -256,6 +263,7 @@ export class Controller {
     // the Mint tab always opens Mint & deploy (Send / Inscribe are sub-pages of a token)
     if (t.closest('#nav') && d.go === 'mint' && ['send', 'transfer'].includes(f.mintMode)) { f.mintMode = 'mint'; state.mint = { stage: 'form' }; }
     if (d.go === 'shield') f.sendAmount = '';
+    if (d.reset || d.go === 'ordinals') { if (state.ord?.done || d.go === 'ordinals') state.ord = {}; state.status.ord = null; }
     if (d.go === 'leaf') { if (d.leafside) f.leafFrom = d.leafside; state.leafSend = { stage: 'form' }; state.status.leaf = null; }
     if (d.go === 'mint' && f.mintMode === 'send') f.mintMode = 'mint';
     state.view = d.go;
@@ -298,6 +306,30 @@ export class Controller {
         const shield = state.view === 'shield';
         f.poisonOk = false;
         await review('send', () => app.builder.send({ from: shield ? 'public' : f.sendFrom, to: shield ? 'self' : f.sendTo, amount: parseBtc(f.sendAmount, account.unit), rate: app.feeRate() }));
+        break;
+      }
+      case 'btnOrdReview': {
+        const x = app.gallery.find(state.ord.sel);
+        if (!x) throw new Error('That inscription is no longer in this wallet.');
+        if (f.ordTo.trim() && app.lookAlike(f.ordTo.trim())) f.poisonOk = false;
+        state.busy = true; state.status.ord = null; this.render();
+        try {
+          const built = await app.builder.sendInscription({ coinKey: x.coinKey, to: f.ordTo.trim() === account.shieldAddr() ? 'self' : f.ordTo, rate: app.feeRate() });
+          state.ord = { sel: x.id, built };
+        } finally { state.busy = false; this.render(); }
+        break;
+      }
+      case 'btnOrdSend': {
+        const b = state.ord.built;
+        if (!b.toSelf && app.lookAlike(b.recipient) && !f.poisonOk) throw new Error('Tick the box to confirm the look-alike address.');
+        state.busy = true; this.render();
+        try {
+          await app.broadcast(b.hex);
+          if (!b.toSelf) app.rememberRecipient(b.recipient);
+          app.afterBroadcast(b.spent, [b.txid]);
+          app.gallery.items = app.gallery.items.filter((x) => x.coinKey !== b.coin.key);
+          state.ord = { done: { txid: b.txid, kind: b.kind } }; f.ordTo = '';
+        } finally { state.busy = false; this.render(); }
         break;
       }
       case 'btnEcAddMint': await this.addEcashMint(); break;

@@ -30,6 +30,27 @@ export const RGB_PROFILES = Object.freeze({
     funding: 'Fund this address using /getbtc at Utexo’s faucet. Do not send public Signet coins.',
   }),
 });
+/**
+ * RGB on Bitcoin mainnet (beta). Its own keys, derived from the MASKED recovery phrase with their own path, so
+ * RGB's coins never mix with the Public or Shielded balance. Tokens can only come back from an RGB backup file:
+ * the phrase alone restores the BTC part, not the token proofs.
+ */
+export const RGB_MAINNET = Object.freeze({
+  id: 'mainnet',
+  label: 'Bitcoin mainnet',
+  sdk: Object.freeze({
+    network: 'mainnet',
+    indexerUrl: 'https://mempool.space/api',
+    transportEndpoint: 'https://proxy.iriswallet.com/0.2/json-rpc',
+    dataDir: 'masked_rgb_mainnet_v1',
+  }),
+  invoiceNets: Object.freeze(['mainnet', 'bitcoin', 'bc']),
+  vaultKey: 'masked.rgb.mainnet.v1',
+  funding: 'Send a little BTC here for RGB network fees, for example from your Public balance.',
+  main: true,
+});
+/** The mainnet beta is switched on per browser. */
+export const RGB_BETA_KEY = 'masked.rgb.mainnet-beta';
 export const RGB_PROFILE_KEY = 'masked.rgb.profile';
 export const DEFAULT_PROFILE = 'public';
 /** @param {string|null} id */

@@ -32,13 +32,14 @@ export class RgbHome {
   /** The RGB section of Home (Signet only). */
   static render(app) {
     const r = app.rgb;
+    if (r.offerable) return `<button class="hint hint-cta" data-rgb="beta"><span class="hint-ic">${I.mint}</span><span><b>RGB tokens (beta)</b><span>Hold and send RGB tokens on Bitcoin mainnet. Beta: keep amounts small.</span></span><span class="chev">›</span></button>`;
     if (!r.available) return '';
     r.ensure();
     if (r.phase === 'legacy') return `<section class="card form"><div class="list-h"><b>RGB tokens</b>${rgbBadge}</div>
       <p class="muted small">This RGB test wallet was made by an earlier test build with its own password. Enter it once; after that RGB opens with your wallet.</p>
       <label class="field"><span class="lbl">Earlier RGB password</span><input id="rgbOldPw" type="password" autocomplete="off"></label>
       <button class="btn primary wide" data-rgb="migrate" ${r.busy ? 'disabled' : ''}>Open RGB</button>${msg(r)}</section>`;
-    if (!r.ready && !r.exists) return `<button class="hint hint-cta" data-rgb="on" ${r.busy ? 'disabled' : ''}><span class="hint-ic">${I.mint}</span><span><b>${r.busy ? 'Turning on RGB…' : 'Try RGB tokens'}</b><span>Create and send private test tokens on Signet.</span></span><span class="chev">›</span></button>`;
+    if (!r.ready && !r.exists) return `<button class="hint hint-cta" data-rgb="on" ${r.busy ? 'disabled' : ''}><span class="hint-ic">${I.mint}</span><span><b>${r.busy ? 'Turning on RGB…' : r.isMain ? 'Turn on RGB (beta)' : 'Try RGB tokens'}</b><span>${r.isMain ? 'Hold and send RGB tokens on Bitcoin mainnet.' : 'Create and send private test tokens on Signet.'}</span></span><span class="chev">›</span></button>`;
     if (!r.ready) {
       return `<section class="home-toks"><div class="list-h"><b>RGB tokens</b><span class="muted small">${r.phase === 'error' ? '' : 'opening…'}</span></div>
       ${r.phase === 'error' ? `${msg(r)}<button class="btn ghost wide" data-rgb="retry">Try again</button>` : ''}</section>`;
@@ -49,23 +50,27 @@ export class RgbHome {
     }
     const list = r.assets();
     const { settled, pending } = r.btc();
+    const t = r.isMain ? '' : 'test ';
+    const backupDue = r.isMain && r.service?.backupRequired
+      ? `<button class="hint hint-cta" data-rgb="backup" ${r.busy ? 'disabled' : ''}><span class="hint-ic">${I.check}</span><span><b>Save your RGB backup</b><span>Needed before your next receive or send. Your recovery phrase alone can't bring RGB tokens back.</span></span><span class="chev">›</span></button>`
+      : '';
     const fund = settled + pending < RGB_LOW_BTC
-      ? `<button class="hint hint-cta" data-rgb="fund"><span class="hint-ic">${I.recv}</span><span><b>Add test BTC for RGB</b><span>RGB pays its own network fees. Send ${RGB_FUND_BTC} from your Public balance.</span></span><span class="chev">›</span></button>`
+      ? `<button class="hint hint-cta" data-rgb="fund"><span class="hint-ic">${I.recv}</span><span><b>Add ${t}BTC for RGB</b><span>RGB pays its own network fees. Send ${RGB_FUND_BTC} from your Public balance.</span></span><span class="chev">›</span></button>`
       : '';
     // RGB's own test BTC (it pays RGB's network fees), with its address: tap to copy
     const addr = r.data.address || '';
     const feeRow = `<button class="tok-line" data-copy="${esc(addr)}" title="Copy RGB address">${btcLogo}
-        <span class="bal-txt"><b class="tk">Test BTC for fees</b><span class="mono">${esc(short(addr, 6))} ${I.copy}</span></span>
-        <span class="bal-amt"><b>${fmtBtc(settled)}</b><span>${pending ? `<span class="pend-t">+${fmtBtc(pending)} waiting for a block</span>` : 'tBTC'}</span></span></button>`;
+        <span class="bal-txt"><b class="tk">${r.isMain ? 'BTC for RGB fees' : 'Test BTC for fees'}</b><span class="mono">${esc(short(addr, 6))} ${I.copy}</span></span>
+        <span class="bal-amt"><b>${fmtBtc(settled)}</b><span>${pending ? `<span class="pend-t">+${fmtBtc(pending)} waiting for a block</span>` : r.isMain ? 'BTC' : 'tBTC'}</span></span></button>`;
     return `<section class="home-toks">
-      <div class="list-h"><b>RGB tokens</b><button class="link small" data-rgb="refresh" ${r.busy ? 'disabled' : ''}>${r.busy ? 'Updating…' : 'Refresh'}</button></div>
-      ${fund}
+      <div class="list-h"><b>RGB tokens${r.isMain ? ' <span class="badge">beta</span>' : ''}</b><button class="link small" data-rgb="refresh" ${r.busy ? 'disabled' : ''}>${r.busy ? 'Updating…' : 'Refresh'}</button></div>
+      ${backupDue}${fund}
       <div class="tok-list">${feeRow}${list.map((a) => {
         const s = Number(a.balance?.settled || 0), fut = Number(a.balance?.future || 0);
         return `<button class="tok-line" data-rgb="token" data-rgb-arg="${esc(a.assetId)}">${rgbIcon(a.ticker)}
         <span class="bal-txt"><b class="tk">${esc(a.ticker)}</b><span>RGB${fut > s ? ' · <span class="pend-t">incoming</span>' : ''}</span></span>
         <span class="bal-amt"><b>${r.amount(a, s)}</b><span>${esc(a.name)}</span></span><span class="chev">›</span></button>`;
-      }).join('') || `<p class="muted small center">No RGB tokens yet.</p><button class="btn ghost wide" data-rgb="mint">${I.mint}<span>Create an RGB token</span></button>`}</div>
+      }).join('') || (r.isMain ? `<p class="muted small center">No RGB tokens yet.</p><button class="btn ghost wide" data-rgb="receive">${I.recv}<span>Receive an RGB token</span></button>` : `<p class="muted small center">No RGB tokens yet.</p><button class="btn ghost wide" data-rgb="mint">${I.mint}<span>Create an RGB token</span></button>`)}</div>
     </section>`;
   }
 }
@@ -95,7 +100,7 @@ export class RgbTokenView extends View {
   }
 
   history(a) {
-    const r = this.app.rgb, explorer = this.account.explorer, onChain = r.profile.id === 'public';
+    const r = this.app.rgb, explorer = this.account.explorer, onChain = r.profile.id === 'public' || r.isMain;
     const rows = r.history(a.assetId).map((t) => ({ t, h: historyRow(t, a, r) })).filter((x) => x.h);
     if (!rows.length) return '<p class="muted small center">No activity yet.</p>';
     let day = '';
@@ -117,7 +122,7 @@ export class RgbTokenView extends View {
       ${rowKV('Ticker', esc(a.ticker))}
       ${rowKV('Supply', r.amount(a, a.issuedSupply))}
       ${rowKV('Decimals', String(a.precision))}
-      ${rowKV('Network', `${esc(r.profile.label)} · test`)}
+      ${rowKV('Network', r.isMain ? 'Bitcoin mainnet · beta' : `${esc(r.profile.label)} · test`)}
       ${rowKV('Asset ID', `<span class="mono small">${esc(short(a.assetId, 10))}</span>`)}
     </div><button class="btn ghost wide" data-copy="${esc(a.assetId)}">${I.copy}<span>Copy asset ID</span></button>
     <p class="info">RGB balances are not on the blockchain. Only you and the people you trade with see them.</p></section>`;
@@ -130,7 +135,7 @@ export class RgbSendView extends View {
     const r = this.app.rgb, a = r.find(r.asset);
     if (!r.ready || !a) { this.state.view = 'home'; return this.app.ui.view('home').render(); }
     if (r.sent) {
-      const onChain = r.profile.id === 'public' && r.sent.txid;
+      const onChain = (r.profile.id === 'public' || r.isMain) && r.sent.txid;
       return `<section class="done"><div class="done-ic">${I.check}</div><h1>Sent</h1>
         <p>${esc(r.sent.shown)} ${esc(r.sent.ticker)} is on its way.</p><p class="muted small">It arrives once the other wallet picks it up and a block confirms it.</p>
         ${onChain ? `<a class="btn ghost" href="${this.account.explorer.tx(r.sent.txid)}" target="_blank" rel="noopener">View on mempool ${I.ext}</a>` : ''}
@@ -148,7 +153,7 @@ export class RgbSendView extends View {
           ${rowKV('Privacy', '<span class="good">Private — the amount and token are not on the blockchain</span>')}
           ${p.fixed ? rowKV('Amount', 'set by the invoice') : ''}
           ${rowKV('Transfer server', `${esc(p.proxies.join(', '))} ${p.ask.length ? '<span class="muted">· not allowed yet</span>' : p.check?.ok ? '<span class="good">· reachable</span>' : p.check ? '<span class="meh">· not usable</span>' : '<span class="muted">· checking…</span>'}`)}
-          ${rowKV('Network fee', p.witness ? 'a few hundred test sats + 1,000 sats for their new output' : 'a few hundred test sats')}
+          ${rowKV('Network fee', `${p.witness ? `a few hundred ${r.isMain ? '' : 'test '}sats + 1,000 sats for their new output` : `a few hundred ${r.isMain ? '' : 'test '}sats`}${r.isMain ? ` · ${esc(r.fee())} sat/vB` : ''}`)}
         </div>
         ${p.ask.length ? `<p class="info">This invoice uses its own transfer server (${esc(p.ask.map((u) => new URL(u).host).join(', '))}). The token's proof is dropped off there for them to collect. Allow MASKED to reach it:</p>
           <button class="btn primary wide" data-rgb="allowProxy" ${r.busy ? 'disabled' : ''}>Allow ${esc(new URL(p.ask[0]).host)}</button>` : ''}
@@ -191,7 +196,7 @@ export class RgbReceive {
         <div class="kv small">${rowKV('Type', info.witness ? 'No BTC needed (witness)' : 'Private (blind)')}${rowKV('Works for', exp || 'a while')}</div>
         <p class="info">Send this to the person paying you. It works once.</p>
         <button class="btn ghost wide" data-rgb="opt" data-rgb-arg="recvType:${type}">New invoice</button>
-        <p class="info warn">${esc(r.profile.label)} test tokens only. They have no value.</p>
+        <p class="info warn">${r.isMain ? 'RGB beta: keep amounts small. Once it arrives, save a new RGB backup.' : `${esc(r.profile.label)} test tokens only. They have no value.`}</p>
       </section>`;
     }
     return `<section class="card form">
@@ -200,8 +205,8 @@ export class RgbReceive {
       ${a ? input(r, 'recvAmt', 'Amount', 'inputmode="decimal" placeholder="Any amount"', `${esc(a.ticker)} · optional`) : ''}
       <div class="field"><span class="lbl">Works for</span>${segOf('recvExpiry', r.fields.recvExpiry, RGB_EXPIRY)}</div>
       <div class="field"><span class="lbl">Invoice type</span>${segOf('recvType', type, [['blind', 'Private'], ['witness', 'No BTC needed']])}
-        <span class="addr-kind">${type === 'witness' ? 'The sender adds 1,000 sats for your new output, so you need no BTC.' : 'Receives onto one of your RGB outputs, fully hidden. Needs a little test BTC.'}</span></div>
-      ${type === 'blind' && low ? `<p class="info warn">Your RGB test BTC is low. Pick "No BTC needed", or add test BTC on Home first.</p>` : ''}
+        <span class="addr-kind">${type === 'witness' ? 'The sender adds 1,000 sats for your new output, so you need no BTC.' : `Receives onto one of your RGB outputs, fully hidden. Needs a little ${r.isMain ? '' : 'test '}BTC.`}</span></div>
+      ${type === 'blind' && low ? `<p class="info warn">Your RGB ${r.isMain ? '' : 'test '}BTC is low. Pick "No BTC needed", or add ${r.isMain ? '' : 'test '}BTC on Home first.</p>` : ''}
       ${msg(r)}
       <button class="btn primary wide" data-rgb="invoice" ${r.busy ? 'disabled' : ''}>${r.busy ? 'Making invoice…' : 'Make invoice'}</button>
     </section>`;
@@ -212,6 +217,7 @@ export class RgbMint {
   /** The "RGB token" tab of Mint: create a token, then a done screen. */
   static render(app) {
     const r = app.rgb;
+    if (r.isMain) return '<section class="card form"><p class="info">Creating RGB tokens is off in the mainnet beta. You can receive and send them.</p></section>';
     if (!r.ready) {
       return `<section class="card form"><p class="info">RGB tokens live off the blockchain: only you and the people you send them to see balances.</p>
         ${r.exists ? `<p class="muted center">${r.phase === 'error' ? esc(r.message) : 'Opening RGB…'}</p>` : `<button class="btn primary wide" data-rgb="on" ${r.busy ? 'disabled' : ''}>${r.busy ? 'Turning on…' : 'Turn on RGB'}</button>`}</section>`;
@@ -248,19 +254,20 @@ export class RgbSettings {
     const r = app.rgb;
     if (!r.available) return '';
     const cur = r.profile.id;
-    const nets = `<div class="seg" role="radiogroup">${Object.values(RGB_PROFILES).map((p) => `<button role="radio" aria-checked="${p.id === cur}" data-rgb="profile" data-rgb-arg="${p.id}" ${r.busy ? 'disabled' : ''}>${p.label}</button>`).join('')}</div>`;
+    const nets = r.isMain ? '' : `<div class="seg" role="radiogroup">${Object.values(RGB_PROFILES).map((p) => `<button role="radio" aria-checked="${p.id === cur}" data-rgb="profile" data-rgb-arg="${p.id}" ${r.busy ? 'disabled' : ''}>${p.label}</button>`).join('')}</div>`;
     const { settled, pending } = r.btc();
-    return `<section class="card"><details class="menu-det" data-k="rgb"><summary class="menu-row"><span>${I.mint}<b>RGB (test)</b></span><span class="small muted">${r.ready ? 'on' : r.exists ? 'opening' : 'off'} ›</span></summary>
+    return `<section class="card"><details class="menu-det" data-k="rgb"><summary class="menu-row"><span>${I.mint}<b>${r.isMain ? 'RGB (beta)' : 'RGB (test)'}</b></span><span class="small muted">${r.ready ? 'on' : r.exists ? 'opening' : 'off'} ›</span></summary>
       <div class="det-body">
-        <div class="field"><span class="lbl">Test network</span>${nets}</div>
+        ${nets ? `<div class="field"><span class="lbl">Test network</span>${nets}</div>` : '<p class="info warn">Beta on Bitcoin mainnet. RGB tokens can only be restored from an RGB backup file, so save one after every change. Keep amounts small.</p>'}
         ${r.ready ? `
-        ${rowKV('Test BTC for fees', `${fmtBtc(settled)} tBTC${pending ? ` <span class="muted">+${fmtBtc(pending)} pending</span>` : ''}`)}
+        ${rowKV(r.isMain ? 'BTC for RGB fees' : 'Test BTC for fees', `${fmtBtc(settled)} ${r.isMain ? 'BTC' : 'tBTC'}${pending ? ` <span class="muted">+${fmtBtc(pending)} pending</span>` : ''}`)}
         <p class="addr mono small">${addrChunks(r.data?.address || '')}</p>
         <button class="btn ghost sm" data-copy="${esc(r.data?.address || '')}">${I.copy}<span>Copy RGB address</span></button>
         <p class="muted small">${esc(r.profile.funding)}</p>
         <button class="btn ghost wide" data-rgb="backup" ${r.busy ? 'disabled' : ''}>Save RGB backup file</button>
         <p class="muted small">${r.service?.backupRequired ? 'Changed since your last RGB backup.' : 'Backup up to date.'} Restoring needs this same MASKED wallet.</p>
-        <button class="btn ghost wide" data-rgb="off" ${r.busy ? 'disabled' : ''}>Turn off RGB for now</button>` : `
+        <button class="btn ghost wide" data-rgb="off" ${r.busy ? 'disabled' : ''}>Turn off RGB for now</button>
+        ${r.isMain ? `<button class="btn ghost wide" data-rgb="betaOff" ${r.busy ? 'disabled' : ''}>Switch off RGB beta</button>` : ''}` : `
         ${r.exists ? '' : `<button class="btn primary wide" data-rgb="on" ${r.busy ? 'disabled' : ''}>Turn on RGB</button>`}`}
         <details><summary>Restore an RGB backup</summary><input id="rgbRestore" type="file" accept=".json,application/json"><button class="btn ghost wide" data-rgb="restore" ${r.busy ? 'disabled' : ''}>Restore</button></details>
         ${msg(r)}

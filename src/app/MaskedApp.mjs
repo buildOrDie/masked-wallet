@@ -16,6 +16,7 @@ import { TokenBook } from '../tokens/TokenBook.mjs';
 import { TokenTx } from '../tokens/TokenTx.mjs';
 import { LeafBook } from '../tokens/LeafBook.mjs';
 import { EcashBook } from '../ecash/EcashBook.mjs';
+import { OrdinalGallery } from '../ordinals/Gallery.mjs';
 import { RecipientBook, lookAlike } from '../security/guard.mjs';
 import { TradeAccount } from '../trade/TradeAccount.mjs';
 import { ApprovalController } from '../dapp/ApprovalController.mjs';
@@ -74,6 +75,7 @@ export class MaskedApp {
     this.tokenTx = new TokenTx(this);
     this.leaf = new LeafBook(this);
     this.ecash = new EcashBook(this);
+    this.gallery = new OrdinalGallery(this);
     this.recips = new RecipientBook(store);
 
     // dApps and private trading
@@ -143,6 +145,7 @@ export class MaskedApp {
     this.tokens.resetCache();
     this.leaf?.reset(); // LEAF balances belong to one account on one network
     this.ecash?.stopWatching(); this.ecash?.reset(); this.state.ecash = {}; // ecash too
+    this.gallery?.reset(); this.state.ord = {}; // and the inscriptions on show
   }
 
   /** A different wallet or network: drop what is on screen and load its records. */

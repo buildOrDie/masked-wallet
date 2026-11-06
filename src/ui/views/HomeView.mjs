@@ -4,6 +4,7 @@ import { INSCRIPTION_MAX } from '../../ordinals/envelope.mjs';
 import { View } from '../View.mjs';
 import { LeafView } from './LeafView.mjs';
 import { EcashView } from './EcashView.mjs';
+import { OrdinalsView } from './OrdinalsView.mjs';
 import { I, btcLogo, shieldLogo } from '../html.mjs';
 
 /** Home: the balance of the side on show (Public or Shielded), actions, both balances and the tokens. */
@@ -63,6 +64,7 @@ export class HomeView extends View {
       </button>
     </section>
     ${account.isTest ? '' : `<section class="ec-home">${EcashView.homeRow(app)}</section>`}
+    ${w.source === 'example' ? '' : `<section class="ec-home">${OrdinalsView.homeRow(app)}</section>`}
     ${app.ui.tokens.home(side, leafRow)}
     ${RgbHome.render(app)}`;
   }

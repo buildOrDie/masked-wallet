@@ -14,6 +14,7 @@ import { ActivityView } from './views/ActivityView.mjs';
 import { AccountsView } from './views/AccountsView.mjs';
 import { LeafView } from './views/LeafView.mjs';
 import { EcashView } from './views/EcashView.mjs';
+import { OrdinalsView } from './views/OrdinalsView.mjs';
 import { SettingsView } from './views/SettingsView.mjs';
 import { ApproveView } from './views/ApproveView.mjs';
 import { BackupView, LockView, OnboardView, SetPasswordView } from './views/GateViews.mjs';
@@ -29,7 +30,7 @@ export class Screen {
     this.tokens = new TokenList(app);
     this.views = {
       approve: new ApproveView(app), home: new HomeView(app), token: new TokenView(app), receive: new ReceiveView(app), relay: new RelayView(app),
-      send: new SendView(app, 'send'), shield: new SendView(app, 'shield'), activity: new ActivityView(app), mint: new MintView(app), settings: new SettingsView(app), accounts: new AccountsView(app), leaf: new LeafView(app), ecash: new EcashView(app),
+      send: new SendView(app, 'send'), shield: new SendView(app, 'shield'), activity: new ActivityView(app), mint: new MintView(app), settings: new SettingsView(app), accounts: new AccountsView(app), leaf: new LeafView(app), ecash: new EcashView(app), ordinals: new OrdinalsView(app),
       rgbtok: new RgbTokenView(app), rgbsend: new RgbSendView(app),
     };
     // screens in front of the wallet, by lock state
@@ -43,7 +44,7 @@ export class Screen {
   /** Which nav tab a view belongs to. */
   navOf(v) {
     const { state } = this.app;
-    const n = ['receive', 'send', 'shield', 'relay', 'accounts', 'leaf', 'ecash', 'rgbtok', 'rgbsend'].includes(v) ? 'home'
+    const n = ['receive', 'send', 'shield', 'relay', 'accounts', 'leaf', 'ecash', 'ordinals', 'rgbtok', 'rgbsend'].includes(v) ? 'home'
       : v === 'token' || (v === 'mint' && (state.f.mintMode === 'send' || state.f.mintMode === 'transfer')) ? (state.tokFrom || 'home') : v;
     return n === 'activity' ? 'settings' : n;
   }
@@ -61,7 +62,14 @@ export class Screen {
     const caret = focus ? active.selectionStart : null;
     const gate = this.gates[state.lockState];
     const prev = this.rendered;
+    // live embeds (inscription previews) survive a re-render instead of reloading and flashing:
+    // moveBefore keeps an iframe running while it moves (removing and re-adding it would reload it)
+    const holder = this.keepHolder();
+    const kept = new Map();
+    if (holder) for (const el of $$('#view [data-keep]')) { /** @type {any} */ (holder).moveBefore(el, null); kept.set(el.dataset.keep, el); }
     $('#view').innerHTML = gate ? gate.render() : this.views[state.view].render();
+    for (const el of $$('#view [data-keep]')) { const old = kept.get(el.dataset.keep); if (old && old.getAttribute('src') === el.getAttribute('src')) { /** @type {any} */ (el.parentNode).moveBefore(old, el); el.remove(); kept.delete(el.dataset.keep); } }
+    for (const el of kept.values()) el.remove();
     if (prev === state.view) $$('#view details').forEach((d) => { if (open.has(dkey(d))) d.open = true; });
     else window.scrollTo(0, 0);
     this.rendered = state.view;
@@ -76,6 +84,14 @@ export class Screen {
     app.trade.publish();
     $('#nav').innerHTML = NAV.map(([k, n, ic]) => `<button data-go="${k}" class="${this.navOf(state.view) === k ? 'on' : ''}">${ic}<span>${n}</span></button>`).join('');
     app.store.set('wren.view', this.navOf(state.view));
+  }
+
+  /** An off-screen parking spot for live embeds during a render (only where the browser can move them without reloading). */
+  keepHolder() {
+    if (typeof /** @type {any} */ (document.body)?.moveBefore !== 'function') return null;
+    let h = document.getElementById('keepHolder');
+    if (!h) { h = document.createElement('div'); h.id = 'keepHolder'; h.setAttribute('aria-hidden', 'true'); h.style.cssText = 'position:fixed;left:-10000px;top:0;width:400px;height:400px;overflow:hidden;'; document.body.append(h); }
+    return h;
   }
 
   /** The address of the side on show (tap to copy); words when there is no open wallet. */

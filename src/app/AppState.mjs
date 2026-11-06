@@ -9,6 +9,7 @@ export const FORM_DEFAULTS = {
   tsTick: '', tsTo: '', tsAmt: '', tsFrom: 'public', trTick: '', trAmt: '', trFrom: 'public',
   coinFilter: 'all', scanText: '', calcRecips: '', relayText: '', leafFrom: 'public', leafTo: '', leafAmt: '', poisonOk: false,
   ecMode: '', ecMint: '', ecVia: '', ecFrom: 'public', ecAmt: '', ecLock: '', ecToken: '', ecInvoice: '', ecNewMint: '',
+  ordSide: 'all', ordTo: '',
   sendMode: 'send', dropText: '', dropEach: '1000', dropFrom: 'public',
   // set by the screens that use them
   homeTok: 'all', tokTab: 'history', rgbTab: 'history', acctMenu: '-1', acctHidden: '', obMode: 'create', backed: false, apRisk: false, rbfInfo: false,
@@ -34,6 +35,8 @@ export class AppState {
     this.leafSend = { stage: 'form' }; // LEAF (CRC-20): form | review | done
     /** @type {{ sent?: any, quote?: any, pay?: any, btc?: any }} Ecash: the token just made, the open invoice, the payment or BTC top-up under review */
     this.ecash = {};
+    /** @type {{ sel?: string, built?: any, done?: any }} Ordinals: the inscription on show, the send under review, the send just made */
+    this.ord = {};
     this.busy = false;
     this.reveal = false;             // recovery phrase on show in Settings
     this.calc = null;                // output calculator result

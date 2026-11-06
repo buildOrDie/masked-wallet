@@ -89,6 +89,7 @@ textarea { resize: vertical; }
 .msg { margin: 0; font-size: 13px; }
 .msg.ok { color: var(--ok); }
 .msg.err { color: var(--err); }
+.msg.warn { color: #f5b84a; }
 .coin { width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; flex: none; font-weight: 800; font-size: 17px; }
 .coin.btc { background: var(--btc); color: #fff; }
 .coin.sh { background: var(--sh-soft); color: var(--sh); }
@@ -538,6 +539,31 @@ a.act, a.act:hover { text-decoration: none; color: inherit; }
 .leaf-scan { width: 100%; margin-top: 6px; }
 .leaf-hero .fee-note { text-align: left; width: 100%; margin: 0; }
 .leaf-pend { font-style: normal; font-size: 11.5px; font-weight: 600; color: var(--warn); }
+
+/* ordinals */
+.ord-line .ord-ic { background: #2a2033; color: #f5b84a; }
+.ord-ic svg { fill: none; stroke: currentColor; stroke-width: 1.8; }
+.ord-top .seg { margin-bottom: 8px; }
+.ord-bar { display: flex; justify-content: space-between; align-items: center; }
+.ord-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0; }
+.ord-tile { position: relative; aspect-ratio: 1; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: #0d0b10; padding: 0; cursor: pointer; display: block; }
+.ord-tile:focus-visible { outline: 2px solid #f5b84a; outline-offset: 2px; }
+.ord-img { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; background: #0d0b10; display: block; }
+.ord-txt { display: flex; flex-direction: column; justify-content: center; width: 100%; height: 100%; padding: 8px; font: 11px/1.35 ui-monospace, monospace; color: var(--muted, #a89f96); text-align: left; overflow: hidden; word-break: break-all; }
+.ord-brc { align-items: center; text-align: center; gap: 4px; font-family: inherit; }
+.ord-brc b { font-size: 11px; color: #f5b84a; }
+.ord-brc span { font-size: 13px; color: var(--text, #f4ede4); }
+.ord-kind { align-items: center; text-align: center; font-size: 12px; letter-spacing: .06em; }
+.ord-cap { position: absolute; left: 0; right: 0; bottom: 0; display: flex; justify-content: space-between; align-items: center; padding: 3px 6px; font-size: 11px; background: linear-gradient(transparent, rgba(0,0,0,.75)); color: #fff; }
+.ord-sh svg { width: 12px; height: 12px; vertical-align: -2px; }
+.ord-big { width: 100%; aspect-ratio: 1; border-radius: 14px; overflow: hidden; background: #0d0b10; margin-bottom: 12px; }
+.ord-big .ord-txt { font-size: 13px; }
+.ord-frame { width: 100%; height: 100%; border: 0; background: #0d0b10; }
+.ord-frame-tile { pointer-events: none; }
+.ord-mini { width: 96px; height: 96px; margin: 6px auto; border-radius: 12px; overflow: hidden; background: #0d0b10; }
+.ord-self { display: inline-flex; align-items: center; gap: 8px; margin: 2px 0 6px; }
+.ord-self .coin { width: 22px; height: 22px; }
+.ord-self.on { outline: 2px solid #8b7cf6; }
 </style>
 </head>
 <body>

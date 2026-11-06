@@ -226,7 +226,44 @@ test('Home on Signet: a "Try RGB tokens" card, then RGB tokens in the same rows 
   assert.doesNotMatch(html, /Prepare RGB outputs|password/i, 'no manual setup steps');
   assert.equal(app.account.pubAddr(), address);
   app.state.net = 'main';
-  assert.doesNotMatch(app.ui.views.home.render(), /RGB/);
+  // mainnet: only an opt-in beta card, nothing opens until it is switched on
+  const main = app.ui.views.home.render();
+  assert.match(main, /data-rgb="beta"[^>]*>.*RGB tokens \(beta\)/s);
+  assert.doesNotMatch(main, /Test BTC for fees|data-rgb="fund"/);
+  assert.equal(app.rgb.available, false);
+  assert.equal(app.rgb.profile.id, 'mainnet');
+});
+
+test('RGB mainnet beta: opt-in, keys of its own, backup before every receive and send', async () => {
+  const { mnemonicFrom } = await import('../src/rgb/runtime.mjs');
+  const { validateMnemonic } = await import('@scure/bip39');
+  const { wordlist } = await import('@scure/bip39/wordlists/english');
+  const app = rgbApp('main');
+  localStorage.removeItem('masked.rgb.mainnet-beta');
+  assert.equal(app.rgb.offerable, true);
+  assert.equal(app.rgb.available, false);
+  localStorage.setItem('masked.rgb.mainnet-beta', '1');
+  assert.equal(app.rgb.available, true);
+  assert.equal(app.rgb.isMain, true);
+  assert.equal(app.rgb.profile.sdk.network, 'mainnet');
+  const f = Number(app.rgb.fee());
+  assert.ok(f >= 1 && f <= 100, 'mainnet fee comes from the wallet fee choice');
+  // RGB keys: a phrase of their own, the same every time, never MASKED's phrase
+  const seed = await app.rgb.mainSeed(), words = mnemonicFrom(seed);
+  assert.equal(words, mnemonicFrom(await app.rgb.mainSeed()));
+  assert.ok(validateMnemonic(words, wordlist));
+  assert.notEqual(words, WORDS);
+  // an out-of-date backup blocks receive and send
+  rgbReady(app);
+  app.rgb.service.backupRequired = true;
+  let called = false;
+  app.rgb.service.receive = async () => { called = true; return { invoice: 'rgb:x' }; };
+  await app.rgb.action('invoice');
+  assert.equal(called, false);
+  assert.match(app.rgb.message, /Save your RGB backup first/);
+  assert.match(app.ui.views.home.render(), /Save your RGB backup/);
+  await assert.rejects(() => app.rgb.action('issue'), /off in the mainnet beta/);
+  localStorage.removeItem('masked.rgb.mainnet-beta');
 });
 
 test('Receive has an RGB tab on Signet only; Mint has "RGB token"', () => {
