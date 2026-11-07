@@ -67,7 +67,8 @@ export class SignetWallet {
       // history per asset (rgb-lib lists transfers by asset)
       const transfers = {};
       for (const a of Object.values(groups || {}).flat()) if (a?.assetId) transfers[a.assetId] = await wallet.listTransfers(a.assetId);
-      const snapshot = { address, btc, groups, transfers, stranded };
+      const locked = typeof wallet.lockedCoins === 'function' ? await wallet.lockedCoins() : [];
+      const snapshot = { address, btc, groups, transfers, stranded, locked };
       const encoded = new TextEncoder().encode(JSON.stringify(snapshot, (_, value) => typeof value === 'bigint' ? value.toString() : value));
       const revision = b64(new Uint8Array(await crypto.subtle.digest('SHA-256', encoded)));
       const key = `${this.vaultKey}.sync-revision`;

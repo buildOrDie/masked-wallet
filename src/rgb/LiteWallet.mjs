@@ -84,6 +84,12 @@ export class LiteWallet {
   }
   async refreshWallet() { const r = await this.wallet.refresh(this.requireOnline(), null, [], false); await this.save(); return plain(r); }
   async getAddress() { return this.wallet.getAddress(); }
+  /** Coins that hold RGB tokens but can't be spent now: a pending send uses them, or an open invoice reserves them. */
+  async lockedCoins() {
+    const list = plain(typeof this.wallet.listUnspents === 'function' ? this.wallet.listUnspents(false) : []) || [];
+    return list.filter((u) => Number(u?.pendingBlinded) > 0 || (u?.rgbAllocations || []).some((a) => a && a.settled === false))
+      .map((u) => `${u?.utxo?.outpoint?.txid}:${u?.utxo?.outpoint?.vout}`);
+  }
   async getBtcBalance() { const b = plain(this.wallet.getBtcBalance()); return { vanilla: balance(b?.vanilla), colored: balance(b?.colored) }; }
   async listAssets() {
     const r = plain(this.wallet.listAssets([]) || {});

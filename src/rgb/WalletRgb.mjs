@@ -233,23 +233,34 @@ export class WalletRgb {
    * Tokens an earlier beta counted twice: two of our witness invoices shared one address, so one payment settled
    * both. Same recipient, same transaction: only the first is real. Base units, 0 when nothing is doubled.
    */
-  doubled(id) {
-    const seen = new Set(); let extra = 0;
+  doubled(id) { return this.doubles(id).reduce((n, d) => n + d.amount, 0); }
+  /** Each payment counted twice: its extra amount and the coin it sits on ("txid:vout", '' if unknown). */
+  doubles(id) {
+    const seen = new Set(); const out = [];
     for (const t of (this.data?.transfers?.[id] || []).slice().sort((x, y) => (Number(x.idx ?? x.batchTransferIdx) || 0) - (Number(y.idx ?? y.batchTransferIdx) || 0))) {
       if (t?.status !== 'Settled' || !/^Receive/.test(String(t?.kind ?? '')) || !t.recipientId || !t.txid) continue;
       const k = `${t.recipientId}|${t.txid}`;
-      if (seen.has(k)) extra += Number(t.assignments?.[0]?.Fungible ?? t.amount ?? 0) || 0; else seen.add(k);
+      if (!seen.has(k)) { seen.add(k); continue; }
+      const coin = t.receiveUtxo?.txid ? `${t.receiveUtxo.txid}:${t.receiveUtxo.vout}` : '';
+      out.push({ amount: Number(t.assignments?.[0]?.Fungible ?? t.amount ?? 0) || 0, coin });
     }
-    return extra;
+    return out;
+  }
+  /**
+   * The balance to show: what the engine reports, less anything counted twice. The total always drops by the
+   * double count; "available" only when it sits on a coin the engine counts as spendable. On a locked coin the
+   * engine has already left it out of "available", and taking it off again would count it twice the other way.
+   */
+  bal(a) {
+    const all = this.doubles(a.assetId), b = a.balance || {};
+    const locked = new Set(this.data?.locked || []);
+    const d = all.reduce((n, x) => n + x.amount, 0);
+    const free = all.filter((x) => !x.coin || !locked.has(x.coin)).reduce((n, x) => n + x.amount, 0);
+    const cut = (n, by) => Math.max(0, Number(n || 0) - by);
+    return { settled: cut(b.settled, d), future: cut(b.future, d), spendable: cut(b.spendable, free), doubled: d };
   }
   /** The note about a doubled payment was read (for this amount: a new doubling shows it again). */
   doubledSeen(id, amount) { try { return localStorage.getItem(`${this.profile.vaultKey}.doubled-ok.${id}`) === String(amount); } catch { return false; } }
-  /** The balance to show: what the engine reports, less anything counted twice. */
-  bal(a) {
-    const d = this.doubled(a.assetId), b = a.balance || {};
-    const cut = (n) => Math.max(0, Number(n || 0) - d);
-    return { settled: cut(b.settled), future: cut(b.future), spendable: cut(b.spendable), doubled: d };
-  }
   /** A send this browser can't broadcast any more (signed before a restore; the signature isn't in backups). */
   stranded(t) { return (this.data?.stranded || []).includes(Number(t?.batchTransferIdx)); }
   /** Sends of this token the other wallet hasn't accepted yet (not broadcast, so they can be cancelled). */

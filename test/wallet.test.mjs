@@ -903,3 +903,28 @@ test('RGB: a transfer signed before a restore says it can\'t be finished and off
   assert.match(app.ui.views.settings.render(), /a restored wallet can't finish a transfer that was already signed/);
   localStorage.removeItem('masked.rgb.mainnet-beta');
 });
+
+test('RGB: a double count on a coin a pending send locks is taken off the total once, not off "available" again', async () => {
+  const app = rgbApp('main');
+  localStorage.setItem('masked.rgb.mainnet-beta', '1');
+  rgbReady(app);
+  // engine: 99,999,000 on the main coin + 2,000 recorded on coin B (1,000 real, 1,000 counted twice); B is locked by a send
+  const MUSD = { assetId: 'rgb:musd', ticker: 'MUSD', name: 'Masked USD', precision: 0, issuedSupply: 100000000, balance: { settled: 100001000, future: 99999445, spendable: 99999000 } };
+  app.rgb.data.groups = { nia: [MUSD] };
+  app.rgb.data.transfers = { 'rgb:musd': [
+    { idx: 3, status: 'Settled', kind: 'ReceiveWitness', recipientId: 'bc:wvout:S', txid: 'back', receiveUtxo: { txid: 'back', vout: 0 }, assignments: [{ Fungible: 1000 }] },
+    { idx: 4, status: 'Settled', kind: 'ReceiveWitness', recipientId: 'bc:wvout:S', txid: 'back', receiveUtxo: { txid: 'back', vout: 0 }, assignments: [{ Fungible: 1000 }] },
+    { idx: 5, batchTransferIdx: 12, status: 'WaitingCounterparty', kind: 'Send', requestedAssignment: { Fungible: 555 } },
+  ] };
+  app.rgb.data.locked = ['back:0'];
+  assert.deepEqual(app.rgb.bal(MUSD), { settled: 100000000, future: 99998445, spendable: 99999000, doubled: 1000 });
+  app.rgb.asset = 'rgb:musd'; app.state.view = 'rgbtok';
+  const page = app.ui.views.rgbtok.render();
+  assert.match(page, /Available to send<\/span><b>99,999,000/);
+  assert.match(page, /1,000 MUSD are held by a transfer/);
+  // once the coin is free again, the double count comes off "available" too
+  app.rgb.data.locked = [];
+  MUSD.balance.spendable = 100001000;
+  assert.equal(app.rgb.bal(MUSD).spendable, 100000000);
+  localStorage.removeItem('masked.rgb.mainnet-beta');
+});

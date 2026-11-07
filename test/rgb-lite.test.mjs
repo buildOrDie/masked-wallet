@@ -168,3 +168,15 @@ test('each witness invoice gets a fresh receive address; one an earlier transfer
   await w.onchainReceive({ witness: false });
   assert.equal(rotated.length, 3, 'blind invoices don\'t rotate');
 });
+
+test('locked coins: a coin with an unsettled allocation or a pending private invoice', async () => {
+  const f = fakeLib();
+  f.lib.WasmWallet.prototype.listUnspents = () => [
+    { utxo: { outpoint: { txid: 'a', vout: 0 } }, rgbAllocations: [{ settled: true }, { settled: false }], pendingBlinded: 0 },
+    { utxo: { outpoint: { txid: 'b', vout: 1 } }, rgbAllocations: [{ settled: true }], pendingBlinded: 0 },
+    { utxo: { outpoint: { txid: 'c', vout: 2 } }, rgbAllocations: [], pendingBlinded: 1 },
+  ];
+  const w = new LiteWallet(f.lib, { ...RGB_PROFILES.public.sdk, mnemonic, password: 'x' });
+  await w.init(); await w.unlock();
+  assert.deepEqual(await w.lockedCoins(), ['a:0', 'c:2']);
+});
