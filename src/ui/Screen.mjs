@@ -21,6 +21,7 @@ import { BackupView, LockView, OnboardView, SetPasswordView } from './views/Gate
 
 export const NAV = [['home', 'Wallet', I.wallet], ['mint', 'Mint', I.mint], ['settings', 'Settings', I.gear]];
 import { $, $$ } from './dom.mjs';
+import { lang, tr, trHtml } from '../i18n/translate.mjs';
 
 export class Screen {
   /** @param {import('../app/MaskedApp.mjs').MaskedApp} app */
@@ -67,14 +68,16 @@ export class Screen {
     const holder = this.keepHolder();
     const kept = new Map();
     if (holder) for (const el of $$('#view [data-keep]')) { /** @type {any} */ (holder).moveBefore(el, null); kept.set(el.dataset.keep, el); }
-    $('#view').innerHTML = gate ? gate.render() : this.views[state.view].render();
+    // English is written in the views; other languages are swapped in just before the page shows it
+    $('#view').innerHTML = trHtml(gate ? gate.render() : this.views[state.view].render());
     for (const el of $$('#view [data-keep]')) { const old = kept.get(el.dataset.keep); if (old && old.getAttribute('src') === el.getAttribute('src')) { /** @type {any} */ (el.parentNode).moveBefore(old, el); el.remove(); kept.delete(el.dataset.keep); } }
     for (const el of kept.values()) el.remove();
     if (prev === state.view) $$('#view details').forEach((d) => { if (open.has(dkey(d))) d.open = true; });
     else window.scrollTo(0, 0);
     this.rendered = state.view;
     if (focus) { const el = $(`[data-bind="${focus}"]`); if (el) { el.focus(); try { el.setSelectionRange(caret, caret); } catch {} } }
-    $('#netChip').textContent = account.params.name;
+    $('#netChip').textContent = tr(account.params.name);
+    this.shellText();
     $('#netChip').className = `net-chip ${account.isTest ? 'test' : 'main'}`;
     this.header(gate);
     $('#nav').style.display = gate || state.view === 'approve' ? 'none' : '';
@@ -82,8 +85,24 @@ export class Screen {
     const pb = $('#panelBtn'); if (pb) pb.hidden = !app.platform.canOpenSidePanel || state.view === 'approve';
     app.sites.publishPublic();
     app.trade.publish();
-    $('#nav').innerHTML = NAV.map(([k, n, ic]) => `<button data-go="${k}" class="${this.navOf(state.view) === k ? 'on' : ''}">${ic}<span>${n}</span></button>`).join('');
+    $('#nav').innerHTML = trHtml(NAV.map(([k, n, ic]) => `<button data-go="${k}" class="${this.navOf(state.view) === k ? 'on' : ''}">${ic}<span>${n}</span></button>`).join(''));
+    if (document.documentElement.lang !== lang()) document.documentElement.lang = lang();
     app.store.set('wren.view', this.navOf(state.view));
+  }
+
+  /** The page shell's own labels (header buttons): translated once per language, English kept to switch back. */
+  shellText() {
+    const code = lang();
+    if (this.shellLang === code) return;
+    this.shellLang = code;
+    for (const el of $$('header [title], header [aria-label], #nav[aria-label]')) {
+      for (const attr of ['title', 'aria-label']) {
+        if (!el.hasAttribute(attr)) continue;
+        const key = `en${attr === 'title' ? 'Title' : 'Aria'}`;
+        el.dataset[key] ??= el.getAttribute(attr);
+        el.setAttribute(attr, tr(el.dataset[key]));
+      }
+    }
   }
 
   /** An off-screen parking spot for live embeds during a render (only where the browser can move them without reloading). */
@@ -101,15 +120,15 @@ export class Screen {
     const sh = side.get() === 'shielded';
     const keys = account.keys, multi = keys?.source === 'mnemonic' && keys.rootFp;
     const name = multi ? this.app.accounts.name(keys.rootFp, keys.index) : '';
-    $('#acctShort').innerHTML = addr
+    $('#acctShort').innerHTML = trHtml(addr
       ? `${multi ? `<button class="acct-name" data-go="accounts" title="Switch account"><span>${esc(name)}</span>${I.chev}</button>` : ''}<button class="acct-addr ${sh ? 'sh' : ''}" data-copy="${esc(addr)}" title="Copy your ${sh ? 'Shielded' : 'Public'} address">${sh ? I.shieldPlain : ''}<span>${esc(short(addr, 6))}</span>${I.copy}</button>`
-      : esc(gate ? (state.lockState === 'locked' ? 'Locked' : 'Set up') : account.keys ? (account.keys.source === 'example' ? 'Demo wallet' : 'Account 1') : 'No wallet');
+      : esc(gate ? (state.lockState === 'locked' ? 'Locked' : 'Set up') : account.keys ? (account.keys.source === 'example' ? 'Demo wallet' : 'Account 1') : 'No wallet'));
   }
 
   /** @param {string} text @param {number} [ms] how long it stays (longer for errors people must read) */
   toast(text, ms = 1400) {
     const t = $('#toast');
-    t.textContent = text; t.classList.add('show');
+    t.textContent = tr(text); t.classList.add('show');
     clearTimeout(this.toastTimer);
     this.toastTimer = setTimeout(() => t.classList.remove('show'), ms);
   }

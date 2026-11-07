@@ -1,4 +1,5 @@
 import { RgbHome } from './RgbViews.mjs';
+import { LANG_KEY } from '../../i18n/translate.mjs';
 import { esc, fmtBtc, sumSats } from '../../core/format.mjs';
 import { INSCRIPTION_MAX } from '../../ordinals/envelope.mjs';
 import { View } from '../View.mjs';
@@ -9,6 +10,15 @@ import { I, btcLogo, shieldLogo } from '../html.mjs';
 
 /** Home: the balance of the side on show (Public or Shielded), actions, both balances and the tokens. */
 export class HomeView extends View {
+  /** A Chinese browser, and no language chosen yet: offer Chinese once (it never switches by itself). */
+  static langHint() {
+    let asked = true;
+    try { asked = !!localStorage.getItem(LANG_KEY) || localStorage.getItem('masked.lang-hint') === '1'; } catch { /* storage blocked */ }
+    const zh = typeof navigator !== 'undefined' && /^zh/i.test(navigator.language || '');
+    if (asked || !zh) return '';
+    return `<div class="hint lang-hint" translate="no"><b>切换到中文？</b><span>MASKED 有中文版（测试中）。也可以随时在设置里更改。</span>
+      <span class="lang-btns"><button class="btn primary sm" data-lang="zh-CN">使用中文</button><button class="btn ghost sm" data-lang="en">Keep English</button></span></div>`;
+  }
   render() {
     const { app, account, unit } = this;
     const w = account.keys;
@@ -34,6 +44,7 @@ export class HomeView extends View {
     const usd = (s) => fees.usdOf(s);
     const leafRow = LeafView.homeRow(app, side);
     return `
+    ${HomeView.langHint()}
     ${w.source === 'example' ? '<div class="testnet-note warn">Demo wallet — keys are public. Create your own in Settings.</div>' : this.netBanner()}
     <section class="hero ${shd ? 'sh' : ''}">
       <p class="hero-label">${shd ? `${I.shieldPlain} Shielded balance` : 'Public balance'}</p>

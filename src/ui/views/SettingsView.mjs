@@ -1,3 +1,4 @@
+import { LANGS, lang } from '../../i18n/translate.mjs';
 import { RgbSettings } from './RgbViews.mjs';
 import { esc, short } from '../../core/format.mjs';
 import { toHex } from '../../core/bytes.mjs';
@@ -36,6 +37,10 @@ export class SettingsView extends View {
       <div class="menu-row"><span>${I.globe}<b>Network</b></span>
         <select id="netSel2">${Object.entries(NETWORKS).map(([k, n]) => `<option value="${k}" ${state.net === k ? 'selected' : ''}>${n.name}</option>`).join('')}</select></div>
       ${this.phraseRows(w, hasVault)}
+    </section>
+    <section class="card lang-row" translate="no"><span class="lbl">Language · 语言</span>
+      <div class="seg">${Object.entries(LANGS).map(([code, name]) => `<button data-lang="${code}" class="${lang() === code ? 'on' : ''}">${name}${code === 'zh-CN' ? ' <small>beta</small>' : ''}</button>`).join('')}</div>
+      ${lang() === 'zh-CN' ? '<p class="muted small">中文翻译仍在测试中，部分页面还是英文。欢迎懂中文的朋友帮忙校对。</p>' : ''}
     </section>
     <section class="card menu">
       <button class="menu-row" data-replace="create"><span>${I.wallet}<b>Create new wallet</b></span><span class="chev">›</span></button>

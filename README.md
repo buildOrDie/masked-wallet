@@ -70,7 +70,8 @@ The build is reproducible: the same source always gives the same `extension/`. T
 | [`v2.20.0`](../../tree/v2.20.0) | **Top up ecash with BTC** (NUT-30 on-chain deposits): send from Public or Shielded to the mint, then pay any Lightning invoice. BTC → Lightning in the wallet, no swap service | GitHub |
 | [`v2.20.1`](../../tree/v2.20.1) | Ecash suggests one mint, Minibits (the most used); any other mint can be added by address, with a link to mint reviews | GitHub |
 | [`v2.20.2`](../../tree/v2.20.2) | Ecash Send: the lock note updates as you type; paywall demo hides its gate once paid | GitHub |
-| [`v2.22.10`](../../tree/v2.22.10) | RGB send: the fee picker is on the send form too, with the current mempool rates, not only on the review | `main` |
+| [`v2.23.0`](../../tree/v2.23.0) | **简体中文 (Simplified Chinese, beta)**: Settings → Language · 语言; English stays the default. Setup, unlock, Home, Send, Shield, Receive, coins, accounts and Settings are translated; other screens follow. The translation is a draft for native speakers to review: [docs/i18n](docs/i18n/TRANSLATING.md). Chrome Web Store name and description in Chinese | `main` |
+| [`v2.22.10`](../../tree/v2.22.10) | RGB send: the fee picker is on the send form too, with the current mempool rates, not only on the review | |
 | [`v2.22.9`](../../tree/v2.22.9) | RGB send: the review has a Slow / Avg / Fast / Custom fee picker with fresh rates (whole sat/vB, up to 500) instead of silently using the last rate | |
 | [`v2.22.8`](../../tree/v2.22.8) | RGB: turning RGB on or allowing a transfer server from the toolbar never opens a second MASKED window: if the popup stayed open it carries on, otherwise only the popup is reopened | |
 | [`v2.22.7`](../../tree/v2.22.7) | RGB: a payment an earlier beta counted twice is taken off "Available to send" only when its coin is spendable; on a coin a pending send or invoice locks, the engine already leaves it out | |

@@ -22,7 +22,7 @@
   --err: #ff6b6b;
   --warn: #f5b94a;
   --r: 16px;
-  --f: Inter, -apple-system, "Segoe UI", system-ui, sans-serif;
+  --f: Inter, -apple-system, "Segoe UI", system-ui, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   color-scheme: dark;
 }
@@ -46,7 +46,7 @@ a { color: inherit; }
 .logo img, .logo svg { width: 32px; height: 32px; display: block; object-fit: contain; }
 .acct small { display: block; color: var(--muted); font-size: 11.5px; }
 
-.net-chip { font-size: 11.5px; font-weight: 700; padding: 6px 11px; border-radius: 999px; background: var(--card-2); display: inline-flex; align-items: center; gap: 6px; }
+.net-chip { font-size: 11.5px; font-weight: 700; padding: 6px 11px; border-radius: 999px; background: var(--card-2); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; flex: none; }
 .net-chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
 .net-chip.test { color: var(--warn); background: rgba(245,185,74,.12); }
 .net-chip.test::before { background: var(--warn); }
@@ -190,7 +190,7 @@ button.bal-row:hover { background: #1c1c20; }
 .amount:focus-within { border-color: rgba(247,147,26,.55); }
 .amount input { border: 0 !important; background: transparent; font-size: 20px; font-weight: 700; padding: 12px 13px; }
 .unit { color: var(--muted); font-size: 13px; font-weight: 600; margin-right: 8px; }
-.max { font-size: 11.5px; font-weight: 800; color: var(--btc); background: var(--btc-soft); padding: 6px 9px; border-radius: 8px; }
+.max { white-space: nowrap; flex: none; font-size: 11.5px; font-weight: 800; color: var(--btc); background: var(--btc-soft); padding: 6px 9px; border-radius: 8px; }
 .fees { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
 .fee { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; height: 72px; padding: 6px 3px; border-radius: 12px; background: var(--card-2); border: 1px solid transparent; text-align: center; }
 .fee b { font-size: 13px; }
@@ -575,6 +575,12 @@ a.act, a.act:hover { text-decoration: none; color: inherit; }
 .rgb-fee .bal-txt b { overflow: hidden; text-overflow: ellipsis; }
 .rgb-fee .bal-amt { flex: none; }
 .h-cancel { margin: -4px 0 8px auto; display: block; }
+.lang-row { gap: 10px; }
+.lang-row .seg small { font-size: 10px; color: var(--btc-2); font-weight: 800; }
+.lang-hint { display: grid; gap: 8px; }
+.lang-btns { display: flex; gap: 8px; }
+.lang-btns .btn { flex: 1; }
+:lang(zh-CN) body { line-height: 1.55; }
 .cloud-box { display: grid; gap: 8px; margin: 10px 0; padding: 12px; border: 1px solid var(--line); border-radius: 12px; }
 .cloud-h { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 .cloud-h > span { white-space: nowrap; }

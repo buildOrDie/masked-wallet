@@ -1,5 +1,6 @@
 // User input: one listener per event type on the document, routed by data attributes (data-go, data-set,
 // data-tok, …) and by button id. Each handler changes state through the app's services and re-renders.
+import { setLang, tr, trHtml } from '../i18n/translate.mjs';
 import * as sp from '../crypto/sp-core.mjs';
 import { fromHex } from '../core/bytes.mjs';
 import { fmtBtc, fmtRate, friendly, parseBtc, short } from '../core/format.mjs';
@@ -50,16 +51,16 @@ export class Controller {
     f[b] = e.target.value;
     const kindHint = (sel, note) => {
       const k = codec.kind(e.target.value), el = $(sel);
-      if (el) { el.className = `addr-kind k-${k.kind}`; el.innerHTML = note(k); }
+      if (el) { el.className = `addr-kind k-${k.kind}`; el.innerHTML = trHtml(note(k)); }
     };
     if (b === 'sendTo') kindHint('#sendKind', SendView.kindNote);
     if (b === 'tsTo') kindHint('#tsKind', TokenSendView.kindNote);
     if (b === 'mintTick') { clearTimeout(this.tickTimer); this.tickTimer = setTimeout(() => { if (state.view === 'mint') this.render(); }, 450); }
-    if (b === 'mintOther') { const k = codec.kind(e.target.value), el = $('#mintKind'); if (el) { el.className = `addr-kind k-${k.kind}`; el.textContent = k.text || ''; } }
+    if (b === 'mintOther') { const k = codec.kind(e.target.value), el = $('#mintKind'); if (el) { el.className = `addr-kind k-${k.kind}`; el.textContent = tr(k.text || ''); } }
     if (b === 'feeCustom') this.customFeeHint(e.target.value);
-    if (b === 'ordTo') { const el = $('#ordKind'), v = e.target.value.trim(); if (el) { const k = this.app.account.codec.kind(v); el.className = `addr-kind k-${k.kind}`; el.textContent = k.kind === 'empty' ? '' : v === this.app.account.shieldAddr() ? 'Your own Shielded address' : k.text; } }
-    if (b === 'ecLock') { this.state.f.ecLockOk = false; const el = $('#ecLockNote'); if (el) el.textContent = EcashView.lockNote(e.target.value); }
-    if (b === 'dropText') { const el = $('#dropCount'); if (el) { const pv = this.app.ui.view('send').drop.preview(); el.innerHTML = AirdropView.countNote(pv); el.className = `addr-kind ${pv.n ? 'k-shielded' : ''}`; } }
+    if (b === 'ordTo') { const el = $('#ordKind'), v = e.target.value.trim(); if (el) { const k = this.app.account.codec.kind(v); el.className = `addr-kind k-${k.kind}`; el.textContent = tr(k.kind === 'empty' ? '' : v === this.app.account.shieldAddr() ? 'Your own Shielded address' : k.text); } }
+    if (b === 'ecLock') { this.state.f.ecLockOk = false; const el = $('#ecLockNote'); if (el) el.textContent = tr(EcashView.lockNote(e.target.value)); }
+    if (b === 'dropText') { const el = $('#dropCount'); if (el) { const pv = this.app.ui.view('send').drop.preview(); el.innerHTML = trHtml(AirdropView.countNote(pv)); el.className = `addr-kind ${pv.n ? 'k-shielded' : ''}`; } }
     if (b === 'dropText' || b === 'dropEach') { clearTimeout(this.dropTimer); this.dropTimer = setTimeout(() => { if (state.view === 'send') this.render(); }, 400); }
     if (state.status.drop) state.status.drop = null;
     if (state.status.send) state.status.send = null;
@@ -71,10 +72,10 @@ export class Controller {
     if (el) {
       const bad = v !== '' && !c, high = c > Math.max(50, rates.fast * 5);
       el.className = `fee-note ${bad ? 'bad' : high ? 'warn' : ''}`;
-      el.textContent = bad ? `Enter ${FEE_MIN} to ${FEE_MAX} sat/vB. Using Avg (${fmtRate(rates.normal)}) until then.` : high ? 'That is much higher than needed right now.' : `Using ${fmtRate(c || rates.normal)} sat/vB.`;
+      el.textContent = tr(bad ? `Enter ${FEE_MIN} to ${FEE_MAX} sat/vB. Using Avg (${fmtRate(rates.normal)}) until then.` : high ? 'That is much higher than needed right now.' : `Using ${fmtRate(c || rates.normal)} sat/vB.`);
     }
     const cb = $('.fee.custom');
-    if (cb) cb.innerHTML = `<b>Custom</b>${c ? `<span class="r"><em>${fmtRate(c)}</em> sat/vB</span>` : ''}`;
+    if (cb) cb.innerHTML = trHtml(`<b>Custom</b>${c ? `<span class="r"><em>${fmtRate(c)}</em> sat/vB</span>` : ''}`);
   }
 
   onChange(e) {
@@ -139,6 +140,7 @@ export class Controller {
     if (d.acctHide !== undefined) { app.accounts.hide(account.keys.rootFp, Number(d.acctHide)); f.acctMenu = '-1'; this.render(); return true; }
     if (d.acctUnhide !== undefined) { app.accounts.hide(account.keys.rootFp, Number(d.acctUnhide), false); f.acctMenu = '-1'; this.render(); return true; }
     if (d.side) { app.side.set(d.side); this.render(); return true; }
+    if (d.lang) { setLang(d.lang); try { localStorage.setItem('masked.lang-hint', '1'); } catch { /* */ } this.render(); return true; }
     if (d.copy != null) {
       try { await navigator.clipboard.writeText(d.copy); this.toast('Copied'); } catch { this.toast('Copy failed — select and copy manually'); }
       return true;
