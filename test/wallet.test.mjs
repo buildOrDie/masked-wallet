@@ -887,11 +887,18 @@ test('RGB: a transfer signed before a restore says it can\'t be finished and off
   app.rgb.data.stranded = [12];
   app.rgb.asset = 'rgb:musd'; app.state.view = 'rgbtok';
   const page = app.ui.views.rgbtok.render();
-  assert.match(page, /Not sent[\s\S]*signed before this wallet was restored/);
-  assert.match(page, /held by a transfer that can't be finished/);
-  assert.match(page, /data-rgb="cancelSend"/);
+  assert.match(page, /Not sent[\s\S]*lost when this wallet was restored/);
+  assert.match(page, /held by a transfer that can't be finished or cancelled/);
+  assert.doesNotMatch(page, /data-rgb="cancelSend"/, 'no Cancel button that can only fail');
   app.rgb.data.stranded = [];
   assert.match(app.ui.views.rgbtok.render(), /Sending[\s\S]*Waiting for the other wallet to accept/);
+  // the engine refuses the cancel because the signed transaction is gone: say exactly that and mark it
+  app.rgb.service.cancelSends = async () => ({ n: 0, errors: [{ idx: 12, reason: 'Internal error: signed PSBT not found in transfer artifacts' }] });
+  app.rgb.refresh = async () => {};
+  await app.rgb.action('cancelSend', '12');
+  assert.equal(app.rgb.message, 'Can\'t cancel or finish this transfer: its signed transaction was lost in the restore. Nothing was sent.');
+  assert.deepEqual(app.rgb.data.stranded, [12]);
+  app.rgb.message = '';
   app.state.view = 'settings';
   assert.match(app.ui.views.settings.render(), /a restored wallet can't finish a transfer that was already signed/);
   localStorage.removeItem('masked.rgb.mainnet-beta');

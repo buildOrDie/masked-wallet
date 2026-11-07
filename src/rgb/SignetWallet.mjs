@@ -124,12 +124,14 @@ export class SignetWallet {
       const all = [];
       for (const id of assets) all.push(...await wallet.listTransfers(id));
       const open = [...new Set(all.filter((t) => t?.kind === 'Send' && t?.status === 'WaitingCounterparty').map((t) => Number(t.batchTransferIdx)))];
-      let n = 0;
+      let n = 0; const errors = [];
       for (const i of open) {
         if (!Number.isFinite(i) || (want && !want.has(i))) continue;
-        try { if (await wallet.failTransfer(i)) n++; } catch { /* accepted meanwhile: it goes ahead */ }
+        // the engine re-checks the transfer before cancelling; a refusal says why (accepted meanwhile, server
+        // unreachable, or a send signed before a restore whose signed transaction is gone)
+        try { if (await wallet.failTransfer(i)) n++; } catch (e) { errors.push({ idx: i, reason: String(e?.message || e) }); }
       }
-      return n;
+      return errors.length ? { n, errors } : n;
     });
   }
   /** @param {string} url an https:// transfer server URL */

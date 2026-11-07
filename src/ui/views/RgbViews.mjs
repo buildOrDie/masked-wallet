@@ -31,9 +31,9 @@ export function historyRow(t, a, r) {
     // not broadcast until the other wallet accepts it: no transaction on mempool yet, and it can be cancelled
     const unsent = t.status === 'WaitingCounterparty';
     const stuck = unsent && r.stranded(t);
-    const note = stuck ? 'Can\'t be finished: it was signed before this wallet was restored, and backups don\'t keep that signature. Cancel it and send again. The tokens never left.'
+    const note = stuck ? 'Can\'t be finished or cancelled in this version: the other wallet accepted it, but its signed transaction was lost when this wallet was restored. Nothing was broadcast, so the tokens never left; they stay locked here.'
       : unsent ? 'Waiting for the other wallet to accept. Not on mempool until then.' : STATUS[t.status] ?? '';
-    return { label: stuck ? 'Not sent' : unsent ? 'Sending' : 'Sent', sign: '−', amount: r.amount(a, fungible(t.requestedAssignment)), note, txid: unsent ? '' : t.txid, cancel: unsent ? Number(t.batchTransferIdx) : null };
+    return { label: stuck ? 'Not sent' : unsent ? 'Sending' : 'Sent', sign: '−', amount: r.amount(a, fungible(t.requestedAssignment)), note, txid: unsent ? '' : t.txid, cancel: unsent && !stuck ? Number(t.batchTransferIdx) : null };
   }
   return { label: kind || 'Transfer', sign: '', amount: got ? r.amount(a, got) : '', note: STATUS[t.status] ?? '', txid: t.txid };
 }
@@ -128,13 +128,13 @@ export class RgbTokenView extends View {
           const unsent = r.unsent(a.assetId).length;
           const stuck = r.unsent(a.assetId).filter((t) => r.stranded(t)).length;
           const why = stuck
-            ? `are held by a transfer that can't be finished: it was signed before this wallet was restored, and backups don't keep that signature, so it was never broadcast. Cancel it and send again. If the other wallet shows it as incoming, it never arrives there and expires.`
+            ? `are held by a transfer that can't be finished or cancelled: the other wallet accepted it, but its signed transaction was lost when this wallet was restored, so it was never broadcast. The tokens never left, but this version of the RGB engine keeps them locked. The other wallet's incoming transfer never arrives and expires.`
             : unsent
             ? `are held by ${unsent === 1 ? 'a transfer' : `${unsent} transfers`} the other wallet hasn't accepted yet. Nothing has been broadcast, so you can cancel ${unsent === 1 ? 'it' : 'them'}: the tokens come back straight away.`
             : open ? `are locked by ${open === 1 ? 'an open Private invoice' : `${open} open Private invoices`}: a Private invoice reserves the RGB output these tokens sit on until it's paid or expires.`
               : 'are held by a transfer waiting for a block. They are freed once it confirms.';
           return `<p class="info warn small">${r.amount(a, s - sp)} ${esc(a.ticker)} ${why}</p>
-            ${unsent ? `<button class="btn ghost wide" data-rgb="cancelSend" ${r.busy ? 'disabled' : ''}>Cancel unsent transfer${unsent === 1 ? '' : 's'}</button>` : ''}
+            ${unsent > stuck ? `<button class="btn ghost wide" data-rgb="cancelSend" ${r.busy ? 'disabled' : ''}>Cancel unsent transfer${unsent === 1 ? '' : 's'}</button>` : ''}
             ${open ? `<button class="btn ghost wide" data-rgb="cancelInv" ${r.busy ? 'disabled' : ''}>Cancel open invoices</button>` : ''}`;
         })() : ''}
         <div class="tok-acts">

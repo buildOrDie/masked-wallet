@@ -206,7 +206,9 @@ test('cancelling unsent transfers fails only our sends the other wallet hasn\'t 
     { kind: 'Send', status: 'WaitingCounterparty', batchTransferIdx: 10 }, // accepted meanwhile: the engine refuses
   ];
   w.failTransfer = async (i) => { if (i === 10) throw new Error('CannotFailBatchTransfer'); failed.push(i); return true; };
-  assert.equal(await f.service.cancelSends(), 1);
+  const res = await f.service.cancelSends();
+  assert.equal(res.n, 1);
+  assert.deepEqual(res.errors, [{ idx: 10, reason: 'CannotFailBatchTransfer' }], 'the refusal and its reason are reported');
   assert.deepEqual(failed, [4], 'broadcast sends and invoices are never touched; one refusal does not stop the rest');
   failed.length = 0;
   assert.equal(await f.service.cancelSends([5, 6]), 0, 'named, but not unsent sends');

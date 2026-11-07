@@ -571,9 +571,15 @@ export class WalletRgb {
       }
       case 'cancelSend': { // a send the other wallet hasn't accepted (arg = batch transfer index), or all of them
         return this.run(async () => {
-          const n = await this.service.cancelSends(arg !== '' ? [Number(arg)] : null);
+          const res = await this.service.cancelSends(arg !== '' ? [Number(arg)] : null);
+          const n = typeof res === 'number' ? res : res.n, errors = typeof res === 'number' ? [] : res.errors;
+          const lost = errors.filter((e) => /signed PSBT not found/i.test(e.reason));
+          if (lost.length && this.data) this.data.stranded = [...new Set([...(this.data.stranded || []), ...lost.map((e) => e.idx)])];
           await this.refresh();
-          app.toast(n ? `${n === 1 ? 'Transfer' : `${n} transfers`} cancelled. Nothing was sent.` : 'This transfer can no longer be cancelled: it may already be on its way.', 6000);
+          if (n) return app.toast(`${n === 1 ? 'Transfer' : `${n} transfers`} cancelled. Nothing was sent.`, 6000);
+          if (lost.length) throw new Error('Can\'t cancel or finish this transfer: its signed transaction was lost in the restore. Nothing was sent.');
+          if (errors.length) throw new Error(`The RGB engine didn't cancel this transfer: ${brief(errors[0].reason)}`);
+          app.toast('Nothing to cancel: the transfer has moved on.', 6000);
         });
       }
       case 'showInv': { // reopen an invoice from the list
