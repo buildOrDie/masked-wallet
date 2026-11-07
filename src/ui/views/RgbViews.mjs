@@ -220,6 +220,7 @@ export class RgbSendView extends View {
       ${input(r, 'sendTo', 'To', 'class="mono" placeholder="Paste their RGB invoice (rgb:…)"')}
       <p class="info">Ask them for an invoice: Receive → RGB in MASKED, or any RGB wallet.</p>
       ${input(r, 'sendAmt', 'Amount', 'inputmode="decimal" placeholder="0"', `Available ${r.amount(a, sp)} ${esc(a.ticker)}`)}
+      ${r.isMain ? `<div><p class="lbl">Network fee <span class="lbl-r">${esc(r.fee())} sat/vB · mempool now</span></p>${this.feeChips({ rbf: false })}</div>` : ''}
       ${msg(r)}
       <button class="btn primary wide" data-rgb="review" ${r.busy ? 'disabled' : ''}>Review</button>
     </section>`;

@@ -943,9 +943,12 @@ test('RGB mainnet send: the review shows a fee picker with fresh rates, and the 
   app.rgb.service.decode = async () => ({ network: 'bitcoin', assetId: 'rgb:musd', transportEndpoints: ['rpcs://proxy.iriswallet.com/0.2/json-rpc'] });
   app.platform.hasOrigins = async () => true;
   app.rgb.service.checkProxy = async () => true;
-  app.rgb.asset = 'rgb:musd'; app.state.view = 'rgbsend';
-  app.rgb.fields.sendTo = 'rgb:example'; app.rgb.fields.sendAmt = '5';
   app.state.f.fee = 'normal';
+  await app.rgb.action('send', 'rgb:musd');
+  await new Promise((r) => setTimeout(r, 0));
+  const form = app.ui.views.rgbsend.render();
+  assert.match(form, /Network fee[\s\S]*9 sat\/vB · mempool now[\s\S]*data-set="fee" data-val="fast"[\s\S]*data-rgb="review"/, 'the picker is on the form, with fresh rates, before Review');
+  app.rgb.fields.sendTo = 'rgb:example'; app.rgb.fields.sendAmt = '5';
   await app.rgb.action('review');
   const page = app.ui.views.rgbsend.render();
   assert.match(page, /data-set="fee" data-val="fast"/);

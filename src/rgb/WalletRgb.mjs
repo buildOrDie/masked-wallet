@@ -555,7 +555,11 @@ export class WalletRgb {
       case 'mint': f.mintMode = 'rgb'; state.view = 'mint'; this.issued = null; return app.render();
       case 'token': this.asset = arg; state.view = 'rgbtok'; return app.render();
       case 'receive': f.recvKind = 'rgb'; this.fields.recvAsset = arg || ''; this.invoice = ''; state.view = 'receive'; return app.render();
-      case 'send': this.asset = arg; this.pending = null; this.sent = null; this.fields.sendTo = ''; this.fields.sendAmt = ''; state.view = 'rgbsend'; return app.render();
+      case 'send':
+        this.asset = arg; this.pending = null; this.sent = null; this.fields.sendTo = ''; this.fields.sendAmt = ''; state.view = 'rgbsend';
+        // current mempool rates for the fee picker on the form; it redraws when they arrive
+        if (this.isMain) app.fees.refresh().then(() => { if (state.view === 'rgbsend') app.render(); }).catch(() => {});
+        return app.render();
       case 'issue': {
         const params = newAsset(this.fields);
         // mainnet: a review step inside MASKED before anything is created
