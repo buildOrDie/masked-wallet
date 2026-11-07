@@ -23,8 +23,9 @@ MASKED 的中文翻译是初稿，需要母语者校对。你可以用以下任�
 
 ## 简体中文 (Simplified Chinese) — beta
 
-The Chinese text is a **draft** and needs review by native speakers. It covers setup and unlocking, Home, Send,
-Shield, Receive, the coin list, accounts and Settings. Ordinals, ecash, BRC-20, Mint and RGB are still English.
+The Chinese text is a **draft** and needs review by native speakers. It covers every screen: setup and unlocking,
+Home, Send, Shield, Receive, coins, accounts, Settings, Mint and deploy, BRC-20 and BRC2.0, Ordinals, ecash, LEAF,
+RGB, airdrops, signed payments, website approvals, and the error messages. A few technical errors stay in English.
 
 ### How to review
 
@@ -49,7 +50,8 @@ Please take extra care with the rows about the **recovery phrase (助记词)**, 
 ### For developers
 
 - Dictionary: `src/i18n/zh-CN.mjs`. Translator: `src/i18n/translate.mjs`.
-- `node scripts/i18n-collect.mjs` lists English lines on the main screens that have no translation yet.
+- `node scripts/i18n-collect.mjs` renders the screens and lists English lines with no translation yet;
+  `node scripts/i18n-scan.mjs` scans the code for messages and errors (it also catches some code fragments).
 - `node scripts/i18n-export.mjs` writes the review file (keeping reviewers' marks and notes);
   `node scripts/i18n-import.mjs` reads a reviewed file back and refuses a row that drops a `{n}` or a `<b>` tag.
 - To merge a reviewer's pull request: merge it, run the import, then `npm test` (the i18n test checks every row).

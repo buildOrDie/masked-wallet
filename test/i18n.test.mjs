@@ -32,8 +32,11 @@ test('Chinese: text, sentences with inline tags, values, attributes; addresses a
 
 test('dictionary: every translation keeps its placeholders and inline tags, and is really translated', () => {
   for (const [k, v] of Object.entries(ZH_CN)) {
-    const ph = (s) => (s.match(/\{\d\}/g) || []).sort().join();
-    assert.equal(ph(v), ph(k), `placeholders differ: ${k}`);
+    // a translation may leave out a placeholder (Chinese has no plural "s"), never invent one
+    const ph = (s) => new Set(s.match(/\{\d\}/g) || []);
+    for (const p of ph(v)) assert.ok(ph(k).has(p), `unknown placeholder ${p}: ${k}`);
+    const dropped = [...ph(k)].filter((p) => !ph(v).has(p));
+    assert.ok(dropped.length <= 2, `too many placeholders left out: ${k}`);
     const inl = (s) => (s.match(/<\/?(b|strong|em|i|u|br)\b[^>]*>/g) || []).join();
     assert.equal(inl(v), inl(k), `inline tags differ: ${k}`);
     assert.ok(v.trim(), `empty: ${k}`);
@@ -77,4 +80,12 @@ test('the review file matches the dictionary (a reviewer\'s edit is imported bef
   assert.equal(inCsv.size, Object.keys(ZH_CN).length, 'every line is in the review file once (run node scripts/i18n-export.mjs)');
   for (const [en, zh] of Object.entries(ZH_CN)) assert.equal(inCsv.get(en), zh, `review file out of date for: ${en} (run node scripts/i18n-import.mjs)`);
   for (const r of rows) assert.ok(['yes', 'no'].includes(r[3]), `reviewed must be yes or no: ${r[1]}`);
+});
+
+test('a short pattern never swallows part of another sentence', () => {
+  _setLangForTest('zh-CN');
+  assert.equal(tr('Self-mint · you mint the whole supply and hand it out yourself and more'), 'Self-mint · you mint the whole supply and hand it out yourself and more');
+  assert.equal(tr('Public · 0'), '公开 · 0', 'short values still work');
+  assert.match(tr('Could not reach the MASKED backup server. RGB will try again in a minute.'), /RGB 将在一分钟后重试/, 'long values work when the pattern has real text');
+  _setLangForTest('en');
 });

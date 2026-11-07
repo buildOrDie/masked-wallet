@@ -40,7 +40,7 @@ export class SettingsView extends View {
     </section>
     <section class="card lang-row" translate="no"><span class="lbl">Language · 语言</span>
       <div class="seg">${Object.entries(LANGS).map(([code, name]) => `<button data-lang="${code}" class="${lang() === code ? 'on' : ''}">${name}${code === 'zh-CN' ? ' <small>beta</small>' : ''}</button>`).join('')}</div>
-      ${lang() === 'zh-CN' ? '<p class="muted small">中文翻译仍在测试中，部分页面还是英文。欢迎懂中文的朋友帮忙校对。</p>' : ''}
+      ${lang() === 'zh-CN' ? '<p class="muted small">中文翻译仍在测试中。欢迎懂中文的朋友帮忙校对。</p>' : ''}
     </section>
     <section class="card menu">
       <button class="menu-row" data-replace="create"><span>${I.wallet}<b>Create new wallet</b></span><span class="chev">›</span></button>

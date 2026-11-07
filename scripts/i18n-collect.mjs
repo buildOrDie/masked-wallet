@@ -1,3 +1,4 @@
+/* global localStorage */
 // Lists every English sentence the main screens show that the Chinese dictionary doesn't cover yet.
 // node scripts/i18n-collect.mjs > missing.json
 import { walletApp, Keyring } from '../test/helpers/wallet-app.mjs';
@@ -29,6 +30,18 @@ for (const net of ['main', 'signet']) {
   state.f.recvKind = 'shielded'; views(app, ['receive']);
   state.f.recvKind = 'public'; views(app, ['receive']);
   seen(app.ui.view('home').render());
+  // more screens
+  for (const mode of ['mint', 'deploy', 'rgb']) { state.f.mintMode = mode; views(app, ['mint']); }
+  for (const who of ['me', 'anyone', 'self']) { state.f.deployWho = who; state.f.mintMode = 'deploy'; views(app, ['mint']); }
+  for (const to of ['shielded', 'other', 'public']) { state.f.mintTo = to; state.f.mintMode = 'mint'; views(app, ['mint']); }
+  for (const m of ['receive', 'send', 'pay', 'topup', 'mints']) { state.f.ecMode = m; views(app, ['ecash']); }
+  views(app, ['ordinals', 'leaf', 'relay']);
+  state.f.sendMode = 'airdrop'; views(app, ['send']); state.f.sendMode = '';
+  try { localStorage.setItem('masked.rgb.mainnet-beta', '1'); } catch {}
+  views(app, ['home', 'settings']);
+  app.rgb.betaAsk = true; views(app, ['home']); app.rgb.betaAsk = false;
+  try { localStorage.removeItem('masked.rgb.mainnet-beta'); } catch {}
+  views(app, ['home']);
   // header and navigation
   try { seen(app.ui.views.settings.render()); } catch {}
 }

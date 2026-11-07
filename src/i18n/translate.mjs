@@ -75,6 +75,8 @@ function lookup(t, key) {
   for (const p of t.patterns) {
     const m = p.re.exec(key);
     if (!m) continue;
+    // a pattern with little fixed text ("{0} mint{1}") must not swallow a long piece of some other sentence
+    if (p.weight < 12 && m.slice(1).some((v) => v.length > 24)) continue;
     const vals = {};
     p.order.forEach((n, i) => { vals[n] = m[i + 1]; });
     // a value is translated too when it is a known word (Public, Shielded…)
