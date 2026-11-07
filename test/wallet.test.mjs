@@ -462,7 +462,7 @@ test('Send: an invoice with a fixed amount fills it in; a different token or an 
   assert.equal(app.rgb.pending.amount, 2500);
   assert.equal(app.rgb.pending.witness, true);
   assert.equal(app.rgb.fields.sendAmt, '25');
-  assert.match(app.ui.views.rgbsend.render(), /1,000 sats for their new output/);
+  assert.match(app.ui.views.rgbsend.render(), /330 sats for their new output/);
   app.rgb.pending = null;
   d = { assetId: 'rgb:other', network: 'signet' };
   await app.rgb.action('review');

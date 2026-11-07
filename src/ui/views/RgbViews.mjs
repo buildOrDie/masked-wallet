@@ -153,7 +153,7 @@ export class RgbSendView extends View {
           ${rowKV('Privacy', '<span class="good">Private — the amount and token are not on the blockchain</span>')}
           ${p.fixed ? rowKV('Amount', 'set by the invoice') : ''}
           ${rowKV('Transfer server', `${esc(p.proxies.join(', '))} ${p.ask.length ? '<span class="muted">· not allowed yet</span>' : p.check?.ok ? '<span class="good">· reachable</span>' : p.check ? '<span class="meh">· not usable</span>' : '<span class="muted">· checking…</span>'}`)}
-          ${rowKV('Network fee', `${p.witness ? `a few hundred ${r.isMain ? '' : 'test '}sats + 1,000 sats for their new output` : `a few hundred ${r.isMain ? '' : 'test '}sats`}${r.isMain ? ` · ${esc(r.fee())} sat/vB` : ''}`)}
+          ${rowKV('Network fee', `${p.witness ? `a few hundred ${r.isMain ? '' : 'test '}sats + 330 sats for their new output` : `a few hundred ${r.isMain ? '' : 'test '}sats`}${r.isMain ? ` · ${esc(r.fee())} sat/vB` : ''}`)}
         </div>
         ${p.ask.length ? `<p class="info">This invoice uses its own transfer server (${esc(p.ask.map((u) => new URL(u).host).join(', '))}). The token's proof is dropped off there for them to collect. Allow MASKED to reach it:</p>
           <button class="btn primary wide" data-rgb="allowProxy" ${r.busy ? 'disabled' : ''}>Allow ${esc(new URL(p.ask[0]).host)}</button>` : ''}
@@ -205,7 +205,7 @@ export class RgbReceive {
       ${a ? input(r, 'recvAmt', 'Amount', 'inputmode="decimal" placeholder="Any amount"', `${esc(a.ticker)} · optional`) : ''}
       <div class="field"><span class="lbl">Works for</span>${segOf('recvExpiry', r.fields.recvExpiry, RGB_EXPIRY)}</div>
       <div class="field"><span class="lbl">Invoice type</span>${segOf('recvType', type, [['blind', 'Private'], ['witness', 'No BTC needed']])}
-        <span class="addr-kind">${type === 'witness' ? 'The sender adds 1,000 sats for your new output, so you need no BTC.' : `Receives onto one of your RGB outputs, fully hidden. Needs a little ${r.isMain ? '' : 'test '}BTC.`}</span></div>
+        <span class="addr-kind">${type === 'witness' ? 'The sender adds 330 sats (the minimum) for your new output, so you need no BTC.' : `Receives onto one of your RGB outputs, fully hidden. Needs a little ${r.isMain ? '' : 'test '}BTC.`}</span></div>
       ${type === 'blind' && low ? `<p class="info warn">Your RGB ${r.isMain ? '' : 'test '}BTC is low. Pick "No BTC needed", or add ${r.isMain ? '' : 'test '}BTC on Home first.</p>` : ''}
       ${msg(r)}
       <button class="btn primary wide" data-rgb="invoice" ${r.busy ? 'disabled' : ''}>${r.busy ? 'Making invoice…' : 'Make invoice'}</button>

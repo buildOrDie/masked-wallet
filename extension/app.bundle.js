@@ -194,7 +194,7 @@ maskedwallet.com`;return`https://x.com/intent/post?text=${encodeURIComponent(e)}
           ${O("Privacy",'<span class="good">Private \u2014 the amount and token are not on the blockchain</span>')}
           ${r.fixed?O("Amount","set by the invoice"):""}
           ${O("Transfer server",`${$(r.proxies.join(", "))} ${r.ask.length?'<span class="muted">\xB7 not allowed yet</span>':r.check?.ok?'<span class="good">\xB7 reachable</span>':r.check?'<span class="meh">\xB7 not usable</span>':'<span class="muted">\xB7 checking\u2026</span>'}`)}
-          ${O("Network fee",`${r.witness?`a few hundred ${t.isMain?"":"test "}sats + 1,000 sats for their new output`:`a few hundred ${t.isMain?"":"test "}sats`}${t.isMain?` \xB7 ${$(t.fee())} sat/vB`:""}`)}
+          ${O("Network fee",`${r.witness?`a few hundred ${t.isMain?"":"test "}sats + 330 sats for their new output`:`a few hundred ${t.isMain?"":"test "}sats`}${t.isMain?` \xB7 ${$(t.fee())} sat/vB`:""}`)}
         </div>
         ${r.ask.length?`<p class="info">This invoice uses its own transfer server (${$(r.ask.map(i=>new URL(i).host).join(", "))}). The token's proof is dropped off there for them to collect. Allow MASKED to reach it:</p>
           <button class="btn primary wide" data-rgb="allowProxy" ${t.busy?"disabled":""}>Allow ${$(new URL(r.ask[0]).host)}</button>`:""}
@@ -224,7 +224,7 @@ maskedwallet.com`;return`https://x.com/intent/post?text=${encodeURIComponent(e)}
       ${i?pr(e,"recvAmt","Amount",'inputmode="decimal" placeholder="Any amount"',`${$(i.ticker)} \xB7 optional`):""}
       <div class="field"><span class="lbl">Works for</span>${c("recvExpiry",e.fields.recvExpiry,_u)}</div>
       <div class="field"><span class="lbl">Invoice type</span>${c("recvType",o,[["blind","Private"],["witness","No BTC needed"]])}
-        <span class="addr-kind">${o==="witness"?"The sender adds 1,000 sats for your new output, so you need no BTC.":`Receives onto one of your RGB outputs, fully hidden. Needs a little ${e.isMain?"":"test "}BTC.`}</span></div>
+        <span class="addr-kind">${o==="witness"?"The sender adds 330 sats (the minimum) for your new output, so you need no BTC.":`Receives onto one of your RGB outputs, fully hidden. Needs a little ${e.isMain?"":"test "}BTC.`}</span></div>
       ${o==="blind"&&a?`<p class="info warn">Your RGB ${e.isMain?"":"test "}BTC is low. Pick "No BTC needed", or add ${e.isMain?"":"test "}BTC on Home first.</p>`:""}
       ${Tn(e)}
       <button class="btn primary wide" data-rgb="invoice" ${e.busy?"disabled":""}>${e.busy?"Making invoice\u2026":"Make invoice"}</button>

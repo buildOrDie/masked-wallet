@@ -111,7 +111,8 @@ export class LiteWallet {
   }
 
   /** Sats the sender puts in the new output when paying a witness invoice (above dust, so it relays). */
-  static WITNESS_SATS = 1000;
+  /** BTC on the receiver's new output for a "No BTC needed" invoice: the Taproot dust limit, the least Bitcoin allows. */
+  static WITNESS_SATS = 330;
 
   /**
    * An invoice. Blind (default): receives onto one of our RGB outputs, blinded, so the sender learns no address;

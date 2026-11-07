@@ -135,7 +135,7 @@ test('BigInt from the engine becomes plain numbers (the screens sort and date th
   assert.equal(t.assignments[0].Fungible, 100000);
 });
 
-test('witness invoices: made with no RGB output of ours; paying one adds 1,000 sats for the new output', async () => {
+test('witness invoices: made with no RGB output of ours; paying one adds 330 sats (Taproot dust) for the new output', async () => {
   const { w, calls } = await open();
   await w.onchainReceive({ assetId: 'rgb:A', amount: 300, durationSeconds: 3600, witness: true });
   assert.deepEqual(calls.find((c) => c[0] === 'witnessReceive'), ['witnessReceive', 'rgb:A', { Fungible: 300 }, 3600, ['rpcs://proxy.iriswallet.com/0.2/json-rpc'], 1]);
@@ -143,7 +143,7 @@ test('witness invoices: made with no RGB output of ours; paying one adds 1,000 s
   assert.equal(d.witness, true); assert.equal(d.amount, 300);
   await w.onchainSend({ invoice: 'rgb:w', assetId: 'rgb:A', amount: 300, feeRate: 2 });
   const [, map] = calls.find((c) => c[0] === 'sendBegin');
-  assert.deepEqual(map['rgb:A'][0].witnessData, { amountSat: '1000', blinding: null }, 'a string: the real engine refuses a number here');
+  assert.deepEqual(map['rgb:A'][0].witnessData, { amountSat: '330', blinding: null }, 'a string: the real engine refuses a number here');
   assert.equal(typeof map['rgb:A'][0].assignment.Fungible, 'number', 'and refuses a string for the token amount');
   assert.equal(map['rgb:A'][0].transportEndpoints[0], 'rpcs://proxy.iriswallet.com/0.2/json-rpc', 'falls back to our proxy');
 });
