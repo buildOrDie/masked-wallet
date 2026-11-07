@@ -276,6 +276,31 @@ test('RGB mainnet beta: opt-in, keys of its own, backup before every receive and
   localStorage.removeItem('masked.rgb.mainnet-beta');
 });
 
+test('RGB invoices made here are listed with where each one stands', async () => {
+  const app = rgbApp();
+  rgbReady(app);
+  localStorage.removeItem(app.rgb.invoicesKey);
+  const future = Math.floor(Date.now() / 1000) + 3600;
+  app.rgb.service.receive = async () => ({ invoice: 'rgb:~/~/~/tb:wvout:AAA', recipientId: 'wvout:AAA', expirationTimestamp: future });
+  app.rgb.fields.recvType = 'witness';
+  await app.rgb.action('invoice');
+  assert.equal(app.rgb.invoices().length, 1);
+  assert.deepEqual(app.rgb.invoiceStatus(app.rgb.invoices()[0]), { key: 'waiting', text: 'Waiting for payment' });
+  app.rgb.invoice = '';
+  let html = app.ui.views.receive.render();
+  if (!/Your invoices/.test(html)) { app.state.f.recvKind = 'rgb'; html = app.ui.views.receive.render(); }
+  assert.match(html, /Your invoices[\s\S]*Any RGB token[\s\S]*Waiting for payment/);
+  // the payment shows up in the token's transfers
+  app.rgb.data.transfers = { 'rgb:tusd': [{ recipientId: 'wvout:AAA', status: 'WaitingConfirmations', assignments: [{ Fungible: 500 }] }] };
+  assert.match(app.rgb.invoiceStatus(app.rgb.invoices()[0]).text, /Paid: 5(\.00)? TUSD, waiting for a block/);
+  app.rgb.data.transfers['rgb:tusd'][0].status = 'Settled';
+  assert.match(app.rgb.invoiceStatus(app.rgb.invoices()[0]).text, /Received 5(\.00)? TUSD/);
+  // an old one nobody paid
+  app.rgb.logInvoice({ invoice: 'rgb:old', recipientId: 'utxob:OLD', at: Date.now() - 9e6, expiresAt: 1, witness: false, amount: '', ticker: '' });
+  assert.equal(app.rgb.invoiceStatus(app.rgb.invoices()[0]).key, 'expired');
+  localStorage.removeItem(app.rgb.invoicesKey);
+});
+
 test('Receive has an RGB tab on Signet only; Mint has "RGB token"', () => {
   const app = rgbApp();
   app.rgb.ensure = () => {};

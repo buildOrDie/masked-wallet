@@ -224,6 +224,24 @@ export class RgbReceive {
       ${type === 'blind' && low ? `<p class="info warn">Your RGB ${r.isMain ? '' : 'test '}BTC is low. Pick "No BTC needed", or add ${r.isMain ? '' : 'test '}BTC on Home first.</p>` : ''}
       ${msg(r)}
       <button class="btn primary wide" data-rgb="invoice" ${r.busy ? 'disabled' : ''}>${r.busy ? 'Making invoice…' : 'Make invoice'}</button>
+    </section>
+    ${RgbReceive.history(r)}`;
+  }
+
+  /** The invoices made here, newest first, with where each one stands. */
+  static history(r) {
+    const list = r.invoices().slice(0, 10);
+    if (!list.length) return '';
+    return `<section class="card"><div class="list-h"><b>Your invoices</b><button class="link small" data-rgb="refresh" ${r.busy ? 'disabled' : ''}>${r.busy ? 'Updating…' : 'Refresh'}</button></div>
+      ${list.map((inv) => {
+        const st = r.invoiceStatus(inv);
+        const what = inv.amount ? `${inv.amount} ${inv.ticker}` : inv.ticker ? `Any amount of ${inv.ticker}` : 'Any RGB token';
+        return `<div class="ec-sent rgb-inv">
+          <span><b>${esc(what)}</b><span class="muted small">${esc(new Date(inv.at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }))} · ${inv.witness ? 'No BTC needed' : 'Private'}</span>
+            <span class="small inv-${st.key}">${esc(st.text)}</span></span>
+          <span class="ec-sent-btns">${st.key === 'waiting' ? `<button class="btn ghost sm" data-rgb="showInv" data-rgb-arg="${esc(inv.recipientId)}">Show</button><button class="btn ghost sm" data-copy="${esc(inv.invoice)}">Copy</button>` : ''}</span>
+        </div>`;
+      }).join('')}
     </section>`;
   }
 }

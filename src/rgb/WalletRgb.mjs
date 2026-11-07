@@ -125,6 +125,30 @@ export class WalletRgb {
     return toHex(new Uint8Array(d));
   }
 
+  // ---- invoices this wallet made (kept in this browser, per network) ----
+  get invoicesKey() { return `${this.profile.vaultKey}.invoices`; }
+  /** @returns {any[]} newest first */
+  invoices() { try { return JSON.parse(localStorage.getItem(this.invoicesKey) || '[]'); } catch { return []; } }
+  logInvoice(inv) {
+    const list = [inv, ...this.invoices().filter((x) => x.invoice !== inv.invoice)].slice(0, 30);
+    try { localStorage.setItem(this.invoicesKey, JSON.stringify(list)); } catch { /* the list is a convenience */ }
+  }
+  /** Where an invoice stands: its transfer once the payment shows up, else waiting or expired. */
+  invoiceStatus(inv) {
+    for (const [assetId, list] of Object.entries(this.data?.transfers || {})) {
+      const t = (list || []).find((x) => String(x?.recipientId ?? '') === inv.recipientId);
+      if (t) {
+        const a = this.find(assetId), amt = Number(t.assignments?.[0]?.Fungible ?? 0);
+        const what = a && amt ? `${this.amount(a, amt)} ${a.ticker}` : a?.ticker || '';
+        if (t.status === 'Settled') return { key: 'done', text: `Received${what ? ` ${what}` : ''}` };
+        if (t.status === 'Failed') return { key: 'failed', text: 'Failed' };
+        if (t.status === 'WaitingConfirmations') return { key: 'confirming', text: `Paid${what ? `: ${what}` : ''}, waiting for a block` };
+      }
+    }
+    if (inv.expiresAt && inv.expiresAt <= Date.now() / 1000) return { key: 'expired', text: 'Expired' };
+    return { key: 'waiting', text: 'Waiting for payment' };
+  }
+
   // ---- what the screens read ----
   assets() { return Object.values(this.data?.groups || {}).flat().filter((a) => a && typeof a === 'object' && a.assetId); }
   find(id) { return this.assets().find((a) => a.assetId === id) || null; }
@@ -345,6 +369,11 @@ export class WalletRgb {
       }
       case 'issueAgain': this.issued = null; return app.render();
       case 'issueEdit': this.issueAsk = null; return app.render();
+      case 'showInv': { // reopen an invoice from the list
+        const inv = this.invoices().find((x) => x.recipientId === arg);
+        if (inv) { this.invoice = inv.invoice; this.invoiceInfo = { witness: inv.witness, amount: inv.amount, ticker: inv.ticker, expiry: inv.expiry }; }
+        return app.render();
+      }
       case 'opt': { // a Receive option, "key:value"
         const [k, v] = String(arg).split(':');
         if (['recvType', 'recvExpiry'].includes(k)) { this.fields[k] = v; this.invoice = ''; this.message = ''; }
@@ -366,6 +395,7 @@ export class WalletRgb {
           const r = witness ? await this.service.receive(opts) : await this.withOutputs(() => this.service.receive(opts));
           this.invoice = r.invoice;
           this.invoiceInfo = { witness, amount: amount ? this.amount(a, amount) : '', ticker: a?.ticker || '', expiry: Number(this.fields.recvExpiry) || 86400 };
+          this.logInvoice({ invoice: r.invoice, recipientId: r.recipientId, at: Date.now(), expiresAt: Number(r.expirationTimestamp) || Math.floor(Date.now() / 1000) + this.invoiceInfo.expiry, ...this.invoiceInfo });
         });
       }
       case 'review': {

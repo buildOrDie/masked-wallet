@@ -564,6 +564,12 @@ a.act, a.act:hover { text-decoration: none; color: inherit; }
 .ord-self { display: inline-flex; align-items: center; gap: 8px; margin: 2px 0 6px; }
 .ord-self .coin { width: 22px; height: 22px; }
 .ord-self.on { outline: 2px solid #8b7cf6; }
+
+.rgb-inv .inv-waiting { color: #f5b84a; }
+.rgb-inv .inv-confirming { color: #8b7cf6; }
+.rgb-inv .inv-done { color: #3fd68f; }
+.rgb-inv .inv-expired, .rgb-inv .inv-failed { color: var(--muted, #a89f96); }
+.rgb-inv > span:first-child { display: flex; flex-direction: column; gap: 2px; }
 </style>
 </head>
 <body>
