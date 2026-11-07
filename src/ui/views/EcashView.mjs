@@ -103,6 +103,7 @@ export class EcashView extends View {
       <label class="field"><span class="lbl">Lock to an address <span class="lbl-r">optional</span></span>
         <input id="ecLock" data-bind="ecLock" class="mono" spellcheck="false" autocomplete="off" value="${esc(f.ecLock)}" placeholder="bc1p… of the person you pay"></label>
       <p class="fee-note" id="ecLockNote">${EcashView.lockNote(f.ecLock)}</p>
+      ${f.ecLock.trim() && this.app.lookAlike(f.ecLock.trim()) ? `<label class="risk"><input type="checkbox" data-eclockok ${f.ecLockOk ? 'checked' : ''}><span><b>Look-alike address.</b> It starts and ends like <span class="mono">${esc(short(this.app.lookAlike(f.ecLock.trim()), 6))}</span>, an address you used before, but it's different. Tick only if you checked every character.</span></label>` : ''}
       ${this.statusLine('ecash')}
       <button class="btn primary wide" id="btnEcSend" ${this.state.busy ? 'disabled' : ''}>${this.state.busy ? 'Making token…' : 'Make token'}</button>
     </section>`;
