@@ -8,7 +8,7 @@ export const FORM_DEFAULTS = {
   depTick: '', depMax: '21000000', depLim: '1000', depFrom: 'public', depResTo: 'shielded', depWho: 'self', recTick: '', recSalt: '',
   tsTick: '', tsTo: '', tsAmt: '', tsFrom: 'public', trTick: '', trAmt: '', trFrom: 'public',
   coinFilter: 'all', scanText: '', calcRecips: '', relayText: '', leafFrom: 'public', leafTo: '', leafAmt: '', poisonOk: false,
-  ecMode: '', ecMint: '', ecVia: '', ecFrom: 'public', ecAmt: '', ecLock: '', ecToken: '', ecInvoice: '', ecNewMint: '',
+  ecMode: '', ecMint: '', ecVia: '', ecFrom: 'public', ecAmt: '', ecLock: '', ecToken: '', ecInvoice: '', ecNewMint: '', ecLockOk: false,
   ordSide: 'all', ordTo: '',
   sendMode: 'send', dropText: '', dropEach: '1000', dropFrom: 'public',
   // set by the screens that use them

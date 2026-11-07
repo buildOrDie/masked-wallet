@@ -56,7 +56,7 @@ export class Controller {
     if (b === 'mintOther') { const k = codec.kind(e.target.value), el = $('#mintKind'); if (el) { el.className = `addr-kind k-${k.kind}`; el.textContent = k.text || ''; } }
     if (b === 'feeCustom') this.customFeeHint(e.target.value);
     if (b === 'ordTo') { const el = $('#ordKind'), v = e.target.value.trim(); if (el) { const k = this.app.account.codec.kind(v); el.className = `addr-kind k-${k.kind}`; el.textContent = k.kind === 'empty' ? '' : v === this.app.account.shieldAddr() ? 'Your own Shielded address' : k.text; } }
-    if (b === 'ecLock') { const el = $('#ecLockNote'); if (el) el.textContent = EcashView.lockNote(e.target.value); }
+    if (b === 'ecLock') { this.state.f.ecLockOk = false; const el = $('#ecLockNote'); if (el) el.textContent = EcashView.lockNote(e.target.value); }
     if (b === 'dropText') { const el = $('#dropCount'); if (el) { const pv = this.app.ui.view('send').drop.preview(); el.innerHTML = AirdropView.countNote(pv); el.className = `addr-kind ${pv.n ? 'k-shielded' : ''}`; } }
     if (b === 'dropText' || b === 'dropEach') { clearTimeout(this.dropTimer); this.dropTimer = setTimeout(() => { if (state.view === 'send') this.render(); }, 400); }
     if (state.status.drop) state.status.drop = null;
@@ -79,6 +79,7 @@ export class Controller {
     const t = e.target, app = this.app;
     if (t.hasAttribute?.('data-rbf')) { TxPolicy.save(app.store, t.checked); this.toast(t.checked ? 'RBF on' : 'RBF off'); return; }
     if (t.hasAttribute?.('data-poisonok')) { this.f.poisonOk = t.checked; this.render(); return; }
+    if (t.hasAttribute?.('data-eclockok')) { this.f.ecLockOk = t.checked; this.render(); return; }
     if (t.hasAttribute?.('data-leafscan')) { app.leaf.setScanShielded(t.checked); this.render(); return; }
     if (t.hasAttribute?.('data-backed')) { this.f.backed = t.checked; this.render(); return; }
     if (t.id === 'autoLockSel') { app.vault.setAutoLock(t.value); app.lock.refreshSession(); this.toast(`Auto-lock: ${t.selectedOptions[0].text}`); return; }
@@ -339,7 +340,7 @@ export class Controller {
         break;
       }
       case 'btnEcSend': {
-        if (f.ecLock && app.lookAlike(f.ecLock.trim()) && !confirm('This address looks like one you used before but is different. Lock to it anyway?')) break;
+        if (f.ecLock && app.lookAlike(f.ecLock.trim()) && !f.ecLockOk) throw new Error('This address looks like one you used before but is different. Check every character, then tick the box to lock to it anyway.');
         state.busy = true; state.status.ecash = null; this.render();
         try {
           const r = await app.ecash.send({ url: f.ecMint, amount: f.ecAmt, lockTo: f.ecLock.trim() });
