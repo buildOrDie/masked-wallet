@@ -70,7 +70,8 @@ The build is reproducible: the same source always gives the same `extension/`. T
 | [`v2.20.0`](../../tree/v2.20.0) | **Top up ecash with BTC** (NUT-30 on-chain deposits): send from Public or Shielded to the mint, then pay any Lightning invoice. BTC → Lightning in the wallet, no swap service | GitHub |
 | [`v2.20.1`](../../tree/v2.20.1) | Ecash suggests one mint, Minibits (the most used); any other mint can be added by address, with a link to mint reviews | GitHub |
 | [`v2.20.2`](../../tree/v2.20.2) | Ecash Send: the lock note updates as you type; paywall demo hides its gate once paid | GitHub |
-| [`v2.21.1`](../../tree/v2.21.1) | Ecash: the look-alike address check for locked tokens is a tick box inside MASKED, not a browser pop-up | `main` |
+| [`v2.22.0`](../../tree/v2.22.0) | **RGB tokens on Bitcoin mainnet (beta, opt-in)**: hold, receive, send and create RGB tokens (NIA), works with other RGB 0.11 wallets; RGB has keys of its own; **encrypted cloud backup** (signed and versioned, on by default, can be switched off) plus backup files; invoice list. RGB servers are asked for only when RGB is turned on | `main` |
+| [`v2.21.1`](../../tree/v2.21.1) | Ecash: the look-alike address check for locked tokens is a tick box inside MASKED, not a browser pop-up | |
 | [`v2.21.0`](../../tree/v2.21.0) | Ordinals gallery on both sides (images, text, BRC-20), and send an inscription to any address or **privately to a Shielded address**: the inscription keeps its own output and value, and the fee comes only from plain coins of the same side | |
 | [`v2.20.3`](../../tree/v2.20.3) | Ecash: claim a token before adding any mint (MASKED adds it); the claim toast no longer shows the sender's fee | |
 | [`v2.15.2`](../../tree/v2.15.2) | redesigned unlock screen (show-password button, clearer wrong-password state); a side panel button in the header | GitHub |
@@ -150,6 +151,10 @@ Pull requests are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Please report
 ## License
 
 [MIT](LICENSE)
+
+## RGB tokens (mainnet beta)
+
+On **mainnet**, Home offers **RGB tokens (beta)**: an opt-in section to hold, receive, send and create RGB tokens. RGB uses keys of its own, derived from the recovery phrase on a separate path, so its coins never mix with Public or Shielded BTC. RGB tokens can't come back from the phrase alone, so MASKED keeps an encrypted, signed cloud backup (switch it off in Settings → RGB (beta)) and can save backup files. Beta: keep amounts small. Details: [RGB-SIGNET.md](docs/RGB-SIGNET.md#mainnet-beta-encrypted-cloud-backup).
 
 ## RGB Signet prototype
 

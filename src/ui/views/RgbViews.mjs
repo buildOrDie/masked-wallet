@@ -55,6 +55,10 @@ export class RgbHome {
       <label class="field"><span class="lbl">Earlier RGB password</span><input id="rgbOldPw" type="password" autocomplete="off"></label>
       <button class="btn primary wide" data-rgb="migrate" ${r.busy ? 'disabled' : ''}>Open RGB</button>${msg(r)}</section>`;
     if (!r.ready && !r.exists) return `<button class="hint hint-cta" data-rgb="on" ${r.busy ? 'disabled' : ''}><span class="hint-ic">${I.mint}</span><span><b>${r.busy ? 'Turning on RGB…' : r.isMain ? 'Turn on RGB (beta)' : 'Try RGB tokens'}</b><span>${r.isMain ? 'Hold and send RGB tokens on Bitcoin mainnet.' : 'Create and send private test tokens on Signet.'}</span></span><span class="chev">›</span></button>`;
+    if (!r.ready && r.phase === 'allow') {
+      return `<section class="home-toks"><div class="list-h"><b>RGB tokens</b></div>
+      <button class="hint hint-cta" data-rgb="retry" ${r.busy ? 'disabled' : ''}><span class="hint-ic">${I.mint}</span><span><b>Allow RGB to connect</b><span>RGB needs to reach its transfer server. Chrome asks once.</span></span><span class="chev">›</span></button>${msg(r)}</section>`;
+    }
     if (!r.ready) {
       return `<section class="home-toks"><div class="list-h"><b>RGB tokens</b><span class="muted small">${r.phase === 'error' ? '' : 'opening…'}</span></div>
       ${r.phase === 'error' ? `${msg(r)}<button class="btn ghost wide" data-rgb="retry">Try again</button>` : ''}</section>`;
@@ -207,7 +211,7 @@ export class RgbReceive {
     const r = app.rgb;
     if (!r.ready) {
       return `<section class="card receive"><div class="recv-badge">${rgbBadge}<b>RGB invoice</b></div>
-        ${r.exists ? `<p class="muted center">${r.phase === 'error' ? esc(r.message) : 'Opening RGB…'}</p>` : `<p class="info">RGB tokens move privately: only you and the sender see them.</p><button class="btn primary wide" data-rgb="on" ${r.busy ? 'disabled' : ''}>Turn on RGB</button>`}</section>`;
+        ${r.exists ? (r.phase === 'allow' ? `<button class="btn primary wide" data-rgb="retry" ${r.busy ? 'disabled' : ''}>Allow RGB to connect</button>` : `<p class="muted center">${r.phase === 'error' ? esc(r.message) : 'Opening RGB…'}</p>`) : `<p class="info">RGB tokens move privately: only you and the sender see them.</p><button class="btn primary wide" data-rgb="on" ${r.busy ? 'disabled' : ''}>Turn on RGB</button>`}</section>`;
     }
     const assets = r.assets(), cur = r.fields.recvAsset, a = cur ? r.find(cur) : null;
     const type = r.recvType(), low = r.btc().settled < RGB_BLIND_MIN;
@@ -263,7 +267,7 @@ export class RgbMint {
     const r = app.rgb;
     if (!r.ready) {
       return `<section class="card form"><p class="info">RGB tokens live off the blockchain: only you and the people you send them to see balances.</p>
-        ${r.exists ? `<p class="muted center">${r.phase === 'error' ? esc(r.message) : 'Opening RGB…'}</p>` : `<button class="btn primary wide" data-rgb="on" ${r.busy ? 'disabled' : ''}>${r.busy ? 'Turning on…' : 'Turn on RGB'}</button>`}</section>`;
+        ${r.exists ? (r.phase === 'allow' ? `<button class="btn primary wide" data-rgb="retry" ${r.busy ? 'disabled' : ''}>Allow RGB to connect</button>` : `<p class="muted center">${r.phase === 'error' ? esc(r.message) : 'Opening RGB…'}</p>`) : `<button class="btn primary wide" data-rgb="on" ${r.busy ? 'disabled' : ''}>${r.busy ? 'Turning on…' : 'Turn on RGB'}</button>`}</section>`;
     }
     if (r.issued) {
       const a = r.find(r.issued.assetId);

@@ -49,6 +49,12 @@ export class Platform {
     if (!ok) throw new Error('MASKED needs permission to reach the transfer server in this invoice.');
   }
 
+  /** Whether MASKED may already reach these servers (no prompt). Outside the extension: always. */
+  async hasOrigins(urls) {
+    if (!urls.length || !this.hasExt || !chrome.permissions?.contains) return true;
+    try { return await chrome.permissions.contains({ origins: [...new Set(urls.map((u) => new URL(u).origin + '/*'))] }); } catch { return true; }
+  }
+
   /** Ask for permission to reach a server the user typed in Settings. */
   async requestOrigin(url) {
     if (!this.hasExt || !chrome.permissions?.request) return;

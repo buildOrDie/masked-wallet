@@ -347,6 +347,8 @@ export class WalletRgb {
     this.waitSince = 0;
     this.tried = this.profile.id;
     setTimeout(() => this.run(async () => {
+      // updated from a build that had the RGB servers in its install permissions: one tap to allow them again
+      if (!await this.app.platform.hasOrigins(this.hostsFor())) { this.phase = 'allow'; this.message = ''; return; }
       this.phase = 'opening'; this.app.render();
       try { await this.open(await this.walletKey()); } catch (e) {
         // a test wallet from an earlier build, encrypted with a password of its own: ask for it once
@@ -366,7 +368,7 @@ export class WalletRgb {
     try {
       await fn();
       if (this.isMain && this.service?.backupRequired) this.scheduleCloud();
-      if (this.phase !== 'legacy') this.phase = '';
+      if (this.phase !== 'legacy' && this.phase !== 'allow') this.phase = '';
       if (!quiet) this.message = '';
     } catch (error) {
       this.message = rgbError(error, this.profile);
@@ -394,9 +396,21 @@ export class WalletRgb {
     }
   }
 
+  /** The servers an RGB network talks to: its block server and its transfer server. */
+  hostsFor(p = this.profile) { return [p.sdk.indexerUrl, p.sdk.transportEndpoint]; }
+
   // ---- actions (data-rgb="…") ----
   async action(name, arg = '') {
     const app = this.app, state = app.state, f = state.f;
+    // Chrome only shows its "allow" prompt straight from a click, so ask before anything else is awaited.
+    // The RGB servers aren't in the install permissions: people who never use RGB are never asked.
+    const opening = { betaYes: RGB_MAINNET, on: this.profile, retry: this.profile, profile: profileOf(arg) }[name];
+    if (opening && (name !== 'betaYes' || this.betaOk)) {
+      try { await app.platform.requestOrigins(this.hostsFor(opening)); } catch {
+        this.phase = this.exists ? 'allow' : ''; this.message = 'RGB needs permission to reach its servers. Tap again and choose Allow.';
+        return app.render();
+      }
+    }
     // mainnet beta: asked inside MASKED (the Home card opens a short explanation with a tick box)
     if (name === 'beta') { if (this.offerable) { this.betaAsk = true; this.betaOk = false; } return app.render(); }
     if (name === 'betaNo') { this.betaAsk = false; return app.render(); }

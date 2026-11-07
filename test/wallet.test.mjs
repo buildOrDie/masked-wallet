@@ -669,3 +669,32 @@ test('RGB: a payment an earlier beta counted twice is left out of the balance an
   localStorage.removeItem('masked.rgb.mainnet.v1.doubled-ok.rgb:musd');
   localStorage.removeItem('masked.rgb.mainnet-beta');
 });
+
+test('RGB servers are asked for when RGB is turned on, not at install; an update without them asks with one tap', async () => {
+  const { readFileSync } = await import('node:fs');
+  const manifest = JSON.parse(readFileSync(new URL('../src/manifest.json', import.meta.url), 'utf8'));
+  assert.equal(manifest.host_permissions.some((h) => /iriswallet|utexo/.test(h)), false, 'no new install permission: existing users are not disabled by the update');
+  const app = rgbApp('main');
+  const r = app.rgb;
+  localStorage.removeItem('masked.rgb.mainnet-beta');
+  const asked = []; let allow = false, granted = false;
+  app.platform.requestOrigins = async (urls) => { asked.push(...urls); if (!allow) throw new Error('declined'); granted = true; };
+  app.platform.hasOrigins = async () => granted;
+  r.betaOk = true;
+  await r.action('betaYes');
+  assert.deepEqual(asked, ['https://mempool.space/api', 'https://proxy.iriswallet.com/0.2/json-rpc']);
+  assert.match(r.message, /needs permission/);
+  assert.equal(localStorage.getItem('masked.rgb.mainnet-beta'), null, 'declined: the beta stays off');
+  // already on, permission missing after the update: RGB doesn't try to open, Home offers one tap
+  localStorage.setItem('masked.rgb.mainnet-beta', '1');
+  localStorage.setItem('masked.rgb.mainnet.v1', '{"format":"x"}');
+  r.tried = ''; r.ensure();
+  await new Promise((res) => setTimeout(res, 20));
+  assert.equal(r.phase, 'allow');
+  assert.match(app.ui.views.home.render(), /data-rgb="retry"[^>]*>.*Allow RGB to connect/s);
+  allow = true; asked.length = 0;
+  let opened = false; r.ensure = () => { opened = true; };
+  await r.action('retry');
+  assert.equal(granted, true); assert.equal(opened, true); assert.notEqual(r.phase, 'allow');
+  localStorage.removeItem('masked.rgb.mainnet.v1'); localStorage.removeItem('masked.rgb.mainnet-beta');
+});
