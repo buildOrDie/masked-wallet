@@ -234,6 +234,8 @@ export class WalletRgb {
     }
     return extra;
   }
+  /** The note about a doubled payment was read (for this amount: a new doubling shows it again). */
+  doubledSeen(id, amount) { try { return localStorage.getItem(`${this.profile.vaultKey}.doubled-ok.${id}`) === String(amount); } catch { return false; } }
   /** The balance to show: what the engine reports, less anything counted twice. */
   bal(a) {
     const d = this.doubled(a.assetId), b = a.balance || {};
@@ -584,6 +586,10 @@ export class WalletRgb {
         return app.render();
       }
       case 'off': return this.run(async () => { await this.close(); this.tried = this.profile.id; app.toast('RGB is off until you reopen the wallet'); });
+      case 'doubledOk': {
+        try { localStorage.setItem(`${this.profile.vaultKey}.doubled-ok.${arg}`, String(this.doubled(arg))); } catch { /* shows again next time */ }
+        return app.render();
+      }
       case 'cloudOn': return this.run(async () => {
         try { localStorage.setItem(CLOUD_KEY, '1'); } catch { /* */ }
         this.cloud = { error: '', conflict: 0, saving: false, last: 0 };

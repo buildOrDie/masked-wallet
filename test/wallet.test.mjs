@@ -662,5 +662,10 @@ test('RGB: a payment an earlier beta counted twice is left out of the balance an
   const page = app.ui.views.rgbtok.render();
   assert.match(page, /counted one payment of 1,000 MUSD twice/);
   assert.match(page, /Available to send<\/span><b>100,000,000/);
+  await app.rgb.action('doubledOk', 'rgb:musd');
+  const after = app.ui.views.rgbtok.render();
+  assert.doesNotMatch(after, /counted one payment/, '"Got it" hides the note');
+  assert.match(after, /100,000,000/, 'the corrected balance stays');
+  localStorage.removeItem('masked.rgb.mainnet.v1.doubled-ok.rgb:musd');
   localStorage.removeItem('masked.rgb.mainnet-beta');
 });

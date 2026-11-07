@@ -108,7 +108,8 @@ export class RgbTokenView extends View {
         ${fut > s ? `<p class="pend-t small">+${r.amount(a, fut - s)} incoming · waiting for a block</p>` : ''}</div>
       <section class="card tok-box">
         <div class="d-row"><span>Available to send</span><b>${r.amount(a, sp)}</b></div>
-        ${doubled ? `<p class="info warn small">An earlier beta counted one payment of ${r.amount(a, doubled)} ${esc(a.ticker)} twice (two invoices shared an address). The extra isn't real, so it's left out here and can't be sent. New invoices each get their own address.</p>` : ''}
+        ${doubled && !r.doubledSeen(a.assetId, doubled) ? `<p class="info warn small">An earlier beta counted one payment of ${r.amount(a, doubled)} ${esc(a.ticker)} twice (two invoices shared an address). The extra isn't real, so it's left out here and can't be sent. New invoices each get their own address.</p>
+          <button class="btn ghost sm" data-rgb="doubledOk" data-rgb-arg="${esc(a.assetId)}">Got it</button>` : ''}
         ${s > sp ? (() => {
           const open = r.invoices().filter((x) => !x.witness && r.invoiceStatus(x).key === 'waiting').length;
           return `<p class="info warn small">${r.amount(a, s - sp)} ${esc(a.ticker)} ${open ? `are locked by ${open === 1 ? 'an open Private invoice' : `${open} open Private invoices`}: a Private invoice reserves the RGB output these tokens sit on until it's paid or expires.` : 'are locked by an open Private invoice or a transfer in progress. An open invoice can be cancelled; a transfer frees them once it confirms.'}</p>
