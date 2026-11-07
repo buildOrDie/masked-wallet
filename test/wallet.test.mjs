@@ -641,3 +641,26 @@ test('an invoice with its own transfer server: Allow asks Chrome once, then the 
   assert.equal(app.rgb.sent.txid, 'ab'.repeat(32));
   assert.match(rgbError('Invalid transport endpoints: no valid transport endpoints'), /transfer server named in this invoice/);
 });
+
+test('RGB: a payment an earlier beta counted twice is left out of the balance and explained', async () => {
+  const app = rgbApp('main');
+  localStorage.setItem('masked.rgb.mainnet-beta', '1');
+  rgbReady(app);
+  const MUSD = { assetId: 'rgb:musd', ticker: 'MUSD', name: 'Masked USD', precision: 0, issuedSupply: 100000000, balance: { settled: 100001000, future: 100001000, spendable: 100001000 } };
+  app.rgb.data.groups = { nia: [MUSD] };
+  app.rgb.data.transfers = { 'rgb:musd': [
+    { idx: 1, status: 'Settled', kind: 'Issuance', assignments: [{ Fungible: 100000000 }] },
+    { idx: 2, status: 'Settled', kind: 'Send', txid: 'out', assignments: [{ Fungible: 1000 }] },
+    { idx: 3, status: 'Settled', kind: 'ReceiveWitness', recipientId: 'bc:wvout:S', txid: 'back', assignments: [{ Fungible: 1000 }] },
+    { idx: 4, status: 'Settled', kind: 'ReceiveWitness', recipientId: 'bc:wvout:S', txid: 'back', assignments: [{ Fungible: 1000 }] },
+  ] };
+  assert.equal(app.rgb.doubled('rgb:musd'), 1000);
+  assert.equal(app.rgb.bal(MUSD).settled, 100000000);
+  assert.match(app.ui.views.home.render(), /100,000,000/);
+  assert.doesNotMatch(app.ui.views.home.render(), /100,001,000/);
+  app.rgb.asset = 'rgb:musd'; app.state.view = 'rgbtok';
+  const page = app.ui.views.rgbtok.render();
+  assert.match(page, /counted one payment of 1,000 MUSD twice/);
+  assert.match(page, /Available to send<\/span><b>100,000,000/);
+  localStorage.removeItem('masked.rgb.mainnet-beta');
+});

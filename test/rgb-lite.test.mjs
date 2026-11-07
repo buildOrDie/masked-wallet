@@ -147,3 +147,24 @@ test('witness invoices: made with no RGB output of ours; paying one adds 330 sat
   assert.equal(typeof map['rgb:A'][0].assignment.Fungible, 'number', 'and refuses a string for the token amount');
   assert.equal(map['rgb:A'][0].transportEndpoints[0], 'rpcs://proxy.iriswallet.com/0.2/json-rpc', 'falls back to our proxy');
 });
+
+test('each witness invoice gets a fresh receive address; one an earlier transfer used is cancelled, never shown', async () => {
+  const f = fakeLib();
+  let pinned = 0; const rotated = [], failed = [];
+  const W = f.lib.WasmWallet.prototype;
+  W.rotateAddress = function (k) { rotated.push(k); pinned++; return 'bc1p' + pinned; };
+  W.witnessReceive = function () { return { invoice: `rgb:~/~/~/bc:wvout:S${pinned}`, recipientId: `bc:wvout:S${pinned}`, batchTransferIdx: 10 + pinned, expirationTimestamp: 9 }; };
+  W.failTransfers = async function (o, idx) { failed.push(idx); return true; };
+  // S1 was already paid once (the old pinned address): the first try lands on it, the second is fresh
+  W.listTransfers = function () { return [{ idx: 1, status: 'Settled', kind: 'ReceiveWitness', recipientId: 'bc:wvout:S1', txid: 't1', assignments: [{ Fungible: 1000 }] }]; };
+  const w = new LiteWallet(f.lib, { ...RGB_PROFILES.public.sdk, mnemonic, password: 'x' });
+  await w.init(); await w.unlock();
+  const a = await w.onchainReceive({ witness: true });
+  assert.equal(a.recipientId, 'bc:wvout:S2');
+  assert.deepEqual(rotated, [0, 0], 'the receive keychain (0) rotates; the funding address (1) stays');
+  assert.deepEqual(failed, [11], 'the reused one is cancelled so it can never match a payment');
+  const b = await w.onchainReceive({ witness: true });
+  assert.notEqual(b.recipientId, a.recipientId);
+  await w.onchainReceive({ witness: false });
+  assert.equal(rotated.length, 3, 'blind invoices don\'t rotate');
+});

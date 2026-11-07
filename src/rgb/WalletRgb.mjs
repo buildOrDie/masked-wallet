@@ -221,6 +221,25 @@ export class WalletRgb {
   // ---- what the screens read ----
   assets() { return Object.values(this.data?.groups || {}).flat().filter((a) => a && typeof a === 'object' && a.assetId); }
   find(id) { return this.assets().find((a) => a.assetId === id) || null; }
+  /**
+   * Tokens an earlier beta counted twice: two of our witness invoices shared one address, so one payment settled
+   * both. Same recipient, same transaction: only the first is real. Base units, 0 when nothing is doubled.
+   */
+  doubled(id) {
+    const seen = new Set(); let extra = 0;
+    for (const t of (this.data?.transfers?.[id] || []).slice().sort((x, y) => (Number(x.idx ?? x.batchTransferIdx) || 0) - (Number(y.idx ?? y.batchTransferIdx) || 0))) {
+      if (t?.status !== 'Settled' || !/^Receive/.test(String(t?.kind ?? '')) || !t.recipientId || !t.txid) continue;
+      const k = `${t.recipientId}|${t.txid}`;
+      if (seen.has(k)) extra += Number(t.assignments?.[0]?.Fungible ?? t.amount ?? 0) || 0; else seen.add(k);
+    }
+    return extra;
+  }
+  /** The balance to show: what the engine reports, less anything counted twice. */
+  bal(a) {
+    const d = this.doubled(a.assetId), b = a.balance || {};
+    const cut = (n) => Math.max(0, Number(n || 0) - d);
+    return { settled: cut(b.settled), future: cut(b.future), spendable: cut(b.spendable), doubled: d };
+  }
   history(id) { return (this.data?.transfers?.[id] || []).slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)); }
   /** Test BTC the RGB wallet holds: { settled, pending } in sats. */
   btc() {
@@ -505,7 +524,7 @@ export class WalletRgb {
           // an invoice with a fixed amount fills it in
           const amount = d.amount || toBase(this.fields.sendAmt, a.precision);
           if (d.amount) this.fields.sendAmt = this.amount(a, d.amount).replace(/,/g, '');
-          if (amount > Number(a.balance?.spendable || 0)) throw new Error(`You can send up to ${this.amount(a, a.balance?.spendable)} ${a.ticker}.`);
+          if (amount > this.bal(a).spendable) throw new Error(`You can send up to ${this.amount(a, this.bal(a).spendable)} ${a.ticker}.`);
           const endpoints = d.transportEndpoints?.length ? d.transportEndpoints : [this.profile.sdk.transportEndpoint];
           const ask = newProxies(endpoints);
           this.pending = { assetId: a.assetId, ticker: a.ticker, invoice, amount, shown: this.amount(a, amount), witness: !!d.witness, fixed: !!d.amount, endpoints, proxies: endpoints.map(hostOf), ask, check: null };

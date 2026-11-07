@@ -85,7 +85,7 @@ export class RgbHome {
       <div class="list-h"><b>RGB tokens${r.isMain ? ' <span class="badge">beta</span>' : ''}</b><button class="link small" data-rgb="refresh" ${r.busy ? 'disabled' : ''}>${r.busy ? 'Updating…' : 'Refresh'}</button></div>
       ${backupDue}${fund}
       <div class="tok-list">${feeRow}${list.map((a) => {
-        const s = Number(a.balance?.settled || 0), fut = Number(a.balance?.future || 0);
+        const { settled: s, future: fut } = r.bal(a);
         return `<button class="tok-line" data-rgb="token" data-rgb-arg="${esc(a.assetId)}">${rgbIcon(a.ticker)}
         <span class="bal-txt"><b class="tk">${esc(a.ticker)}</b><span>RGB${fut > s ? ' · <span class="pend-t">incoming</span>' : ''}</span></span>
         <span class="bal-amt"><b>${r.amount(a, s)}</b><span>${esc(a.name)}</span></span><span class="chev">›</span></button>`;
@@ -99,7 +99,7 @@ export class RgbTokenView extends View {
   render() {
     const r = this.app.rgb, a = r.find(r.asset);
     if (!r.ready || !a) { this.state.view = 'home'; return this.app.ui.view('home').render(); }
-    const s = Number(a.balance?.settled || 0), fut = Number(a.balance?.future || 0), sp = Number(a.balance?.spendable || 0);
+    const { settled: s, future: fut, spendable: sp, doubled } = r.bal(a);
     const tab = this.f.rgbTab || 'history';
     return `
     <div class="tok-page">
@@ -108,6 +108,7 @@ export class RgbTokenView extends View {
         ${fut > s ? `<p class="pend-t small">+${r.amount(a, fut - s)} incoming · waiting for a block</p>` : ''}</div>
       <section class="card tok-box">
         <div class="d-row"><span>Available to send</span><b>${r.amount(a, sp)}</b></div>
+        ${doubled ? `<p class="info warn small">An earlier beta counted one payment of ${r.amount(a, doubled)} ${esc(a.ticker)} twice (two invoices shared an address). The extra isn't real, so it's left out here and can't be sent. New invoices each get their own address.</p>` : ''}
         ${s > sp ? (() => {
           const open = r.invoices().filter((x) => !x.witness && r.invoiceStatus(x).key === 'waiting').length;
           return `<p class="info warn small">${r.amount(a, s - sp)} ${esc(a.ticker)} ${open ? `are locked by ${open === 1 ? 'an open Private invoice' : `${open} open Private invoices`}: a Private invoice reserves the RGB output these tokens sit on until it's paid or expires.` : 'are locked by an open Private invoice or a transfer in progress. An open invoice can be cancelled; a transfer frees them once it confirms.'}</p>
@@ -186,7 +187,7 @@ export class RgbSendView extends View {
         <button class="btn primary wide" data-rgb="confirm" ${r.busy || !p.check?.ok ? 'disabled' : ''}>${r.busy ? 'Working…' : 'Confirm & send'}</button>
       </section>`;
     }
-    const sp = Number(a.balance?.spendable || 0);
+    const sp = r.bal(a).spendable;
     return `${head(`Send ${esc(a.ticker)}`)}
     ${this.netBanner()}
     <section class="card form">

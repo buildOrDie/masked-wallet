@@ -125,11 +125,32 @@ export class LiteWallet {
    * needs a free RGB output. Witness: the sender creates the output (and pays its sats), so it works with no BTC.
    * @param {{ assetId?: string|null, amount?: number, durationSeconds?: number|null, witness?: boolean }} [o]
    */
+  /** Every recipient ID this wallet has ever had a transfer for (all assets, and receives not tied to one). */
+  usedRecipients() {
+    const r = plain(this.wallet.listAssets([]) || {});
+    const ids = [null, ...[...(r.nia || []), ...(r.ifa || [])].map((a) => a?.assetId).filter(Boolean)];
+    const out = new Set();
+    for (const id of ids) for (const t of plain(this.wallet.listTransfers(id)) || []) if (t?.recipientId) out.add(String(t.recipientId));
+    return out;
+  }
   async onchainReceive({ assetId = null, amount = 0, durationSeconds = null, witness = false } = {}) {
     const assignment = amount ? { Fungible: amount } : 'Any';
     const make = witness ? 'witnessReceive' : 'blindReceive';
-    const r = plain(this.wallet[make](assetId || null, assignment, durationSeconds, [this.transport], 1));
+    // The wallet keeps one pinned address (reuseAddresses), and a witness invoice pays to the pinned *receive*
+    // address. Two invoices on one address both match one payment and count it twice, so each witness invoice gets
+    // a fresh receive address, and one already used by any earlier transfer is never handed out.
+    const used = witness ? this.usedRecipients() : null;
+    let r = null;
+    for (let i = 0; i < 4; i++) {
+      if (witness && typeof this.wallet.rotateAddress === 'function') this.wallet.rotateAddress(0); // 0 = receive keychain; the funding address (1) stays
+      r = plain(this.wallet[make](assetId || null, assignment, durationSeconds, [this.transport], 1));
+      if (!witness || !used.has(String(r?.recipientId ?? ''))) break;
+      // a reused one is cancelled at once, so it can never match a payment
+      try { await this.wallet.failTransfers(this.requireOnline(), r.batchTransferIdx, false, true); } catch { /* offline: it stays open, but it is never shown */ }
+      r = null;
+    }
     await this.save();
+    if (!r) throw new Error('Could not make a fresh RGB invoice. Try again.');
     return { invoice: String(r?.invoice ?? ''), recipientId: String(r?.recipientId ?? ''), expirationTimestamp: r?.expirationTimestamp ?? null };
   }
 
