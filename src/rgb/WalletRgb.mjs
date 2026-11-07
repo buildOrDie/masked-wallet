@@ -283,7 +283,6 @@ export class WalletRgb {
     // mainnet beta: asked inside MASKED (the Home card opens a short explanation with a tick box)
     if (name === 'beta') { if (this.offerable) { this.betaAsk = true; this.betaOk = false; } return app.render(); }
     if (name === 'betaNo') { this.betaAsk = false; return app.render(); }
-    if (name === 'betaTick') { this.betaOk = !this.betaOk; return app.render(); }
     if (name === 'betaYes') {
       if (!this.offerable || !this.betaOk) return app.render();
       try { localStorage.setItem(RGB_BETA_KEY, '1'); } catch { /* stays off */ }

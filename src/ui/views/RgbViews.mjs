@@ -41,7 +41,7 @@ export class RgbHome {
           <li>RGB has keys of its own: its coins never mix with your Public or Shielded BTC.</li>
           <li>It's a beta: keep amounts small.</li>
         </ul>
-        <label class="risk"><input type="checkbox" data-rgb="betaTick" ${r.betaOk ? 'checked' : ''}><span>I understand I must keep my RGB backup safe.</span></label>
+        <label class="risk"><input type="checkbox" data-rgbbeta ${r.betaOk ? 'checked' : ''}><span>I understand I must keep my RGB backup safe.</span></label>
         <button class="btn primary wide" data-rgb="betaYes" ${r.betaOk && !r.busy ? '' : 'disabled'}>Turn on RGB beta</button>
         <button class="btn ghost wide" data-rgb="betaNo">Not now</button>
       </section>`;
