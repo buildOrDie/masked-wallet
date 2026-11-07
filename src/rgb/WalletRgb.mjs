@@ -170,7 +170,8 @@ export class WalletRgb {
   get betaOn() { try { return localStorage.getItem(RGB_BETA_KEY) === '1'; } catch { return false; } }
   get isMain() { return this.profile.id === 'mainnet'; }
   /** sat/vB for RGB's own transactions: the wallet's fee choice on mainnet, 2 on the test networks. */
-  fee() { return this.isMain ? String(Math.min(100, Math.max(1, Math.ceil(this.app.feeRate())))) : RGB_FEE; }
+  /** The fee picked on the send screen (Slow / Avg / Fast / Custom). RGB takes whole sat/vB, so it rounds up. */
+  fee() { return this.isMain ? String(Math.min(500, Math.max(1, Math.ceil(this.app.feeRate())))) : RGB_FEE; }
   /** The RGB network in use: mainnet on mainnet; on Signet, Public Signet unless Utexo Signet was picked. */
   get profile() {
     if (this.app.state.net === 'main') return RGB_MAINNET;
@@ -628,6 +629,8 @@ export class WalletRgb {
         if (!a) { this.message = 'Pick a token first.'; return app.render(); }
         if (!/^rgb:/i.test(invoice)) { this.message = 'Paste the RGB invoice from the person you are paying. It starts with rgb:'; return app.render(); }
         return this.run(async () => {
+          // fresh fee rates for the picker on the review (at most a few seconds; the last rates otherwise)
+          if (this.isMain) await Promise.race([app.fees.refresh().catch(() => {}), new Promise((r) => setTimeout(r, 4000))]);
           let d;
           try { d = await this.service.decode(invoice); } catch { throw new Error('That is not a valid RGB invoice. Ask them to make a new one.'); }
           if (d.assetId && d.assetId !== a.assetId) throw new Error(`This invoice asks for a different token, not ${a.ticker}.`);

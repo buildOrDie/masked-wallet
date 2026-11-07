@@ -41,7 +41,7 @@ export class View {
   }
 
   /** Slow / Avg / Fast / Custom, plus the RBF switch. */
-  feeChips() {
+  feeChips({ rbf = true } = {}) {
     const f = this.app.fees.rates, k0 = this.f.fee;
     const custom = FeeOracle.custom(this.f.feeCustom);
     const card = (k, name, time, cls = '') => `<button class="fee ${cls} ${k0 === k ? 'on' : ''}" data-set="fee" data-val="${k}"><b>${name}</b><span class="r"><em>${fmtRate(f[k])}</em> sat/vB</span><span class="t">${time}</span></button>`;
@@ -55,8 +55,8 @@ export class View {
     </div>
     ${k0 === 'custom' ? `<div class="amount fee-in"><input id="feeCustom" data-bind="feeCustom" type="number" inputmode="decimal" min="${FEE_MIN}" max="${FEE_MAX}" step="0.01" placeholder="e.g. ${fmtRate(f.slow)}" value="${esc(v)}" autocomplete="off"><span class="unit">sat/vB</span></div>
       <p class="fee-note ${bad ? 'bad' : high ? 'warn' : ''}" id="feeNote">${bad ? `Enter ${FEE_MIN} to ${FEE_MAX} sat/vB. Using Avg (${fmtRate(f.normal)}) until then.` : high ? 'That is much higher than needed right now.' : `Lowest ${FEE_MIN} sat/vB. Below 1 is cheapest but can wait longer if blocks fill up.`}</p>` : ''}
-    <div class="rbf-row"><span>RBF <button class="q" data-rbfinfo aria-label="What is RBF?">?</button></span><label class="sw-tgl"><input type="checkbox" data-rbf ${TxPolicy.rbf ? 'checked' : ''}><span></span></label></div>
-    ${this.f.rbfInfo ? '<p class="fee-note">Replace-by-fee: if the transaction gets stuck, it can be replaced with a higher fee. Some sellers ask for RBF off; most people leave it on.</p>' : ''}`;
+    ${rbf ? `<div class="rbf-row"><span>RBF <button class="q" data-rbfinfo aria-label="What is RBF?">?</button></span><label class="sw-tgl"><input type="checkbox" data-rbf ${TxPolicy.rbf ? 'checked' : ''}><span></span></label></div>
+    ${this.f.rbfInfo ? '<p class="fee-note">Replace-by-fee: if the transaction gets stuck, it can be replaced with a higher fee. Some sellers ask for RBF off; most people leave it on.</p>' : ''}` : ''}`;
   }
 
   /** The screen after a broadcast. */

@@ -928,3 +928,38 @@ test('RGB: a double count on a coin a pending send locks is taken off the total 
   assert.equal(app.rgb.bal(MUSD).spendable, 100000000);
   localStorage.removeItem('masked.rgb.mainnet-beta');
 });
+
+test('RGB mainnet send: the review shows a fee picker with fresh rates, and the send uses the rate picked', async () => {
+  const app = rgbApp('main');
+  localStorage.setItem('masked.rgb.mainnet-beta', '1');
+  rgbReady(app);
+  const MUSD = { assetId: 'rgb:musd', ticker: 'MUSD', name: 'Masked USD', precision: 0, issuedSupply: 100, balance: { settled: 100, future: 100, spendable: 100 } };
+  app.rgb.data.groups = { nia: [MUSD] };
+  app.rgb.data.transfers = { 'rgb:musd': [] };
+  Object.defineProperty(app.rgb.service, 'everBackedUp', { get: () => true });
+  app.rgb.cloudApi = { put: async () => {}, latest: async () => null, remove: async () => {} };
+  app.fees.rates = { slow: 1, normal: 2, fast: 3 }; // stale
+  app.fees.refresh = async () => { app.fees.rates = { slow: 4, normal: 9, fast: 15 }; };
+  app.rgb.service.decode = async () => ({ network: 'bitcoin', assetId: 'rgb:musd', transportEndpoints: ['rpcs://proxy.iriswallet.com/0.2/json-rpc'] });
+  app.platform.hasOrigins = async () => true;
+  app.rgb.service.checkProxy = async () => true;
+  app.rgb.asset = 'rgb:musd'; app.state.view = 'rgbsend';
+  app.rgb.fields.sendTo = 'rgb:example'; app.rgb.fields.sendAmt = '5';
+  app.state.f.fee = 'normal';
+  await app.rgb.action('review');
+  const page = app.ui.views.rgbsend.render();
+  assert.match(page, /data-set="fee" data-val="fast"/);
+  assert.doesNotMatch(page, /data-rbf/, 'RBF is not offered for RGB');
+  assert.match(page, /<b>9 sat\/vB<\/b>/, 'fresh rates, not the stale ones');
+  app.state.f.fee = 'fast';
+  assert.match(app.ui.views.rgbsend.render(), /<b>15 sat\/vB<\/b>/);
+  let used = null;
+  app.rgb.service.send = async (o) => { used = o.fee; return { txid: 't' }; };
+  app.rgb.refresh = async () => {};
+  await app.rgb.action('confirm');
+  assert.equal(used, '15');
+  app.state.f.fee = 'custom'; app.state.f.feeCustom = '0.5';
+  assert.equal(app.rgb.fee(), '1', 'below 1 rounds up: RGB takes whole sat/vB');
+  app.state.f.fee = 'normal'; app.state.f.feeCustom = '';
+  localStorage.removeItem('masked.rgb.mainnet-beta');
+});

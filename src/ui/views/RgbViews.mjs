@@ -202,8 +202,10 @@ export class RgbSendView extends View {
           ${rowKV('Privacy', '<span class="good">Private — the amount and token are not on the blockchain</span>')}
           ${p.fixed ? rowKV('Amount', 'set by the invoice') : ''}
           ${rowKV('Transfer server', `${esc(p.proxies.join(', '))} ${p.ask.length ? '<span class="muted">· not allowed yet</span>' : p.check?.ok ? '<span class="good">· reachable</span>' : p.check ? '<span class="meh">· not usable</span>' : '<span class="muted">· checking…</span>'}`)}
-          ${rowKV('Network fee', `${p.witness ? `a few hundred ${r.isMain ? '' : 'test '}sats + 330 sats for their new output` : `a few hundred ${r.isMain ? '' : 'test '}sats`}${r.isMain ? ` · ${esc(r.fee())} sat/vB` : ''}`)}
+          ${rowKV('Network fee', `${p.witness ? `a few hundred ${r.isMain ? '' : 'test '}sats + 330 sats for their new output` : `a few hundred ${r.isMain ? '' : 'test '}sats`}${r.isMain ? ` · <b>${esc(r.fee())} sat/vB</b>` : ''}`)}
         </div>
+        ${r.isMain ? `<p class="lbl">Fee rate</p>${this.feeChips({ rbf: false })}
+          <p class="fee-note">RGB uses whole sat/vB, so a rate below 1 is sent as 1. The transaction goes out once the other wallet accepts; a low rate can then wait a long time for a block.</p>` : ''}
         ${p.ask.length ? `<p class="info">This invoice uses a transfer server that needs permission (${esc(p.ask.map((u) => new URL(u).host).join(', '))}). The token's proof is dropped off there for the recipient.${this.app.platform.isPopup ? ' Chrome asks once; MASKED reopens here when you allow it.' : ''}</p>
           <button class="btn primary wide" data-rgb="allowProxy" ${r.busy ? 'disabled' : ''}>${p.ask.length === 1 ? `Allow ${esc(new URL(p.ask[0]).host)}` : 'Allow transfer servers'}</button>` : ''}
         ${p.check && !p.check.ok ? `<p class="info warn">MASKED can't use this invoice's transfer server: ${esc(p.check.detail)}</p><button class="btn ghost wide" data-rgb="recheck" ${r.busy ? 'disabled' : ''}>Check again</button>` : ''}

@@ -45,7 +45,7 @@ test('Utexo Signet configuration: no Lightning, no cloud backup settings', () =>
 test('exact base units reject fractions, scientific notation, zero and unsafe integers', () => {
   assert.equal(baseUnits('1000000'), 1000000);
   for (const v of ['0', '-1', '1.1', '1e6', '9007199254740993']) assert.throws(() => baseUnits(v));
-  assert.equal(testFee('2'), 2); for (const v of ['0', '101', 'Infinity']) assert.throws(() => testFee(v));
+  assert.equal(testFee('2'), 2); for (const v of ['0', '501', 'Infinity']) assert.throws(() => testFee(v));
 });
 test('encrypted vault does not contain plaintext keys and wrong password fails', async () => {
   const envelope = await encryptRgb({ mnemonic }, password);

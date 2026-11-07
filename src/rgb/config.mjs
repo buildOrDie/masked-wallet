@@ -71,7 +71,7 @@ export function baseUnits(text) {
 }
 export function testFee(text) {
   const value = Number(text);
-  if (!Number.isFinite(value) || value < 1 || value > 100) throw new Error('Use a fee rate between 1 and 100 sat/vB.');
+  if (!Number.isFinite(value) || value < 1 || value > 500) throw new Error('Use a fee rate between 1 and 500 sat/vB.');
   return value;
 }
 /** A new test asset: ticker, name, decimals and whole-unit supply, checked before the SDK sees them. */
