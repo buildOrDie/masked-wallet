@@ -113,26 +113,23 @@ test('RGB permission window: placed inside the browser window, fitted to it, Chr
   for (const b of [null, { state: 'minimized', left: -32000, top: -32000, width: 160, height: 28 }, { left: 0, top: 0 }]) assert.deepEqual(rgbWindowBounds(b), { width: 380, height: 660 });
 });
 
-test('RGB permission window: a tab in full screen, and no position when Chrome refuses it', async () => {
-  const { Platform } = await import('../src/app/Platform.mjs');
-  const prev = { chrome: globalThis.chrome, window: globalThis.window };
-  const made = [];
-  globalThis.window = { close: () => made.push('closed') };
-  const chromeWith = (win, refuse) => ({
-    runtime: { getURL: (p) => `chrome-extension://masked/${p}` },
-    storage: { session: { set: async () => {}, remove: async () => {} } },
-    windows: { getCurrent: async () => win, create: async (o) => { if (refuse && 'left' in o) throw new Error('Bounds must be at least 50% within visible screen space.'); made.push(['window', o]); } },
-    tabs: { create: async (o) => made.push(['tab', o]) },
-  });
+test('RGB permission from the popup: the step is saved before Chrome asks, and cleared if the popup stays open', async () => {
+  const { Platform, RGB_PENDING } = await import('../src/app/Platform.mjs');
+  const prev = globalThis.chrome;
+  const store = {}; const order = [];
+  globalThis.chrome = {
+    runtime: { id: 'x' },
+    storage: { local: {}, session: { set: async (o) => { order.push('save'); Object.assign(store, o); }, get: async (k) => ({ [k]: store[k] }), remove: async (k) => { delete store[k]; } } },
+    permissions: { request: async () => { order.push('ask'); return true; }, contains: async () => false },
+  };
   try {
     const p = Object.create(Platform.prototype);
-    globalThis.chrome = chromeWith({ id: 7, state: 'fullscreen', left: 0, top: 0, width: 1512, height: 982 });
-    await p.openRgbPermissionWindow({});
-    assert.equal(made[0][0], 'tab'); assert.equal(made[0][1].windowId, 7, 'stays in the full-screen window');
-    made.length = 0;
-    globalThis.chrome = chromeWith({ id: 8, state: 'normal', left: 3000, top: 0, width: 1500, height: 900 }, true);
-    await p.openRgbPermissionWindow({});
-    assert.equal(made[0][0], 'window'); assert.equal('left' in made[0][1], false, 'Chrome places it');
-    assert.equal(made.at(-1), 'closed');
-  } finally { globalThis.chrome = prev.chrome; globalThis.window = prev.window; }
+    Object.defineProperty(p, 'hasSession', { value: true });
+    await p.requestFromPopup(['https://rgb.example.com/json-rpc'], { name: 'allowProxy' });
+    assert.deepEqual(order, ['save', 'ask'], 'saved first, asked on the same click');
+    assert.equal(store[RGB_PENDING], undefined, 'still open: nothing for the background to reopen');
+    globalThis.chrome.permissions.request = async () => false;
+    await assert.rejects(p.requestFromPopup(['https://rgb.example.com/json-rpc'], { name: 'allowProxy' }), /needs permission/);
+    assert.equal(Object.keys(store).length, 0, 'declined: nothing left behind');
+  } finally { globalThis.chrome = prev; }
 });

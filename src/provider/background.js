@@ -4,6 +4,7 @@
 // where the user approves or rejects and the wallet page does the signing.
 import * as btc from '@scure/btc-signer';
 import { bech32m, hex } from '@scure/base';
+import { RGB_PENDING, rgbWindowBounds } from '../app/Platform.mjs';
 
 const NETS = {
   main: { ord: 'https://ordinals.com', api: 'https://mempool.space/api/', unisat: 'livenet', chain: 'BITCOIN_MAINNET', name: 'Bitcoin Mainnet' },
@@ -65,6 +66,34 @@ function rejectPending(id, message = 'User rejected the request.') {
   const p = pending.get(id); if (!p) return;
   pending.delete(id); p.reject(err(4001, message)); resetPopup();
 }
+// RGB servers allowed from the toolbar popup: Chrome's prompt closed the popup, so reopen MASKED at the same step.
+// One approval in all: the reopened page already has the permission and carries on.
+chrome.permissions.onAdded.addListener(async () => {
+  await new Promise((r) => setTimeout(r, 400)); // a popup that stayed open clears the pending step itself
+  let id = null;
+  try { id = (await chrome.storage.session.get(RGB_PENDING))[RGB_PENDING]; } catch { return; }
+  if (!id) return;
+  await chrome.storage.session.remove(RGB_PENDING).catch(() => {});
+  const page = `masked.html?popup=1&rgbResume=${encodeURIComponent(id)}`;
+  if (chrome.action?.openPopup && ![...pending.values()].some((p) => p.mode === 'popup')) {
+    try {
+      await chrome.action.setPopup({ popup: page });
+      await Promise.race([chrome.action.openPopup(), new Promise((_, no) => setTimeout(() => no(new Error('popup timeout')), 1500))]);
+      for (let i = 0; i < 10; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+        const ctx = chrome.runtime.getContexts ? await chrome.runtime.getContexts({ contextTypes: ['POPUP'] }) : [{ documentUrl: page }];
+        if (ctx.some((c) => String(c.documentUrl || '').includes(id))) return void resetPopup();
+      }
+    } catch { /* no focused browser window: a small window instead */ }
+    await resetPopup();
+  }
+  const url = chrome.runtime.getURL(page);
+  const browser = await chrome.windows.getLastFocused({ windowTypes: ['normal'] }).catch(() => null);
+  const bounds = rgbWindowBounds(browser);
+  await chrome.windows.create({ url, type: 'popup', focused: true, ...bounds })
+    .catch(() => chrome.windows.create({ url, type: 'popup', focused: true, width: bounds.width, height: bounds.height }))
+    .catch(() => {});
+});
 chrome.windows.onRemoved.addListener((windowId) => {
   for (const [id, p] of pending) if (p.windowId === windowId) rejectPending(id);
 });

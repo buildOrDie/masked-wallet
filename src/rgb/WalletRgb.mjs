@@ -428,39 +428,41 @@ export class WalletRgb {
     return missing.filter(Boolean);
   }
 
-  async permissionWindow(name) {
+  /** Where the person is, so MASKED can reopen at the same step after Chrome's prompt closes the popup. */
+  permissionDraft(name, arg = '') {
     const { app } = this;
-    await app.platform.openRgbPermissionWindow({
-      name, view: app.state.view, account: app.account.id, profile: this.profile.id,
-      recvKind: app.state.f.recvKind, mintMode: app.state.f.mintMode,
-      asset: this.asset, fields: this.fields,
-    });
+    return { name, arg, view: app.state.view, account: app.account.id, profile: this.profile.id, recvKind: app.state.f.recvKind, mintMode: app.state.f.mintMode, asset: this.asset, fields: this.fields, betaOk: this.betaOk };
+  }
+  /** Ask for servers: in the toolbar popup with a saved draft (one approval), elsewhere straight away. */
+  async allowHosts(hosts, name, arg = '') {
+    const { platform } = this.app;
+    if (await platform.hasOrigins(hosts)) return;
+    return platform.isPopup ? platform.requestFromPopup(hosts, this.permissionDraft(name, arg)) : platform.requestOrigins(hosts);
   }
 
+  /** Reopened after Chrome allowed the servers: go back to the same step and carry on, without asking again. */
   async resumePermission(draft) {
     const { app } = this;
     if (!draft || !this.unlocked || draft.account !== app.account.id || draft.profile !== this.profile.id) {
       this.ensure();
       return;
     }
-    if (draft.name === 'allowProxy') {
-      this.tried = this.profile.id;
-      await this.run(async () => this.open(await this.walletKey()));
-      if (!this.ready) return;
-      this.asset = draft.asset;
-      this.fields = { ...EMPTY_FIELDS(), ...draft.fields };
-      app.state.view = 'rgbsend';
-      return this.action('review');
-    }
     app.state.view = draft.view;
     app.state.f.recvKind = draft.recvKind;
     app.state.f.mintMode = draft.mintMode;
     this.fields = { ...EMPTY_FIELDS(), ...draft.fields };
-    if (draft.name === 'betaYes') this.betaAsk = this.betaOk = true;
-    if (draft.name === 'retry') this.phase = 'allow';
-    this.ensure();
-    app.render();
-    app.platform.revealRgbPermissionAction(draft.name);
+    if (draft.name === 'allowProxy') {
+      this.tried = this.profile.id;
+      await this.run(async () => this.open(await this.walletKey()));
+      if (!this.ready) return app.render();
+      this.asset = draft.asset;
+      this.fields = { ...EMPTY_FIELDS(), ...draft.fields };
+      app.state.view = 'rgbsend';
+      return this.action('review'); // the server is allowed now: the review checks it and shows Confirm
+    }
+    if (draft.name === 'betaYes') { this.betaAsk = true; this.betaOk = !!draft.betaOk; }
+    this.tried = '';
+    return this.action(draft.name, draft.arg || '');
   }
 
   // ---- actions (data-rgb="…") ----
@@ -470,17 +472,8 @@ export class WalletRgb {
     // The RGB servers aren't in the install permissions: people who never use RGB are never asked.
     const opening = { betaYes: RGB_MAINNET, on: this.profile, retry: this.profile, profile: profileOf(arg) }[name];
     if (opening && (name !== 'betaYes' || this.betaOk)) {
-      const hosts = this.hostsFor(opening);
       try {
-        if (app.platform.isPopup) {
-          if (this.busy) return;
-          this.busy = true;
-          try {
-            if (!await app.platform.hasOrigins(hosts)) return await this.permissionWindow(name);
-          } finally { this.busy = false; }
-        } else {
-          await app.platform.requestOrigins(hosts);
-        }
+        await this.allowHosts(this.hostsFor(opening), name, arg);
       } catch {
         this.phase = this.exists ? 'allow' : ''; this.message = 'RGB needs permission to reach its servers. Tap again and choose Allow.';
         return app.render();
@@ -628,8 +621,7 @@ export class WalletRgb {
         const p = this.pending;
         if (!p?.ask.length || !this.ready) return;
         return this.run(async () => {
-          if (app.platform.isPopup) return this.permissionWindow(name);
-          await app.platform.requestOrigins(p.ask); // first: still the click, so Chrome can show its prompt
+          await this.allowHosts(p.ask, name); // first: still the click, so Chrome can show its prompt
           await this.checkProxies();
         });
       }

@@ -654,7 +654,7 @@ test('an invoice with its own transfer server: Allow asks Chrome once, then the 
   assert.match(rgbError('Invalid transport endpoints: no valid transport endpoints'), /transfer server named in this invoice/);
 });
 
-test('RGB proxy permission resumes the same send review in a compact popup window', async () => {
+test('RGB transfer server from the toolbar popup: one Chrome approval, then MASKED reopens at the same review', async () => {
   const popup = rgbApp();
   rgbReady(popup);
   popup.state.view = 'rgbsend';
@@ -662,73 +662,62 @@ test('RGB proxy permission resumes the same send review in a compact popup windo
   popup.rgb.fields.sendTo = 'rgb:example';
   popup.rgb.fields.sendAmt = '2';
   popup.rgb.service.decode = async () => ({ network: 'signet', transportEndpoints: ['rpcs://rgb.example.com/json-rpc'] });
-  let draft;
   popup.platform.isPopup = true;
-  popup.platform.hasOrigins = async () => false;
-  const previousChrome = globalThis.chrome;
-  const previousWindow = globalThis.window;
-  let windowOptions;
-  let closed = false;
-  globalThis.window = { close: () => { assert.ok(windowOptions); closed = true; } };
-  globalThis.chrome = {
-    runtime: { getURL: (path) => `chrome-extension://masked/${path}` },
-    storage: { session: { set: async (entry) => { [draft] = Object.values(entry); } } },
-    windows: {
-      getCurrent: async () => ({ left: 100, top: 20, width: 1500, height: 900, state: 'normal' }),
-      create: async (options) => { windowOptions = options; },
-    },
-  };
-  popup.platform.requestOrigins = async () => assert.fail('the popup must not request permission');
-  try {
-    await popup.rgb.action('review');
-    await popup.rgb.action('allowProxy');
-  } finally {
-    if (previousChrome === undefined) delete globalThis.chrome;
-    else globalThis.chrome = previousChrome;
-    if (previousWindow === undefined) delete globalThis.window;
-    else globalThis.window = previousWindow;
-  }
-  assert.equal(closed, true, 'the toolbar popup closes after the replacement is open');
-  assert.deepEqual({ ...windowOptions, url: undefined }, { url: undefined, type: 'popup', width: 380, height: 660, left: 1208, top: 92, focused: true });
-  assert.match(windowOptions.url, /^chrome-extension:\/\/masked\/masked\.html\?rgbResume=/);
+  let allowed = false, draft = null, asked = [];
+  popup.platform.hasOrigins = async () => allowed;
+  // Chrome's prompt closes the popup: the request never returns to this page
+  popup.platform.requestFromPopup = async (urls, d) => { asked = urls; draft = structuredClone(d); return new Promise(() => {}); };
+  popup.platform.requestOrigins = async () => assert.fail('the popup asks through requestFromPopup');
+  await popup.rgb.action('review');
+  assert.match(popup.ui.views.rgbsend.render(), /data-rgb="allowProxy"[^>]*>Allow rgb\.example\.com/);
+  void popup.rgb.action('allowProxy');
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(asked, ['https://rgb.example.com/json-rpc']);
+  assert.equal(draft.name, 'allowProxy');
   assert.equal(draft.fields.sendTo, 'rgb:example');
-  assert.equal(draft.fields.sendAmt, '2');
 
-  const tab = rgbApp();
-  tab.rgb.open = async () => { rgbReady(tab); tab.rgb.service.decode = popup.rgb.service.decode; };
-  let allowed = false;
-  tab.platform.hasOrigins = async () => allowed;
-  tab.platform.requestOrigins = async () => { throw new Error('Permission declined'); };
-  await tab.rgb.resumePermission(draft);
-  assert.equal(tab.state.view, 'rgbsend');
-  assert.equal(tab.rgb.pending.shown, '2');
-  await tab.rgb.action('allowProxy');
-  assert.equal(tab.state.view, 'rgbsend');
-  assert.equal(tab.rgb.pending.ask.length, 1);
-  tab.platform.requestOrigins = async () => { allowed = true; };
-  await tab.rgb.action('allowProxy');
-  assert.equal(tab.state.view, 'rgbsend');
-  assert.equal(tab.rgb.pending.invoice, 'rgb:example');
-  assert.equal(tab.rgb.pending.check.ok, true);
-  assert.equal(tab.rgb.sent, null);
+  // the person allowed it; the background reopens the popup with the saved step
+  allowed = true;
+  const again = rgbApp();
+  again.platform.isPopup = true;
+  again.rgb.open = async () => { rgbReady(again); again.rgb.service.decode = popup.rgb.service.decode; };
+  again.platform.hasOrigins = async () => allowed;
+  again.platform.requestFromPopup = async () => assert.fail('no second approval');
+  again.platform.requestOrigins = async () => assert.fail('no second approval');
+  await again.rgb.resumePermission(draft);
+  assert.equal(again.state.view, 'rgbsend');
+  assert.equal(again.rgb.pending.invoice, 'rgb:example');
+  assert.equal(again.rgb.pending.shown, '2');
+  assert.equal(again.rgb.pending.ask.length, 0);
+  assert.equal(again.rgb.pending.check.ok, true, 'ready for Confirm & send');
+  assert.equal(again.rgb.sent, null, 'nothing is sent without Confirm');
 });
 
-test('RGB beta setup restores the checked consent screen and reveals its button', async () => {
+test('RGB beta from the toolbar popup: one approval, then it turns on by itself', async () => {
   const popup = rgbApp('main');
-  let draft;
   popup.platform.isPopup = true;
-  popup.platform.hasOrigins = async () => false;
-  popup.platform.openRgbPermissionWindow = async (data) => { draft = structuredClone(data); };
+  let allowed = false, draft = null;
+  popup.platform.hasOrigins = async () => allowed;
+  popup.platform.requestFromPopup = async (urls, d) => { draft = structuredClone(d); return new Promise(() => {}); };
   popup.rgb.betaAsk = popup.rgb.betaOk = true;
-  await popup.rgb.action('betaYes');
-  const replacement = rgbApp('main');
-  let revealed;
-  replacement.platform.revealRgbPermissionAction = (name) => { revealed = name; };
-  await replacement.rgb.resumePermission(draft);
-  assert.equal(replacement.rgb.betaAsk, true);
-  assert.equal(replacement.rgb.betaOk, true);
-  assert.equal(revealed, 'betaYes');
-  assert.match(replacement.ui.views.home.render(), /data-rgbbeta checked[\s\S]*Turn on RGB beta/);
+  localStorage.removeItem('masked.rgb.mainnet-beta');
+  void popup.rgb.action('betaYes');
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(draft.name, 'betaYes');
+  assert.equal(draft.betaOk, true);
+  assert.equal(localStorage.getItem('masked.rgb.mainnet-beta'), null, 'nothing changes until Chrome allows it');
+  allowed = true;
+  const again = rgbApp('main');
+  again.platform.isPopup = true;
+  again.platform.hasOrigins = async () => true;
+  again.platform.requestFromPopup = async () => assert.fail('no second approval');
+  let turnedOn = false;
+  again.rgb.cloudApi = { latest: async () => null, put: async () => {}, remove: async () => {} };
+  again.rgb.open = async () => { turnedOn = true; rgbReady(again); };
+  await again.rgb.resumePermission(draft);
+  assert.equal(localStorage.getItem('masked.rgb.mainnet-beta'), '1');
+  assert.equal(turnedOn, true);
+  localStorage.removeItem('masked.rgb.mainnet-beta');
 });
 
 test('RGB: a payment an earlier beta counted twice is left out of the balance and explained', async () => {

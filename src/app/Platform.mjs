@@ -6,6 +6,9 @@
  * taller than it. Without usable bounds (minimised, unknown) only the size is given and Chrome places it.
  * @param {{ left?: number, top?: number, width?: number, height?: number, state?: string } | null} b
  */
+/** The resume the background should reopen MASKED at once Chrome allows the servers. */
+export const RGB_PENDING = 'masked.rgb.permission.pending';
+
 export function rgbWindowBounds(b, width = 380, height = 660) {
   const ok = (n) => Number.isFinite(n);
   if (!b || b.state === 'minimized' || ![b.left, b.top, b.width, b.height].every(ok) || b.width < 200 || b.height < 300) return { width, height };
@@ -53,30 +56,19 @@ export class Platform {
   async sessionRemove(key) { if (!this.hasSession) return; try { await chrome.storage.session.remove(key); } catch {} }
 
   /**
-   * Chrome's permission prompt closes the toolbar popup, so the RGB review continues in a small wallet window
-   * by the toolbar. In full screen (a new window would open on another macOS desktop) it opens as a tab instead,
-   * and if Chrome refuses the position (a window mostly off screen, a second display) Chrome places it itself.
+   * Ask Chrome for RGB servers from the toolbar popup, in one step. Where the person was is saved first, then
+   * Chrome asks. Its prompt usually closes the popup: once the servers are allowed, the background reopens
+   * MASKED at the same step (masked.html?rgbResume=…). If the popup stays open, it simply carries on.
+   * Throws if the person says no.
    */
-  async openRgbPermissionWindow(draft) {
+  async requestFromPopup(urls, draft) {
     const id = crypto.randomUUID(), key = `masked.rgb.permission.${id}`;
-    await chrome.storage.session.set({ [key]: { ...draft, expires: Date.now() + 5 * 60000 } });
-    const url = chrome.runtime.getURL(`masked.html?rgbResume=${id}`);
-    let browser = null;
-    try { browser = await chrome.windows.getCurrent(); } catch { /* no window info: Chrome picks the place */ }
-    try {
-      if (browser?.state === 'fullscreen' && Number.isInteger(browser.id)) {
-        await chrome.tabs.create({ windowId: browser.id, url, active: true });
-      } else {
-        const bounds = rgbWindowBounds(browser);
-        try { await chrome.windows.create({ url, type: 'popup', focused: true, ...bounds }); } catch {
-          await chrome.windows.create({ url, type: 'popup', focused: true, width: bounds.width, height: bounds.height });
-        }
-      }
-    } catch (error) {
-      await this.sessionRemove(key);
-      throw error;
+    // not awaited before the request: Chrome only shows its prompt straight from the click
+    const saved = chrome.storage.session.set({ [key]: { ...draft, expires: Date.now() + 5 * 60000 }, [RGB_PENDING]: id }).catch(() => {});
+    try { await this.requestOrigins(urls); } finally {
+      // still open: nothing to resume
+      await saved; await this.sessionRemove(RGB_PENDING); await this.sessionRemove(key);
     }
-    window.close();
   }
 
   async takeRgbPermissionDraft() {
@@ -86,15 +78,10 @@ export class Platform {
     const draft = await this.sessionGet(key);
     await this.sessionRemove(key);
     this.rgbResumeId = null;
-    try { history.replaceState(null, '', chrome.runtime.getURL('masked.html')); } catch { /* the draft is already consumed */ }
+    try { history.replaceState(null, '', chrome.runtime.getURL(this.isPopup ? 'masked.html?popup=1' : 'masked.html')); } catch { /* the draft is already consumed */ }
     return draft?.expires > Date.now() ? draft : null;
   }
 
-  revealRgbPermissionAction(name) {
-    if (typeof document === 'undefined') return;
-    const button = [...document.querySelectorAll('[data-rgb]')].find((el) => el.getAttribute('data-rgb') === name);
-    button?.scrollIntoView({ block: 'center' });
-  }
 
   /**
    * Ask once (one Chrome prompt) to reach several servers, e.g. the RGB transfer server named in an invoice.
