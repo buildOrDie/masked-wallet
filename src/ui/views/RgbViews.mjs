@@ -104,6 +104,11 @@ export class RgbTokenView extends View {
         ${fut > s ? `<p class="pend-t small">+${r.amount(a, fut - s)} incoming · waiting for a block</p>` : ''}</div>
       <section class="card tok-box">
         <div class="d-row"><span>Available to send</span><b>${r.amount(a, sp)}</b></div>
+        ${s > sp ? (() => {
+          const open = r.invoices().filter((x) => !x.witness && r.invoiceStatus(x).key === 'waiting').length;
+          return `<p class="info warn small">${r.amount(a, s - sp)} ${esc(a.ticker)} ${open ? `are locked by ${open === 1 ? 'an open Private invoice' : `${open} open Private invoices`}: a Private invoice reserves the RGB output these tokens sit on until it's paid or expires.` : 'are locked by a transfer in progress. They free up once it confirms: tap Refresh in a few minutes.'}</p>
+            ${open ? `<button class="btn ghost wide" data-rgb="cancelInv" ${r.busy ? 'disabled' : ''}>Cancel open invoices</button>` : ''}`;
+        })() : ''}
         <div class="tok-acts">
           <button class="tact" data-rgb="send" data-rgb-arg="${esc(a.assetId)}" ${sp ? '' : 'disabled'}>${I.send}<span>Send</span></button>
           <button class="tact" data-rgb="receive" data-rgb-arg="${esc(a.assetId)}">${I.recv}<span>Receive</span></button>
@@ -220,7 +225,7 @@ export class RgbReceive {
       ${a ? input(r, 'recvAmt', 'Amount', 'inputmode="decimal" placeholder="Any amount"', `${esc(a.ticker)} · optional`) : ''}
       <div class="field"><span class="lbl">Works for</span>${segOf('recvExpiry', r.fields.recvExpiry, RGB_EXPIRY)}</div>
       <div class="field"><span class="lbl">Invoice type</span>${segOf('recvType', type, [['blind', 'Private'], ['witness', 'No BTC needed']])}
-        <span class="addr-kind">${type === 'witness' ? 'The sender adds 330 sats (the minimum) for your new output, so you need no BTC.' : `Receives onto one of your RGB outputs, fully hidden. Needs a little ${r.isMain ? '' : 'test '}BTC.`}</span></div>
+        <span class="addr-kind">${type === 'witness' ? 'The sender adds 330 sats (the minimum) for your new output, so you need no BTC.' : `Receives onto one of your RGB outputs, fully hidden. Needs a little ${r.isMain ? '' : 'test '}BTC, and reserves that output (and any tokens on it) until it's paid or expires.`}</span></div>
       ${type === 'blind' && low ? `<p class="info warn">Your RGB ${r.isMain ? '' : 'test '}BTC is low. Pick "No BTC needed", or add ${r.isMain ? '' : 'test '}BTC on Home first.</p>` : ''}
       ${msg(r)}
       <button class="btn primary wide" data-rgb="invoice" ${r.busy ? 'disabled' : ''}>${r.busy ? 'Making invoice…' : 'Make invoice'}</button>
@@ -239,7 +244,7 @@ export class RgbReceive {
         return `<div class="ec-sent rgb-inv">
           <span><b>${esc(what)}</b><span class="muted small">${esc(new Date(inv.at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }))} · ${inv.witness ? 'No BTC needed' : 'Private'}</span>
             <span class="small inv-${st.key}">${esc(st.text)}</span></span>
-          <span class="ec-sent-btns">${st.key === 'waiting' ? `<button class="btn ghost sm" data-rgb="showInv" data-rgb-arg="${esc(inv.recipientId)}">Show</button><button class="btn ghost sm" data-copy="${esc(inv.invoice)}">Copy</button>` : ''}</span>
+          <span class="ec-sent-btns">${st.key === 'waiting' ? `<button class="btn ghost sm" data-rgb="showInv" data-rgb-arg="${esc(inv.recipientId)}">Show</button><button class="btn ghost sm" data-copy="${esc(inv.invoice)}">Copy</button><button class="btn ghost sm" data-rgb="cancelInv" data-rgb-arg="${esc(inv.recipientId)}" ${r.busy ? 'disabled' : ''}>Cancel</button>` : ''}</span>
         </div>`;
       }).join('')}
     </section>`;

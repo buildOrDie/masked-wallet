@@ -301,6 +301,28 @@ test('RGB invoices made here are listed with where each one stands', async () =>
   localStorage.removeItem(app.rgb.invoicesKey);
 });
 
+test('RGB tokens locked by an open Private invoice: explained, and the invoice can be cancelled', async () => {
+  const app = rgbApp('main');
+  localStorage.setItem('masked.rgb.mainnet-beta', '1');
+  rgbReady(app);
+  localStorage.removeItem(app.rgb.invoicesKey);
+  assert.equal(app.rgb.recvType(), 'witness', 'mainnet starts on No BTC needed');
+  app.rgb.data.groups.nia = [{ ...TUSD, balance: { settled: 123450, future: 123450, spendable: 0 } }];
+  app.rgb.logInvoice({ invoice: 'rgb:blind', recipientId: 'utxob:LOCK', at: Date.now(), expiresAt: Math.floor(Date.now() / 1000) + 3600, witness: false, amount: '', ticker: '' });
+  app.rgb.asset = 'rgb:tusd';
+  const html = app.ui.views.rgbtok.render();
+  assert.match(html, /locked by an open Private invoice/);
+  assert.match(html, /data-rgb="cancelInv"/);
+  let asked = null;
+  app.rgb.service.cancelInvoices = async (ids) => { asked = ids; return ids.length; };
+  app.rgb.refresh = async () => {};
+  await app.rgb.action('cancelInv');
+  assert.deepEqual(asked, ['utxob:LOCK']);
+  assert.equal(app.rgb.invoiceStatus(app.rgb.invoices()[0]).text, 'Cancelled');
+  localStorage.removeItem(app.rgb.invoicesKey);
+  localStorage.removeItem('masked.rgb.mainnet-beta');
+});
+
 test('Receive has an RGB tab on Signet only; Mint has "RGB token"', () => {
   const app = rgbApp();
   app.rgb.ensure = () => {};

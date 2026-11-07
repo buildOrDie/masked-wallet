@@ -133,6 +133,10 @@ export class WalletRgb {
     const list = [inv, ...this.invoices().filter((x) => x.invoice !== inv.invoice)].slice(0, 30);
     try { localStorage.setItem(this.invoicesKey, JSON.stringify(list)); } catch { /* the list is a convenience */ }
   }
+  markCancelled(ids) {
+    const set = new Set(ids);
+    try { localStorage.setItem(this.invoicesKey, JSON.stringify(this.invoices().map((x) => (set.has(x.recipientId) ? { ...x, cancelled: true } : x)))); } catch { /* */ }
+  }
   /** Where an invoice stands: its transfer once the payment shows up, else waiting or expired. */
   invoiceStatus(inv) {
     for (const [assetId, list] of Object.entries(this.data?.transfers || {})) {
@@ -145,6 +149,7 @@ export class WalletRgb {
         if (t.status === 'WaitingConfirmations') return { key: 'confirming', text: `Paid${what ? `: ${what}` : ''}, waiting for a block` };
       }
     }
+    if (inv.cancelled) return { key: 'expired', text: 'Cancelled' };
     if (inv.expiresAt && inv.expiresAt <= Date.now() / 1000) return { key: 'expired', text: 'Expired' };
     return { key: 'waiting', text: 'Waiting for payment' };
   }
@@ -174,7 +179,8 @@ export class WalletRgb {
     this.pending = { ...p, check: { ok: false, detail: errors.join(' · ') } };
   }
   /** Blind unless chosen otherwise; witness by default when there is too little test BTC for a blind one. */
-  recvType() { return this.fields.recvType || (this.data && this.btc().settled < RGB_BLIND_MIN ? 'witness' : 'blind'); }
+  /** Mainnet starts on "No BTC needed": a Private invoice reserves one of your RGB outputs (and the tokens on it) until it's paid or expires. */
+  recvType() { return this.fields.recvType || (this.isMain || (this.data && this.btc().settled < RGB_BLIND_MIN) ? 'witness' : 'blind'); }
 
   // ---- lifecycle ----
   async acquire() {
@@ -369,6 +375,17 @@ export class WalletRgb {
       }
       case 'issueAgain': this.issued = null; return app.render();
       case 'issueEdit': this.issueAsk = null; return app.render();
+      case 'cancelInv': { // one invoice (arg = recipient ID) or every open one (no arg)
+        const ids = arg ? [arg] : this.invoices().filter((x) => this.invoiceStatus(x).key === 'waiting').map((x) => x.recipientId);
+        if (!ids.length) { this.message = 'No open invoices to cancel.'; return app.render(); }
+        return this.run(async () => {
+          const n = await this.service.cancelInvoices(ids);
+          this.markCancelled(ids);
+          if (this.invoice && ids.some((id) => this.invoices().find((x) => x.recipientId === id)?.invoice === this.invoice)) this.invoice = '';
+          await this.refresh();
+          app.toast(n ? `${n} invoice${n === 1 ? '' : 's'} cancelled` : 'Invoices cancelled');
+        });
+      }
       case 'showInv': { // reopen an invoice from the list
         const inv = this.invoices().find((x) => x.recipientId === arg);
         if (inv) { this.invoice = inv.invoice; this.invoiceInfo = { witness: inv.witness, amount: inv.amount, ticker: inv.ticker, expiry: inv.expiry }; }

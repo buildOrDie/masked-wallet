@@ -90,6 +90,12 @@ export class LiteWallet {
     return { nia: (r.nia || []).map(asset), ifa: (r.ifa || []).map(asset) };
   }
   async listTransfers(assetId = null) { return plain(this.wallet.listTransfers(assetId) || []); }
+  /** Give up on a transfer that is still waiting for the other side (frees the RGB output an invoice reserved). */
+  async failTransfer(batchTransferIdx) {
+    const r = await this.wallet.failTransfers(this.requireOnline(), batchTransferIdx, false, false);
+    await this.save();
+    return !!r;
+  }
 
   /** Sign a PSBT with this wallet's own keys. */
   sign(psbt) { return this.wallet.signPsbt(psbt); }

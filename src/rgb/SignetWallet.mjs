@@ -92,6 +92,22 @@ export class SignetWallet {
     const opts = typeof o === 'string' ? { assetId: o } : o;
     return this.mutate(wallet => wallet.onchainReceive({ assetId: opts.assetId || null, amount: opts.amount || 0, durationSeconds: opts.durationSeconds ?? null, witness: !!opts.witness }));
   }
+  /**
+   * Cancel invoices of ours nobody has paid yet (their recipient IDs): the transfers waiting for the other wallet
+   * are marked failed, which frees the RGB outputs they reserved. Paid or settled ones are left alone.
+   */
+  cancelInvoices(recipientIds) {
+    const want = new Set(recipientIds.map(String));
+    return this.mutate(async (wallet) => {
+      const assets = Object.values(await wallet.listAssets()).flat().map((a) => a.assetId);
+      const all = [];
+      for (const id of [null, ...assets]) all.push(...await wallet.listTransfers(id));
+      const idx = [...new Set(all.filter((t) => want.has(String(t?.recipientId ?? '')) && t?.status === 'WaitingCounterparty' && /^Receive/.test(String(t?.kind ?? ''))).map((t) => Number(t.batchTransferIdx)))];
+      let n = 0;
+      for (const i of idx) if (Number.isFinite(i) && await wallet.failTransfer(i)) n++;
+      return n;
+    });
+  }
   /** @param {string} url an https:// transfer server URL */
   checkProxy(url) { return this.exclusive(() => this.requireWallet().checkProxy(url)); }
   /** What an invoice asks for (no change to the wallet). */

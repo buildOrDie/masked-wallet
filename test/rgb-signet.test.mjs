@@ -168,3 +168,17 @@ test('Public Signet wallet: issues a test asset after a backup, rejects Utexo in
   await assert.rejects(() => service.send({ invoice: 'rgb:x', assetId: 'rgb:abc', amount: '1', fee: '1' }), /not for Public Signet/);
   assert.equal(calls.some((c) => c[0] === 'send'), false);
 });
+
+test('cancelling invoices fails only our receives still waiting for the other wallet', async () => {
+  const f = fixture(); await open(f);
+  const failed = [];
+  const w = f.service.requireWallet();
+  w.listAssets = async () => ({ nia: [{ assetId: 'rgb:A' }] });
+  w.listTransfers = async (id) => (id === null
+    ? [{ recipientId: 'utxob:OPEN', status: 'WaitingCounterparty', kind: 'ReceiveBlind', batchTransferIdx: 7 }]
+    : [{ recipientId: 'utxob:PAID', status: 'Settled', kind: 'ReceiveBlind', batchTransferIdx: 8 }, { recipientId: 'x', status: 'WaitingCounterparty', kind: 'Send', batchTransferIdx: 9 }]);
+  w.failTransfer = async (i) => { failed.push(i); return true; };
+  assert.equal(await f.service.cancelInvoices(['utxob:OPEN', 'utxob:PAID', 'x']), 1);
+  assert.deepEqual(failed, [7], 'a settled receive and an outgoing send are never touched');
+  assert.equal(f.service.backupRequired, true);
+});
