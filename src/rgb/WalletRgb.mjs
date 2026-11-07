@@ -74,6 +74,10 @@ export class WalletRgb {
     this.invoice = '';    // the last receive invoice
     /** @type {any} */ this.invoiceInfo = null;
     this.issued = null;   // { ticker, assetId } after Create
+    /** @type {any} the token about to be created on mainnet, shown for review first */
+    this.issueAsk = null;
+    this.betaAsk = false; // the mainnet beta explanation is open on Home
+    this.betaOk = false;  // its "I understand" box is ticked
     this.pending = null;  // a reviewed send
     this.sent = null;     // { txid, amount, ticker } after Send
     this.asset = '';      // the token page / send screen asset
@@ -202,7 +206,7 @@ export class WalletRgb {
   }
   async close() {
     clearInterval(this.timer); this.timer = null;
-    this.ready = false; this.data = null; this.pending = null; this.invoice = ''; this.issued = null; this.sent = null; this.saved = false;
+    this.ready = false; this.data = null; this.pending = null; this.invoice = ''; this.issued = null; this.issueAsk = null; this.sent = null; this.saved = false;
     this.fields = EMPTY_FIELDS();
     try { await this.service?.close(); } finally { this.release?.(); this.release = null; }
   }
@@ -276,11 +280,14 @@ export class WalletRgb {
   // ---- actions (data-rgb="…") ----
   async action(name, arg = '') {
     const app = this.app, state = app.state, f = state.f;
-    if (name === 'beta') {
-      if (!this.offerable) return undefined;
-      if (!confirm('RGB on mainnet is a beta.\n\n• RGB tokens can only be restored from an RGB backup file, not from your recovery phrase alone. MASKED asks you to save one before every receive and send.\n• Keep amounts small.\n\nTurn on RGB beta?')) return undefined;
+    // mainnet beta: asked inside MASKED (the Home card opens a short explanation with a tick box)
+    if (name === 'beta') { if (this.offerable) { this.betaAsk = true; this.betaOk = false; } return app.render(); }
+    if (name === 'betaNo') { this.betaAsk = false; return app.render(); }
+    if (name === 'betaTick') { this.betaOk = !this.betaOk; return app.render(); }
+    if (name === 'betaYes') {
+      if (!this.offerable || !this.betaOk) return app.render();
       try { localStorage.setItem(RGB_BETA_KEY, '1'); } catch { /* stays off */ }
-      this.tried = ''; this.phase = '';
+      this.betaAsk = false; this.tried = ''; this.phase = '';
       return this.action('on');
     }
     if (!this.available) throw new Error('Open your wallet on Signet first.');
@@ -322,7 +329,9 @@ export class WalletRgb {
       case 'send': this.asset = arg; this.pending = null; this.sent = null; this.fields.sendTo = ''; this.fields.sendAmt = ''; state.view = 'rgbsend'; return app.render();
       case 'issue': {
         const params = newAsset(this.fields);
-        if (this.isMain && !confirm(`Create ${params.ticker} on Bitcoin mainnet?\n\nSupply: ${this.fields.supply} (fixed forever, all to this wallet)\nCost: one Bitcoin transaction fee\n\nAfter it is created, save a new RGB backup: the token exists only in your wallet and its backups.`)) return undefined;
+        // mainnet: a review step inside MASKED before anything is created
+        if (this.isMain && arg !== 'go') { this.issueAsk = { ...params, supply: this.fields.supply }; this.message = ''; return app.render(); }
+        this.issueAsk = null;
         return this.run(async () => {
           this.message = 'Creating…'; app.render();
           const a = await this.withOutputs(() => this.service.issue(this.fields));
@@ -332,6 +341,7 @@ export class WalletRgb {
         });
       }
       case 'issueAgain': this.issued = null; return app.render();
+      case 'issueEdit': this.issueAsk = null; return app.render();
       case 'opt': { // a Receive option, "key:value"
         const [k, v] = String(arg).split(':');
         if (['recvType', 'recvExpiry'].includes(k)) { this.fields[k] = v; this.invoice = ''; this.message = ''; }

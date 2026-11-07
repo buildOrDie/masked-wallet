@@ -32,6 +32,20 @@ export class RgbHome {
   /** The RGB section of Home (Signet only). */
   static render(app) {
     const r = app.rgb;
+    if (r.offerable && r.betaAsk) {
+      return `<section class="card rgb-ask">
+        <h2>RGB tokens on mainnet (beta)</h2>
+        <ul class="ask-list">
+          <li>RGB tokens can only be restored from an <b>RGB backup file</b>, not from your recovery phrase alone.</li>
+          <li>MASKED asks you to save a backup before every receive, send and new token.</li>
+          <li>RGB has keys of its own: its coins never mix with your Public or Shielded BTC.</li>
+          <li>It's a beta: keep amounts small.</li>
+        </ul>
+        <label class="risk"><input type="checkbox" data-rgb="betaTick" ${r.betaOk ? 'checked' : ''}><span>I understand I must keep my RGB backup safe.</span></label>
+        <button class="btn primary wide" data-rgb="betaYes" ${r.betaOk && !r.busy ? '' : 'disabled'}>Turn on RGB beta</button>
+        <button class="btn ghost wide" data-rgb="betaNo">Not now</button>
+      </section>`;
+    }
     if (r.offerable) return `<button class="hint hint-cta" data-rgb="beta"><span class="hint-ic">${I.mint}</span><span><b>RGB tokens (beta)</b><span>Hold and send RGB tokens on Bitcoin mainnet. Beta: keep amounts small.</span></span><span class="chev">›</span></button>`;
     if (!r.available) return '';
     r.ensure();
@@ -229,6 +243,24 @@ export class RgbMint {
         ${r.isMain ? `<button class="btn primary wide" data-rgb="backup" ${r.busy ? 'disabled' : ''}>Save RGB backup</button>` : ''}
         ${a ? `<button class="btn primary wide" data-rgb="token" data-rgb-arg="${esc(a.assetId)}">View ${esc(a.ticker)}</button>` : ''}
         <button class="btn ghost wide" data-rgb="issueAgain">Create another</button></section>`;
+    }
+    if (r.issueAsk) {
+      const q = r.issueAsk;
+      return `<section class="card review">
+        <p class="hero-label">Create on Bitcoin mainnet</p>
+        <p class="hero-bal" style="font-size:30px">${esc(q.ticker)}</p>
+        <div class="kv">
+          ${rowKV('Name', esc(q.name))}
+          ${rowKV('Supply', `${esc(q.supply)} · fixed forever`)}
+          ${rowKV('Decimals', esc(String(q.precision)))}
+          ${rowKV('Goes to', 'This wallet (all of it)')}
+          ${rowKV('Cost', `one Bitcoin transaction fee · ${esc(r.fee())} sat/vB`)}
+        </div>
+        <p class="info warn">After it is created, save a new RGB backup: the token exists only in your wallet and its backups.</p>
+        ${msg(r)}
+        <button class="btn primary wide" data-rgb="issue" data-rgb-arg="go" ${r.busy ? 'disabled' : ''}>${r.busy ? esc(r.message || 'Creating…') : `Create ${esc(q.ticker)}`}</button>
+        <button class="btn ghost wide" data-rgb="issueEdit" ${r.busy ? 'disabled' : ''}>Edit</button>
+      </section>`;
     }
     const { settled, pending } = r.btc();
     const low = r.data && settled + pending < RGB_LOW_BTC;
