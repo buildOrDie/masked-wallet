@@ -101,6 +101,8 @@ export class WalletRgb {
   /** On by default; switched off per browser in Settings. */
   get cloudOn() { try { return localStorage.getItem(CLOUD_KEY) !== '0'; } catch { return false; } }
   get cloudVersion() { try { return Number(localStorage.getItem(`${RGB_MAINNET.vaultKey}.cloud-version`)) || 0; } catch { return 0; } }
+  /** When a backup file was last written from this browser (ms), 0 if never. */
+  get fileAt() { try { return Number(localStorage.getItem(`${this.profile.vaultKey}.file-at`)) || 0; } catch { return 0; } }
   /** When the last cloud backup was saved (ms), 0 if never from this browser. */
   get cloudAt() { try { return Number(localStorage.getItem(`${RGB_MAINNET.vaultKey}.cloud-at`)) || 0; } catch { return 0; } }
   cloudMark(version) {
@@ -367,7 +369,12 @@ export class WalletRgb {
     this.busy = true;
     try {
       await fn();
-      if (this.isMain && this.service?.backupRequired) this.scheduleCloud();
+      // Something the person did (an invoice, a send, a new token): back it up before the screen shows the
+      // result, so an invoice is never handed out before the cloud has it. Background refreshes save a bit later.
+      if (this.isMain && this.service?.backupRequired && this.cloudOn && this.ready) {
+        if (quiet) this.scheduleCloud();
+        else { this.message = 'Backing up…'; this.app.render(); await this.cloudSave(); this.message = ''; }
+      }
       if (this.phase !== 'legacy' && this.phase !== 'allow') this.phase = '';
       if (!quiet) this.message = '';
     } catch (error) {
@@ -571,15 +578,35 @@ export class WalletRgb {
           await this.refresh();
         });
       }
-      case 'backup': return this.run(async () => {
+      case 'backup': {
+        // Chrome's save dialog has to open straight from the click: ask for the file first, write it after
+        const name = `masked-rgb-${this.profile.id}-backup-${new Date().toISOString().slice(0, 10)}.json`;
+        let handle = null;
+        const picker = /** @type {any} */ (globalThis).showSaveFilePicker;
+        if (typeof picker === 'function') {
+          try { handle = await picker({ suggestedName: name, types: [{ description: 'RGB backup', accept: { 'application/json': ['.json'] } }] }); } catch (e) {
+            if (e?.name === 'AbortError') return; // cancelled: nothing saved, nothing marked
+            handle = null;
+          }
+        }
+        return this.run(async () => {
         const backup = await this.service.backup();
-        const url = URL.createObjectURL(new Blob([JSON.stringify(backup)], { type: 'application/json' }));
-        const link = document.createElement('a'); link.href = url; link.download = `masked-rgb-${this.profile.id}-backup.json`; link.click();
-        setTimeout(() => URL.revokeObjectURL(url), 10000);
+        const text = JSON.stringify(backup);
+        if (handle) {
+          const w = await handle.createWritable(); await w.write(text); await w.close(); // throws if the write fails
+        } else {
+          // no save dialog here: a download. Chrome doesn't tell us it finished, so say where to check
+          const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+          const link = document.createElement('a'); link.href = url; link.download = name; link.click();
+          setTimeout(() => URL.revokeObjectURL(url), 10000);
+          app.toast(`Check ${name} is in your Downloads`, 6000);
+        }
         this.service.backupSaved();
+        try { localStorage.setItem(`${this.profile.vaultKey}.file-at`, String(Date.now())); } catch { /* */ }
         if (this.needBackup) { this.needBackup = false; this.message = 'Backup saved. You can continue.'; }
-        app.toast('RGB backup saved');
-      });
+        if (handle) app.toast('RGB backup saved');
+        });
+      }
       case 'restore': {
         const file = /** @type {HTMLInputElement} */ (document.getElementById('rgbRestore'))?.files?.[0];
         return this.run(async () => {

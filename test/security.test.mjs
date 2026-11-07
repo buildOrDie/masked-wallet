@@ -46,3 +46,43 @@ test('a dApp PSBT asking for SIGHASH_NONE on your coin is refused before you see
   const psbt = hex.encode(tx.toPSBT());
   assert.throws(() => app.psbt.analyse(psbt, { toSignInputs: [{ index: 0, address: f.address, sighashTypes: [0x82] }] }), /SIGHASH_NONE/);
 });
+
+// A dApp PSBT: 500,000 sats of ours in, 2,000 to the site's address at output 0, 498,000 "change" to us at output 1.
+function partialFixture(sighashType) {
+  const app = walletApp(Keyring.fromMnemonic(WORDS, '', 'main'));
+  const ours = hex.decode(app.account.pubSpk());
+  const tx = new btc.Transaction({ allowUnknownOutputs: true });
+  tx.addInput({ txid: hex.decode('22'.repeat(32)), index: 0, witnessUtxo: { script: ours, amount: 500000n }, ...(sighashType != null ? { sighashType } : {}) });
+  tx.addOutputAddress(REAL, 2000n, btc.NETWORK);
+  tx.addOutput({ script: ours, amount: 498000n });
+  return { app, psbt: hex.encode(tx.toPSBT()) };
+}
+
+test('SINGLE|ANYONECANPAY: change the signature doesn\'t cover is not counted, is marked, and must be confirmed', () => {
+  const { app, psbt } = partialFixture(0x83);
+  const a = app.psbt.analyse(psbt, { toSignInputs: [{ index: 0, sighashTypes: [0x83] }] });
+  assert.equal(a.partial, true);
+  assert.deepEqual(a.outputs.map((o) => o.locked), [true, false], 'SINGLE covers only output 0');
+  assert.equal(a.net, -500000, 'the 498,000 the site could redirect is not shown as coming back');
+  assert.equal(a.changeableOurs, 498000);
+  assert.ok(a.protectedCount > 0, 'the approval needs the confirm box');
+  const card = app.ui.views.approve.psbtCard(a, 0, 1);
+  assert.match(card, /not covered: can be changed/);
+  assert.match(card, /left out of the balance change/);
+  assert.match(card, /-0\.005/);
+  // the same transaction signed normally (DEFAULT): every output is covered, the change counts
+  const ok = partialFixture(null);
+  const b = ok.app.psbt.analyse(ok.psbt);
+  assert.equal(b.partial, false);
+  assert.equal(b.net, -2000);
+  assert.equal(b.changeableOurs, 0);
+});
+
+test('signature types from a site must be standard integers: markup or odd values are refused, not rendered', () => {
+  const { app, psbt } = partialFixture(null);
+  for (const bad of [['<img src=x onerror=alert(1)>'], [1.5], ['1'], [0x84], [0x01, 0x81, 0x83, 0x03, 0x01], 'x']) {
+    assert.throws(() => app.psbt.analyse(psbt, { toSignInputs: [{ index: 0, sighashTypes: bad }] }), /unsupported signature type/, JSON.stringify(bad));
+  }
+  const a = app.psbt.analyse(psbt, { toSignInputs: [{ index: 0, sighashTypes: [0x01] }] });
+  assert.match(app.ui.views.approve.psbtCard(a, 0, 1), /sighash 0x01/);
+});

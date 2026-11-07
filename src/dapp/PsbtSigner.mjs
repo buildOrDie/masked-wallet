@@ -7,6 +7,23 @@ import { fromHex, toHex } from '../core/bytes.mjs';
 import { INSCRIPTION_MAX } from '../ordinals/envelope.mjs';
 import { sighashRisk } from '../security/guard.mjs';
 
+/** Signature types MASKED understands (Taproot: 0 = DEFAULT). Anything else, and anything not an integer, is refused. */
+const SIGHASHES = new Set([0x00, 0x01, 0x02, 0x03, 0x81, 0x82, 0x83]);
+/** @param {unknown} list what the site sent (toSignInputs[].sighashTypes) */
+export function checkSighashes(list, i) {
+  if (!Array.isArray(list) || list.length > 4 || !list.every((t) => Number.isInteger(t) && SIGHASHES.has(t))) throw new Error(`Input ${i}: unsupported signature type. MASKED only signs standard SIGHASH values.`);
+  return list.map(Number);
+}
+/**
+ * Which outputs a signature with these types covers. DEFAULT/ALL cover every output; SINGLE covers only the output
+ * with the same index as the input. With several allowed types, the weakest counts.
+ * @returns {'all'|'single'}
+ */
+export function commitment(types) {
+  const list = types?.length ? types : [0x00];
+  return list.some((t) => (t & 0x1f) === 0x03) ? 'single' : 'all';
+}
+
 export class PsbtSigner {
   /** @param {import('../app/MaskedApp.mjs').MaskedApp} app */
   constructor(app) { this.app = app; }
@@ -37,22 +54,34 @@ export class PsbtSigner {
       const coin = tk ? null : this.coins.public.find((c) => c.txid === txid && c.vout === inp.index);
       const tcoin = tk ? this.coins.trade.find((c) => c.txid === txid && c.vout === inp.index) : null;
       const prot = ours && (isRisky(coin) || isRisky(tcoin) || (value != null && value <= INSCRIPTION_MAX));
-      const sighash = w?.sighashTypes?.length ? w.sighashTypes : inp.sighashType != null ? [inp.sighashType] : null;
+      const fromSite = w?.sighashTypes != null ? checkSighashes(w.sighashTypes, i) : [];
+      const fromPsbt = inp.sighashType != null ? checkSighashes([inp.sighashType], i) : [];
+      // the signature uses the PSBT's own type if set; judge by every type in play
+      const sighash = [...new Set([...fromPsbt, ...fromSite])];
+      const sighashOrNull = sighash.length ? sighash : null;
       // SIGHASH_NONE signs no outputs: the site could send these coins anywhere. Never.
-      if (sign && sighashRisk(sighash) === 'blank-cheque') throw new Error(`This site asks you to sign input ${i} with SIGHASH_NONE, which would let it send those coins anywhere. MASKED refuses to sign it.`);
+      if (sign && sighashRisk(sighashOrNull) === 'blank-cheque') throw new Error(`This site asks you to sign input ${i} with SIGHASH_NONE, which would let it send those coins anywhere. MASKED refuses to sign it.`);
       if (ours) spent += value || 0;
-      inputs.push({ i, txid, vout: inp.index, value, address: spk ? codec.fromScript(fromHex(spk)) : null, ours, keyed: tk ? tk.kind : null, spk, trade: tk?.kind === 'trade' ? tk.index : null, sign, prot: !!prot, sighash, finalized: !!inp.finalScriptWitness });
+      inputs.push({ i, txid, vout: inp.index, value, address: spk ? codec.fromScript(fromHex(spk)) : null, ours, keyed: tk ? tk.kind : null, spk, trade: tk?.kind === 'trade' ? tk.index : null, sign, prot: !!prot, sighash: sighashOrNull, covers: commitment(sighashOrNull), finalized: !!inp.finalScriptWitness });
     }
+    const toSign = inputs.filter((x) => x.sign);
+    // Outputs our signatures lock in. One DEFAULT/ALL signature locks every output; SINGLE locks only its own index.
+    // An output nothing of ours covers can be changed after we sign, so it is never counted as money coming back.
+    const coversAll = toSign.some((x) => x.covers === 'all');
+    const single = new Set(toSign.filter((x) => x.covers === 'single').map((x) => x.i));
     for (let i = 0; i < tx.outputsLength; i++) {
       const o = tx.getOutput(i);
       const tk = tradeAcct.keyPathFor(toHex(o.script));
       const ours = toHex(o.script) === ourSpk || !!tk;
-      if (ours) received += Number(o.amount);
-      outputs.push({ i, value: Number(o.amount), address: codec.fromScript(o.script) || (o.script[0] === 0x6a ? 'OP_RETURN' : 'unknown'), ours, keyed: tk ? tk.kind : null, trade: tk?.kind === 'trade' ? tk.index : null });
+      const locked = coversAll || single.has(i);
+      if (ours && locked) received += Number(o.amount);
+      outputs.push({ i, value: Number(o.amount), address: codec.fromScript(o.script) || (o.script[0] === 0x6a ? 'OP_RETURN' : 'unknown'), ours, locked, keyed: tk ? tk.kind : null, trade: tk?.kind === 'trade' ? tk.index : null });
     }
-    const toSign = inputs.filter((x) => x.sign);
     const unusual = toSign.filter((x) => sighashRisk(x.sighash) === 'unusual').length;
-    return { tx, inputs, outputs, toSign, net: received - spent, protectedCount: toSign.filter((x) => x.prot).length + unusual, unusual, trade: toSign.some((x) => x.keyed) };
+    // partial: the site can change or add outputs after we sign. Always asked about, never just shown.
+    const partial = toSign.length > 0 && !coversAll;
+    const changeable = outputs.filter((o) => !o.locked);
+    return { tx, inputs, outputs, toSign, net: received - spent, protectedCount: toSign.filter((x) => x.prot).length + unusual + (partial ? 1 : 0), unusual, partial, changeable: changeable.length, changeableOurs: changeable.filter((o) => o.ours).reduce((n, o) => n + o.value, 0), trade: toSign.some((x) => x.keyed) };
   }
 
   sign(psbtHex, options = {}) {

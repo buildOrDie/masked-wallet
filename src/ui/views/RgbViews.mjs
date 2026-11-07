@@ -13,6 +13,8 @@ const input = (r, key, label, extra = '', right = '') => `<label class="field"><
 const msg = (r) => (r.message ? `<p class="msg" role="status">${esc(r.message)}</p>` : '')
   + (r.needBackup && r.isMain ? `<button class="btn ghost wide" data-rgb="backup" ${r.busy ? 'disabled' : ''}>${I.check}<span>Save RGB backup</span></button>` : '');
 
+const ago = (t) => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : dayLabel(t); };
+
 /** Status words for a transfer, from the person's side. */
 const STATUS = { WaitingCounterparty: 'Waiting for the other wallet', WaitingConfirmations: 'Waiting for a block', Settled: '', Failed: 'Failed' };
 const fungible = (x) => Number(x?.Fungible ?? x?.amount ?? 0);
@@ -221,6 +223,8 @@ export class RgbReceive {
       const exp = RGB_EXPIRY.find(([v]) => Number(v) === info.expiry)?.[1] || '';
       return `<section class="card receive">
         <div class="recv-badge">${rgbBadge}<b>${info.amount ? `${esc(info.amount)} ${esc(info.ticker)}` : info.ticker ? `Any amount of ${esc(info.ticker)}` : 'Any RGB token'}</b></div>
+        ${r.isMain && r.service?.backupRequired ? `<p class="info warn">This invoice isn't in a backup yet${r.cloudOn && r.cloud.error ? `: ${esc(r.cloud.error)}` : ''}. If this browser's data is lost before it's backed up, a payment to it can't be recovered. Save a backup before sharing it.</p>
+          <button class="btn ghost wide" data-rgb="${r.cloudOn && r.cloud.error && !r.cloud.conflict ? 'cloudRetry' : 'backup'}" ${r.busy ? 'disabled' : ''}>${I.check}<span>${r.cloudOn && r.cloud.error && !r.cloud.conflict ? 'Try the cloud backup again' : 'Save backup file'}</span></button>` : ''}
         <div class="qr-wrap">${qrSvg(r.invoice)}</div><p class="addr mono small">${esc(r.invoice)}</p>
         <button class="btn primary wide" data-copy="${esc(r.invoice)}">${I.copy}<span>Copy invoice</span></button>
         <div class="kv small">${rowKV('Type', info.witness ? 'No BTC needed (witness)' : 'Private (blind)')}${rowKV('Works for', exp || 'a while')}</div>
@@ -332,7 +336,7 @@ export class RgbSettings {
         <button class="btn ghost sm" data-copy="${esc(r.data?.address || '')}">${I.copy}<span>Copy RGB address</span></button>
         <p class="muted small">${esc(r.profile.funding)}</p>
         <button class="btn ghost wide" data-rgb="backup" ${r.busy ? 'disabled' : ''}>Save RGB backup file</button>
-        <p class="muted small">${r.isMain && r.cloudOn ? 'A file is an extra copy you keep yourself.' : r.service?.backupRequired ? 'Changed since your last RGB backup.' : 'Backup up to date.'} Restoring needs this same MASKED wallet.</p>
+        <p class="muted small">${r.fileAt ? `Last file: ${ago(r.fileAt)}. ` : 'No backup file saved from this browser yet. '}${r.isMain && r.cloudOn ? (r.cloud.error || r.service?.backupRequired ? 'Changes since the last cloud backup are not saved anywhere yet.' : 'The cloud backup has every change.') : r.service?.backupRequired ? 'Changed since your last RGB backup.' : 'Backup up to date.'} Restoring needs this same MASKED wallet.</p>
         <button class="btn ghost wide" data-rgb="off" ${r.busy ? 'disabled' : ''}>Turn off RGB for now</button>
         ${r.isMain ? `<button class="btn ghost wide" data-rgb="betaOff" ${r.busy ? 'disabled' : ''}>Switch off RGB beta</button>` : ''}` : `
         ${r.exists ? '' : `<button class="btn primary wide" data-rgb="on" ${r.busy ? 'disabled' : ''}>Turn on RGB</button>`}`}
@@ -342,7 +346,6 @@ export class RgbSettings {
   }
   /** Settings → RGB → cloud backup: status, and the switch. */
   static cloud(r) {
-    const ago = (t) => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : dayLabel(t); };
     if (!r.cloudOn) return `<div class="cloud-box"><div class="cloud-h"><b>Cloud backup</b><span class="muted small">off</span></div>
       <p class="muted small">Save a backup file after every RGB change, or switch the encrypted cloud backup back on.</p>
       <button class="btn ghost wide" data-rgb="cloudOn" ${r.busy ? 'disabled' : ''}>Switch on cloud backup</button></div>`;

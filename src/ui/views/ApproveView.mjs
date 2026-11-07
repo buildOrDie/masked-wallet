@@ -60,8 +60,9 @@ export class ApproveView extends View {
         if (a.prepErr) return `<p class="msg err">${esc(a.prepErr)}</p>`;
         const risky = (b || []).some((p) => p.protectedCount);
         const unusual = (b || []).some((p) => p.unusual);
+        const partial = (b || []).some((p) => p.partial);
         return (b || []).map((p, k) => this.psbtCard(p, k, b.length)).join('')
-          + (risky ? `<label class="risk"><input type="checkbox" data-risk ${this.f.apRisk ? 'checked' : ''}><span>${unusual ? '<b>This uses an unusual signature type (SIGHASH_SINGLE).</b> It only covers one output. ' : ''}${unusual && (b || []).some((p) => p.protectedCount > p.unusual) ? '<b>It also spends an inscription coin.</b> ' : !unusual ? '<b>This spends an inscription coin.</b> ' : ''}Only continue if you trust this site and mean to do this (e.g. a marketplace listing).</span></label>` : '');
+          + (risky ? `<label class="risk"><input type="checkbox" data-risk ${this.f.apRisk ? 'checked' : ''}><span>${partial ? '<b>Your signature covers only some outputs.</b> Outputs marked "can be changed" are not protected by it: the site can redirect them or add new ones after you sign, so they are not counted in your balance change. ' : ''}${unusual ? '<b>This uses an unusual signature type (SIGHASH_SINGLE).</b> It only covers one output. ' : ''}${(b || []).some((p) => p.toSign.some((x) => x.prot)) ? '<b>It spends an inscription coin.</b> ' : ''}Only continue if you trust this site and mean to do this (e.g. a marketplace listing).</span></label>` : '');
       }
       case 'shareTrade':
         return `<div class="kv">${rowKV('Trade address it will see', b ? `<span class="mono">${esc(short(b.address, 8))}</span>` : a.prepErr ? '—' : 'finding it…')}${b ? rowKV('Shielded totals it will see', `${fmtBtc(b.shielded.sats)} ${unit}${b.shielded.tokens.length ? ` · ${b.shielded.tokens.length} token${b.shielded.tokens.length > 1 ? 's' : ''}` : ''}`) : ''}</div>
@@ -144,13 +145,14 @@ export class ApproveView extends View {
     const row = (x, kind) => `<div class="pz-row ${x.ours ? 'mine' : ''} ${x.prot && x.sign ? 'danger' : ''}">
       <span class="pz-i">${kind}${x.i}</span>
       <span class="pz-a"><span class="mono">${esc(x.address ? short(x.address, 8) : x.txid ? short(x.txid, 6) + ':' + x.vout : '?')}</span>
-        ${x.ours ? `<span class="badge v2">${x.keyed === 'trade' ? 'Your trade address' : x.keyed === 'shielded' ? 'Your Shielded listing' : 'You'}</span>` : ''}${x.sign ? '<span class="badge">sign</span>' : ''}${x.prot && x.sign ? `<span class="badge red">${I.lock} inscription</span>` : ''}${x.sighash ? `<span class="badge">sighash ${x.sighash.join(',')}</span>` : ''}</span>
+        ${x.ours ? `<span class="badge v2">${x.keyed === 'trade' ? 'Your trade address' : x.keyed === 'shielded' ? 'Your Shielded listing' : 'You'}</span>` : ''}${x.sign ? '<span class="badge">sign</span>' : ''}${x.prot && x.sign ? `<span class="badge red">${I.lock} inscription</span>` : ''}${x.sighash ? `<span class="badge">sighash ${esc(x.sighash.map((t) => '0x' + Number(t).toString(16).padStart(2, '0')).join(', '))}</span>` : ''}${x.locked === false ? '<span class="badge red">not covered: can be changed</span>' : ''}</span>
       <span class="pz-v">${x.value != null ? fmtBtc(x.value) : '?'}</span></div>`;
     return `<div class="pz">
     ${total > 1 ? `<p class="card-title">PSBT ${k + 1} of ${total}</p>` : ''}
     <p class="lbl">Inputs</p>${p.inputs.map((x) => row(x, 'in ')).join('')}
     <p class="lbl">Outputs</p>${p.outputs.map((x) => row(x, 'out ')).join('')}
     <div class="kv">${rowKV('Your balance change', `<b class="${p.net < 0 ? 'neg' : 'good'}">${p.net > 0 ? '+' : ''}${fmtBtc(p.net)} ${this.unit}</b>`)}${rowKV('Inputs you sign', `${p.toSign.length}`)}</div>
+    ${p.changeableOurs ? `<p class="info warn">${fmtBtc(p.changeableOurs)} ${this.unit} shown going back to you is in outputs your signature doesn't cover. The site can change them, so they are left out of the balance change.</p>` : ''}
     ${p.net < 0 && -p.net >= 100000 && -p.net >= 0.5 * sumSats(this.app.coins.public) ? `<p class="info warn">This takes <b>${Math.round((-p.net / Math.max(1, sumSats(this.app.coins.public))) * 100)}%</b> of your Public balance. Make sure you know this site.</p>` : ''}
   </div>`;
   }
