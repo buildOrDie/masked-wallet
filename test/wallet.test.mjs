@@ -966,3 +966,14 @@ test('RGB mainnet send: the review shows a fee picker with fresh rates, and the 
   app.state.f.fee = 'normal'; app.state.f.feeCustom = '';
   localStorage.removeItem('masked.rgb.mainnet-beta');
 });
+
+test('RGB uses the person\'s own block server first, then the public ones, and explains a server it cannot reach', async () => {
+  const app = rgbApp('main');
+  localStorage.setItem('masked.rgb.mainnet-beta', '1');
+  app.servers.list = () => ['https://my.node.example/api/', 'https://mempool.space/api/', 'https://blockstream.info/api/'];
+  const p = app.rgb.withIndexers(app.rgb.profile);
+  assert.deepEqual(p.sdk.indexerUrls, ['https://my.node.example/api', 'https://mempool.space/api', 'https://blockstream.info/api']);
+  const { rgbError } = await import('../src/rgb/WalletRgb.mjs');
+  assert.match(rgbError(new Error('Invalid indexer: not a valid esplora server'), p), /couldn't reach a block server[\s\S]*ad blocker[\s\S]*Settings → Blockchain server/);
+  localStorage.removeItem('masked.rgb.mainnet-beta');
+});

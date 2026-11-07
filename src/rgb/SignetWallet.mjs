@@ -44,7 +44,7 @@ export class SignetWallet {
         }
         await wallet.unlock();
         // unlock can return offline. Explicit sync must fail visibly instead of showing a zero balance.
-        if (!wallet.isOnline()) await wallet.goOnline(this.profile.sdk.indexerUrl);
+        if (!wallet.isOnline()) await wallet.goOnline();
         if (backup) this.storage.setItem(this.vaultKey, JSON.stringify(await encryptRgb({ mnemonic: payload.mnemonic }, password, net)));
         this.mnemonic = payload.mnemonic; this.password = password;
       } catch (e) { await this.close(); throw e; }
@@ -55,7 +55,11 @@ export class SignetWallet {
   async snapshot({ full = false } = {}) {
     return this.exclusive(async () => {
       const wallet = this.requireWallet();
-      await wallet.syncWallet({ full });
+      // the block server in use is busy or gone: try the next one once before giving up
+      try { await wallet.syncWallet({ full }); } catch (e) {
+        if (!/invalid indexer|esplora|failed to fetch|network|429|too many|timed? ?out|50[234]/i.test(String(e?.message || e)) || !(await wallet.switchIndexer?.())) throw e;
+        await wallet.syncWallet({ full });
+      }
       // A send signed before a restore can't be broadcast: the engine keeps the signed transaction in this
       // browser only, never in backups. Once the other wallet accepts, refresh reports it missing.
       const refreshed = await wallet.refreshWallet() || {};

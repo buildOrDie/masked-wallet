@@ -19,6 +19,7 @@ export function rgbError(error, profile = profileOf('utexo')) {
   const full = typeof error === 'string' ? error : (error instanceof Error ? error.message : String(error?.['message'] ?? ''));
   const text = brief(full);
   if (/did not answer in time|timed? ?out|\b429\b|too many requests|status: 50[234]\b|bad gateway|service unavailable|gateway time/i.test(full)) return `The ${profile.label} block server is busy or down right now.`;
+  if (/invalid indexer/i.test(full) && (profile.id === 'mainnet' || profile.id === 'public')) return `RGB couldn't reach a block server (mempool.space or blockstream.info). If you use an ad blocker, VPN or firewall, allow these sites, or set your own server in Settings → Blockchain server. Then try again.`;
   if (/invalid indexer|failed to fetch|network ?error|internet|ECONN|proxy/i.test(full)) return `Can't reach the ${profile.label} RGB servers right now. Check your connection and try again. (${text})`;
   if (/no valid transport endpoints|invalid transport endpoint/i.test(full)) return 'Could not reach the transfer server named in this invoice. Allow MASKED to reach it when asked, or ask for an invoice from MASKED or another wallet using proxy.iriswallet.com.';
   if (/insufficient ?allocation|allocation ?slots|no (colorable|available) (utxo|output)s?/i.test(text)) {
@@ -310,10 +311,19 @@ export class WalletRgb {
     });
   }
   async runtime() { return import(new URL('rgb-runtime.mjs', location.href).href); }
+  /**
+   * Mainnet and public Signet: the person's own block server (Settings → Blockchain server) first, then mempool.space
+   * and blockstream.info, the same servers the rest of MASKED uses. Utexo Signet has only its own.
+   */
+  withIndexers(p) {
+    if (p.id !== 'mainnet' && p.id !== 'public') return p;
+    const servers = this.app.servers?.list?.() || [p.sdk.indexerUrl];
+    return { ...p, sdk: { ...p.sdk, indexerUrls: servers.map((u) => String(u).replace(/\/+$/, '')) } };
+  }
   async serviceFor() {
     if (this.service && this.service.profile.id === this.profile.id) return this.service;
     const runtime = await this.runtime();
-    this.service = new runtime.SignetWallet({ loadSdk: runtime.loadRgbSdk, storage: localStorage, profile: this.profile });
+    this.service = new runtime.SignetWallet({ loadSdk: runtime.loadRgbSdk, storage: localStorage, profile: this.withIndexers(this.profile) });
     return this.service;
   }
   /** @param {string} password @param {any} [backup] @param {{ keyed?: boolean }} [o] keyed: password is the wallet key */

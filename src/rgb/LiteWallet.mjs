@@ -32,7 +32,7 @@ const asset = (a) => ({
 export class LiteWallet {
   /**
    * @param {object} lib  the loaded rgb-lib-wasm module ({ WasmWallet, WasmInvoice, restoreKeys })
-   * @param {{ network: string, indexerUrl: string, transportEndpoint: string, mnemonic: string, dataDir: string }} params
+   * @param {{ network: string, indexerUrl: string, indexerUrls?: string[], transportEndpoint: string, mnemonic: string, dataDir: string }} params  indexerUrls: block servers to try in order
    */
   constructor(lib, params) {
     this.lib = lib;
@@ -61,9 +61,38 @@ export class LiteWallet {
   requireOnline() { if (!this.online) throw new Error('RGB wallet is offline. Try Refresh.'); return this.online; }
 
   /** Connect to the indexer (the SDK's unlock does the same). */
-  async unlock() { if (!this.online) await this.goOnline(this.params.indexerUrl); }
+  /** Block servers to try, in order: the person's own server (if set), then the public ones. */
+  indexers() {
+    const list = [...(this.params.indexerUrls || []), this.params.indexerUrl].filter(Boolean).map((u) => String(u).replace(/\/+$/, ''));
+    return [...new Set(list)];
+  }
+  async unlock() { if (!this.online) await this.goOnline(); }
   isOnline() { return !!this.online; }
-  async goOnline(url = this.params.indexerUrl) { this.online = await this.wallet.goOnline(false, url); }
+  /**
+   * Connect to a block server. The engine accepts one only if it answers "block 0" right away, so a busy, blocked
+   * or rate-limited server is skipped for the next one instead of leaving RGB unable to open.
+   * @param {string} [url] one server only; otherwise each in turn, starting after `skip`
+   */
+  async goOnline(url, skip = '') {
+    const list = url ? [url] : this.indexers();
+    const start = skip ? (list.indexOf(skip) + 1) % list.length : 0;
+    let last = null;
+    for (let i = 0; i < list.length; i++) {
+      const u = list[(start + i) % list.length];
+      if (skip && u === skip && list.length > 1) continue;
+      try { this.online = await this.wallet.goOnline(false, u); this.indexer = u; return u; } catch (e) { last = e; }
+    }
+    throw last || new Error('Invalid indexer: no block server answered');
+  }
+  /** The block server in use failed: move to the next one (true if there was another to try). */
+  async switchIndexer() {
+    const list = this.indexers();
+    if (list.length < 2) return false;
+    const was = this.indexer;
+    this.online = null;
+    await this.goOnline(undefined, was);
+    return this.indexer !== was;
+  }
   async save() { await this.wallet.flush(); }
   async dispose() {
     const w = this.w;

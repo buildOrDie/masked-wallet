@@ -180,3 +180,22 @@ test('locked coins: a coin with an unsettled allocation or a pending private inv
   await w.init(); await w.unlock();
   assert.deepEqual(await w.lockedCoins(), ['a:0', 'c:2']);
 });
+
+test('block server fallback: a server that does not answer is skipped, and a failing one is swapped later', async () => {
+  const f = fakeLib();
+  const down = new Set(['https://mempool.space/api']);
+  const tried = [];
+  f.lib.WasmWallet.prototype.goOnline = async function (_skip, url) { tried.push(url); if (down.has(url)) throw new Error('Invalid indexer: not a valid esplora server'); return { id: 1, indexerUrl: url }; };
+  const w = new LiteWallet(f.lib, { ...RGB_PROFILES.public.sdk, indexerUrl: 'https://mempool.space/api', indexerUrls: ['https://mempool.space/api/', 'https://blockstream.info/api/'], mnemonic, password: 'x' });
+  await w.init(); await w.unlock();
+  assert.equal(w.indexer, 'https://blockstream.info/api', 'opened on the second server');
+  assert.deepEqual(tried, ['https://mempool.space/api', 'https://blockstream.info/api']);
+  // blockstream starts failing, mempool is back: switch
+  down.clear(); down.add('https://blockstream.info/api');
+  assert.equal(await w.switchIndexer(), true);
+  assert.equal(w.indexer, 'https://mempool.space/api');
+  // nothing answers: the engine's error comes through
+  down.add('https://mempool.space/api');
+  w.online = null;
+  await assert.rejects(w.goOnline(), /Invalid indexer/);
+});
