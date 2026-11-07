@@ -1,6 +1,7 @@
 import { RGB_BETA_KEY, RGB_MAINNET, RGB_PROFILE_KEY, fromBase, newAsset, profileOf, toBase } from './config.mjs';
 import { toHex, enc } from '../core/bytes.mjs';
 import { encryptRgb } from './backup.mjs';
+import { CLOUD_KEY, RgbCloud, cloudKeys, seal, open as openCloud } from './cloud.mjs';
 
 /** Fee rate for RGB's own transactions on the test networks (sat/vB). */
 const RGB_FEE = '2';
@@ -89,6 +90,69 @@ export class WalletRgb {
     /** @type {any} */ this.waiting = null;
     this.waitSince = 0;
     this.fields = EMPTY_FIELDS();
+    /** mainnet encrypted cloud backup: last result in this session */
+    this.cloud = { error: '', conflict: 0, saving: false, last: 0 };
+    this.cloudAsk = false; // the "switch off cloud backup?" panel is open
+    /** @type {any} */ this.cloudTimer = null;
+    this.cloudApi = new RgbCloud();
+  }
+
+  // ---- encrypted cloud backup (mainnet) ----
+  /** On by default; switched off per browser in Settings. */
+  get cloudOn() { try { return localStorage.getItem(CLOUD_KEY) !== '0'; } catch { return false; } }
+  get cloudVersion() { try { return Number(localStorage.getItem(`${RGB_MAINNET.vaultKey}.cloud-version`)) || 0; } catch { return 0; } }
+  /** When the last cloud backup was saved (ms), 0 if never from this browser. */
+  get cloudAt() { try { return Number(localStorage.getItem(`${RGB_MAINNET.vaultKey}.cloud-at`)) || 0; } catch { return 0; } }
+  cloudMark(version) {
+    try { localStorage.setItem(`${RGB_MAINNET.vaultKey}.cloud-version`, String(version)); localStorage.setItem(`${RGB_MAINNET.vaultKey}.cloud-at`, String(Date.now())); } catch { /* */ }
+  }
+  /** Save to the cloud a few seconds after RGB changes (one upload for several changes). */
+  scheduleCloud(ms = 4000) {
+    if (!this.isMain || !this.cloudOn || !this.ready || this.cloud.conflict) return;
+    if (this.cloud.error && Date.now() - this.cloud.last < 60000) return; // after a failure, wait a minute
+    clearTimeout(this.cloudTimer);
+    this.cloudTimer = setTimeout(() => {
+      this.cloudTimer = null;
+      if (!this.ready || !this.service?.backupRequired) return;
+      if (this.busy) return this.scheduleCloud(ms);
+      this.run(() => this.cloudSave(), { quiet: true });
+    }, ms);
+  }
+  /**
+   * Upload the current RGB backup. Never throws: the result is in this.cloud and the manual file stays.
+   * @param {{ replace?: boolean }} [o] replace: overwrite a newer backup another browser saved
+   * @returns {Promise<boolean>} saved
+   */
+  async cloudSave({ replace = false } = {}) {
+    if (!this.isMain || !this.cloudOn || !this.service) return false;
+    this.cloud.saving = true; this.cloud.last = Date.now();
+    try {
+      const keys = await cloudKeys(this.app.lock?.secret);
+      const envelope = await this.service.backup();
+      const version = Math.max(this.cloudVersion, replace ? this.cloud.conflict : 0) + 1;
+      await this.cloudApi.put(keys.id, await seal(keys, envelope, version));
+      this.cloudMark(version);
+      this.service.backupSaved();
+      this.cloud.error = ''; this.cloud.conflict = 0;
+      return true;
+    } catch (e) {
+      if (e?.status === 409) { this.cloud.conflict = Math.max(1, e.latest || 0); this.cloud.error = 'A newer RGB cloud backup was saved from another browser. Use RGB in one browser at a time.'; }
+      else this.cloud.error = e?.message || 'The cloud backup did not save.';
+      return false;
+    } finally { this.cloud.saving = false; }
+  }
+  /**
+   * Before a new mainnet RGB wallet is made in this browser: the latest cloud backup, if there is one.
+   * Throws if the server can't be asked, so a wallet is never started over a backup that exists.
+   */
+  async cloudFind() {
+    const keys = await cloudKeys(this.app.lock?.secret);
+    let body;
+    try { body = await this.cloudApi.latest(keys.id); } catch {
+      throw new Error('Could not check for your RGB cloud backup. Try again, or switch off cloud backup in Settings → RGB to start without it.');
+    }
+    if (!body) return null;
+    return { version: body.version, backup: await openCloud(keys, body, this.cloudVersion) };
   }
 
   get unlocked() { return this.app.state.lockState === 'open' && !!this.app.lock?.secret?.words; }
@@ -236,7 +300,7 @@ export class WalletRgb {
     if (full) try { localStorage.setItem(`${this.profile.vaultKey}.scanned-v2`, '1'); } catch { /* scans again next time */ }
   }
   async close() {
-    clearInterval(this.timer); this.timer = null;
+    clearInterval(this.timer); this.timer = null; clearTimeout(this.cloudTimer); this.cloudTimer = null; this.cloudAsk = false;
     this.ready = false; this.data = null; this.pending = null; this.invoice = ''; this.issued = null; this.issueAsk = null; this.sent = null; this.saved = false;
     this.fields = EMPTY_FIELDS();
     try { await this.service?.close(); } finally { this.release?.(); this.release = null; }
@@ -280,6 +344,7 @@ export class WalletRgb {
     this.busy = true;
     try {
       await fn();
+      if (this.isMain && this.service?.backupRequired) this.scheduleCloud();
       if (this.phase !== 'legacy') this.phase = '';
       if (!quiet) this.message = '';
     } catch (error) {
@@ -323,6 +388,10 @@ export class WalletRgb {
     if (!this.available) throw new Error('Open your wallet on Signet first.');
     // mainnet: one backup must exist before RGB is used (it holds the RGB keys); after that, Home reminds
     // whenever something changed, without blocking (a block on every change would block every receive)
+    if (this.isMain && ['invoice', 'review', 'confirm', 'issue'].includes(name) && !this.service?.everBackedUp && this.cloudOn && !this.busy) {
+      this.busy = true; app.render();
+      try { await this.cloudSave(); } finally { this.busy = false; }
+    }
     if (this.isMain && ['invoice', 'review', 'confirm', 'issue'].includes(name) && !this.service?.everBackedUp) {
       this.message = 'Save your RGB backup once before using RGB on mainnet. Your recovery phrase alone can\'t bring RGB tokens back.';
       this.needBackup = true;
@@ -333,8 +402,16 @@ export class WalletRgb {
     switch (name) {
       case 'on': return this.run(async () => {
         this.phase = 'opening'; this.tried = this.profile.id; app.render();
-        await this.open(await this.walletKey());
-        app.toast('RGB is on');
+        const found = this.isMain && !this.exists && this.cloudOn ? await this.cloudFind() : null;
+        if (found) {
+          await this.open(await this.walletKey(), found.backup);
+          this.cloudMark(found.version); this.service.backupSaved();
+          app.toast('RGB restored from your cloud backup');
+        } else {
+          await this.open(await this.walletKey());
+          if (this.isMain && this.cloudOn) await this.cloudSave(); // the new keys are backed up straight away
+          app.toast('RGB is on');
+        }
       });
       case 'retry': this.tried = ''; this.phase = ''; this.ensure(); return app.render();
       case 'migrate': {
@@ -488,6 +565,25 @@ export class WalletRgb {
         return app.render();
       }
       case 'off': return this.run(async () => { await this.close(); this.tried = this.profile.id; app.toast('RGB is off until you reopen the wallet'); });
+      case 'cloudOn': return this.run(async () => {
+        try { localStorage.setItem(CLOUD_KEY, '1'); } catch { /* */ }
+        this.cloud = { error: '', conflict: 0, saving: false, last: 0 };
+        if (this.ready && await this.cloudSave()) app.toast('Cloud backup is on');
+      });
+      case 'cloudOff': this.cloudAsk = true; return app.render();
+      case 'cloudKeep': this.cloudAsk = false; return app.render();
+      case 'cloudOffYes': return this.run(async () => {
+        this.cloudAsk = false; clearTimeout(this.cloudTimer);
+        try { await this.cloudApi.remove(await cloudKeys(app.lock?.secret)); } catch (e) {
+          throw new Error(`Cloud backup is still on: ${e?.message || 'the server did not answer'}. Try again.`);
+        }
+        try { localStorage.setItem(CLOUD_KEY, '0'); localStorage.removeItem(`${RGB_MAINNET.vaultKey}.cloud-at`); } catch { /* */ }
+        this.cloud = { error: '', conflict: 0, saving: false, last: 0 };
+        if (this.ready) try { localStorage.setItem(this.service.dirtyKey, '1'); } catch { /* */ } // the file is the only backup now
+        app.toast('Cloud backup is off and deleted from the server. Save backup files yourself.', 6000);
+      });
+      case 'cloudRetry': return this.run(async () => { this.cloud.last = 0; if (await this.cloudSave()) app.toast('Cloud backup saved'); });
+      case 'cloudReplace': return this.run(async () => { if (await this.cloudSave({ replace: true })) app.toast('This browser\'s RGB state is now the cloud backup'); });
       case 'betaOff': return this.run(async () => { await this.close(); try { localStorage.setItem(RGB_BETA_KEY, '0'); } catch { /* */ } app.toast('RGB beta is off. Your RGB wallet stays saved in this browser.'); });
       default: return undefined;
     }

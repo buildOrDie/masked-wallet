@@ -1,3 +1,4 @@
+/* global localStorage */
 // The wallet's services, run in Node on the real classes (no browser): keys and addresses, transactions,
 // coin protection, PSBT signing with the trade address and Shielded holders, and the token server.
 import { test } from 'node:test';
@@ -240,6 +241,7 @@ test('RGB mainnet beta: opt-in, keys of its own, backup before every receive and
   const { wordlist } = await import('@scure/bip39/wordlists/english');
   const app = rgbApp('main');
   localStorage.removeItem('masked.rgb.mainnet-beta');
+  localStorage.setItem('masked.rgb.cloud', '0'); // this test is the backup-file path (cloud backup switched off)
   assert.equal(app.rgb.offerable, true);
   assert.equal(app.rgb.available, false);
   localStorage.setItem('masked.rgb.mainnet-beta', '1');
@@ -274,6 +276,88 @@ test('RGB mainnet beta: opt-in, keys of its own, backup before every receive and
   assert.equal(called, true);
   assert.match(app.ui.views.home.render(), /Something changed since your last backup/);
   localStorage.removeItem('masked.rgb.mainnet-beta');
+  localStorage.removeItem('masked.rgb.cloud');
+});
+
+test('RGB mainnet cloud backup: on by default, saved after changes, restored in a new browser, can be switched off', async () => {
+  const cloud = await import('../src/rgb/cloud.mjs');
+  const app = rgbApp('main');
+  const r = app.rgb;
+  localStorage.setItem('masked.rgb.mainnet-beta', '1');
+  localStorage.removeItem('masked.rgb.cloud');
+  for (const k of ['', '.cloud-version', '.cloud-at', '.backed-up']) localStorage.removeItem('masked.rgb.mainnet.v1' + k);
+  assert.equal(r.cloudOn, true, 'on by default');
+  // an in-memory server with the real version rule
+  const store = new Map(); let reachable = true;
+  r.cloudApi = {
+    latest: async (id) => { if (!reachable) throw new Error('offline'); return store.get(id) || null; },
+    put: async (id, body) => { const cur = store.get(id); if (cur && body.version <= cur.version) throw Object.assign(new Error('newer'), { status: 409, latest: cur.version }); store.set(id, body); },
+    remove: async (k) => { store.delete(k.id); },
+  };
+  let dirty = true, opened = [];
+  const ENV = { format: 'masked-rgb-signet', version: 1, ciphertext: 'state-1' };
+  const service = {
+    profile: r.profile, get backupRequired() { return dirty; }, get everBackedUp() { return localStorage.getItem('masked.rgb.mainnet.v1.backed-up') === '1'; },
+    dirtyKey: 'masked.rgb.mainnet.v1.backup-required',
+    open: async (_pw, _gen, backup) => { opened.push(backup); localStorage.setItem('masked.rgb.mainnet.v1', '{"format":"x"}'); },
+    backup: async () => ENV,
+    backupSaved: () => { dirty = false; localStorage.setItem('masked.rgb.mainnet.v1.backed-up', '1'); },
+    close: async () => {},
+  };
+  Object.assign(r, { acquire: async () => {}, runtime: async () => ({ mnemonicFrom: () => 'w', newTestMnemonic: () => 'w' }), serviceFor: async () => (r.service = service), refresh: async () => { r.data = { address: 'bc1qrgbfees', btc: { vanilla: { settled: 9000, future: 9000 }, colored: { settled: 0, future: 0 } }, groups: {}, transfers: {} }; }, startTimer: () => {}, markKeyed: () => {} });
+  // 1. first browser: nothing in the cloud, a new RGB wallet, backed up straight away
+  await r.action('on');
+  assert.deepEqual(opened, [null]);
+  const { id } = await cloud.cloudKeys(app.lock.secret);
+  assert.equal(store.get(id).version, 1);
+  assert.equal(r.cloudVersion, 1);
+  assert.equal(dirty, false, 'a cloud save counts as a backup');
+  assert.equal(service.everBackedUp, true, 'no file needed before the first receive');
+  assert.deepEqual(await cloud.open(await cloud.cloudKeys(app.lock.secret), store.get(id)), ENV, 'what is stored opens with this phrase');
+  assert.doesNotMatch(app.ui.views.home.render(), /Save your RGB backup|didn't save/, 'Home stays quiet');
+  assert.match(app.ui.views.settings.render(), /Cloud backup \(encrypted\)[\s\S]*saved just now/);
+  // a change: saved again, version 2
+  dirty = true;
+  assert.equal(await r.cloudSave(), true);
+  assert.equal(store.get(id).version, 2);
+  // 2. a new browser with the same phrase: restores the cloud backup instead of starting empty
+  await r.close();
+  for (const k of ['', '.cloud-version', '.cloud-at', '.backed-up']) localStorage.removeItem('masked.rgb.mainnet.v1' + k);
+  r.tried = ''; opened = [];
+  await r.action('on');
+  assert.deepEqual(opened, [ENV]);
+  assert.equal(r.cloudVersion, 2);
+  // the server can't be asked: never start a wallet over a backup that may exist
+  await r.close();
+  localStorage.removeItem('masked.rgb.mainnet.v1'); r.tried = ''; opened = []; reachable = false;
+  await r.action('on');
+  assert.deepEqual(opened, []);
+  assert.match(r.message, /Could not check for your RGB cloud backup/);
+  reachable = true;
+  localStorage.setItem('masked.rgb.mainnet.v1', '{"format":"x"}');
+  await r.open('k');
+  // 3. another browser saved newer: say so, offer to replace, never overwrite silently
+  localStorage.setItem('masked.rgb.mainnet.v1.cloud-version', '0'); dirty = true;
+  assert.equal(await r.cloudSave(), false);
+  assert.equal(r.cloud.conflict, 2);
+  assert.match(app.ui.views.home.render(), /RGB cloud backup didn't save/);
+  assert.match(app.ui.views.settings.render(), /data-rgb="cloudReplace"/);
+  await r.action('cloudReplace');
+  assert.equal(store.get(id).version, 3);
+  assert.equal(r.cloud.error, '');
+  // 4. switch off: asked inside MASKED, then every copy is deleted and the file reminder comes back
+  await r.action('cloudOff');
+  assert.match(app.ui.views.settings.render(), /Switch off cloud backup\?[\s\S]*data-rgb="cloudOffYes"/);
+  await r.action('cloudOffYes');
+  assert.equal(store.has(id), false);
+  assert.equal(r.cloudOn, false);
+  assert.match(app.ui.views.settings.render(), /data-rgb="cloudOn"/);
+  dirty = true;
+  assert.equal(await r.cloudSave(), false, 'off means no uploads');
+  assert.equal(store.has(id), false);
+  await r.close();
+  for (const k of ['', '.cloud-version', '.cloud-at', '.backed-up']) localStorage.removeItem('masked.rgb.mainnet.v1' + k);
+  localStorage.removeItem('masked.rgb.mainnet-beta'); localStorage.removeItem('masked.rgb.cloud');
 });
 
 test('RGB invoices made here are listed with where each one stands', async () => {

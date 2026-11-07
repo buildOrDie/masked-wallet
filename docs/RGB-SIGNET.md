@@ -69,3 +69,26 @@ Automated checks cover encrypted backup/restore, large backup encoding, Signet-o
 A real Chrome-extension installation, actual SDK runtime initialization, faucet-funded send/receive, clean-profile restore and network-reconnection behaviour still require manual testing. No live transaction was signed or broadcast during development. The supplied environment has no Chromium binary. Keep the PR as a draft until those checks pass; no store update or production deployment is included.
 
 Reference: [Utexo Web SDK](https://docs.utexo.com/sdk/web-sdk) and [Web quickstart](https://docs.utexo.com/getting-started/quickstart/web).
+
+## Mainnet beta: encrypted cloud backup
+
+On Bitcoin mainnet, RGB tokens can't come back from the recovery phrase alone, so MASKED keeps an encrypted cloud
+backup of the RGB state. It is on by default and can be switched off in **Settings → RGB (beta)**; backup files still
+work either way.
+
+- **Encrypted before it leaves.** The backup (already encrypted with a key from the recovery phrase) is encrypted again
+  with AES-256-GCM using a key derived from the phrase and passphrase (`SHA-256("MASKED/rgb-cloud/v1\n"…)`, then
+  HMAC-SHA256 `enc`), padded to fixed sizes, and stored under an ID that is a public key, not an address.
+- **Signed.** Each upload is signed with a BIP340 key from the same phrase (HMAC-SHA256 `sign`). The server refuses
+  anything not signed by the key its ID names.
+- **Versioned.** Every save has a version that only goes up. The server refuses an equal or older version and keeps
+  the last three. The version is bound into the encryption, and the browser refuses a backup older than the last one
+  it saved. If another browser saved a newer one, MASKED says so and asks before replacing it.
+- **Restore.** Turning on RGB in a new browser with the same phrase restores the latest cloud backup. If the server
+  can't be reached, MASKED doesn't start a new RGB wallet over a backup that may exist.
+- **Switch off.** Switching off sends a signed request that deletes every stored copy. After that, save backup files
+  yourself after every change.
+- Code: `src/rgb/cloud.mjs`. Endpoint: `https://scan.maskedwallet.com/rgb-vault/v1/backup/<id>`.
+
+What the server can see: when backups are saved, their rough size, and the IP address that saved them. It can't read
+tokens, amounts, addresses or keys. Someone who has your recovery phrase can restore your RGB backup, like your BTC.

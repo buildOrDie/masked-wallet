@@ -37,12 +37,12 @@ export class RgbHome {
       return `<section class="card rgb-ask">
         <h2>RGB tokens on mainnet (beta)</h2>
         <ul class="ask-list">
-          <li>RGB tokens can only be restored from an <b>RGB backup file</b>, not from your recovery phrase alone.</li>
-          <li>MASKED asks you to save one backup before you start, then reminds you after every change.</li>
+          <li>Your recovery phrase alone can't bring RGB tokens back: they need an RGB backup.</li>
+          <li>MASKED saves an <b>encrypted cloud backup</b> after every change. It's locked with keys from your recovery phrase before it leaves this browser, so MASKED's server can't read it. You can switch it off in Settings and save backup files yourself.</li>
           <li>RGB has keys of its own: its coins never mix with your Public or Shielded BTC.</li>
           <li>It's a beta: keep amounts small.</li>
         </ul>
-        <label class="risk"><input type="checkbox" data-rgbbeta ${r.betaOk ? 'checked' : ''}><span>I understand I must keep my RGB backup safe.</span></label>
+        <label class="risk"><input type="checkbox" data-rgbbeta ${r.betaOk ? 'checked' : ''}><span>I understand RGB is a beta and my recovery phrase is what unlocks my RGB backup.</span></label>
         <button class="btn primary wide" data-rgb="betaYes" ${r.betaOk && !r.busy ? '' : 'disabled'}>Turn on RGB beta</button>
         <button class="btn ghost wide" data-rgb="betaNo">Not now</button>
       </section>`;
@@ -66,9 +66,13 @@ export class RgbHome {
     const list = r.assets();
     const { settled, pending } = r.btc();
     const t = r.isMain ? '' : 'test ';
-    const backupDue = r.isMain && r.service?.backupRequired
-      ? `<button class="hint hint-cta" data-rgb="backup" ${r.busy ? 'disabled' : ''}><span class="hint-ic">${I.check}</span><span><b>Save your RGB backup</b><span>${r.service?.everBackedUp ? 'Something changed since your last backup. Save a new one to keep it.' : 'Needed once before you use RGB. Your recovery phrase alone can\'t bring RGB tokens back.'}</span></span><span class="chev">›</span></button>`
-      : '';
+    // with cloud backup on, Home only speaks up when the cloud could not save
+    const cloudFail = r.isMain && r.cloudOn && r.cloud.error && r.service?.backupRequired;
+    const backupDue = cloudFail
+      ? `<button class="hint hint-cta" data-go="settings"><span class="hint-ic">${I.check}</span><span><b>RGB cloud backup didn't save</b><span>${esc(r.cloud.error)} Open Settings → RGB.</span></span><span class="chev">›</span></button>`
+      : r.isMain && !r.cloudOn && r.service?.backupRequired
+        ? `<button class="hint hint-cta" data-rgb="backup" ${r.busy ? 'disabled' : ''}><span class="hint-ic">${I.check}</span><span><b>Save your RGB backup</b><span>${r.service?.everBackedUp ? 'Something changed since your last backup. Save a new one to keep it.' : 'Needed once before you use RGB. Your recovery phrase alone can\'t bring RGB tokens back.'}</span></span><span class="chev">›</span></button>`
+        : '';
     const fund = settled + pending < RGB_LOW_BTC
       ? `<button class="hint hint-cta" data-rgb="fund"><span class="hint-ic">${I.recv}</span><span><b>Add ${t}BTC for RGB</b><span>RGB pays its own network fees. Send ${RGB_FUND_BTC} from your Public balance.</span></span><span class="chev">›</span></button>`
       : '';
@@ -315,19 +319,38 @@ export class RgbSettings {
     const { settled, pending } = r.btc();
     return `<section class="card"><details class="menu-det" data-k="rgb"><summary class="menu-row"><span>${I.mint}<b>${r.isMain ? 'RGB (beta)' : 'RGB (test)'}</b></span><span class="small muted">${r.ready ? 'on' : r.exists ? 'opening' : 'off'} ›</span></summary>
       <div class="det-body">
-        ${nets ? `<div class="field"><span class="lbl">Test network</span>${nets}</div>` : '<p class="info warn">Beta on Bitcoin mainnet. RGB tokens can only be restored from an RGB backup file, so save one after every change. Keep amounts small.</p>'}
+        ${nets ? `<div class="field"><span class="lbl">Test network</span>${nets}</div>` : `<p class="info warn">Beta on Bitcoin mainnet. RGB tokens can only be restored from an RGB backup, not from the recovery phrase alone. Keep amounts small.</p>${RgbSettings.cloud(r)}`}
         ${r.ready ? `
         ${rowKV(r.isMain ? 'BTC for RGB fees' : 'Test BTC for fees', `${fmtBtc(settled)} ${r.isMain ? 'BTC' : 'tBTC'}${pending ? ` <span class="muted">+${fmtBtc(pending)} pending</span>` : ''}`)}
         <p class="addr mono small">${addrChunks(r.data?.address || '')}</p>
         <button class="btn ghost sm" data-copy="${esc(r.data?.address || '')}">${I.copy}<span>Copy RGB address</span></button>
         <p class="muted small">${esc(r.profile.funding)}</p>
         <button class="btn ghost wide" data-rgb="backup" ${r.busy ? 'disabled' : ''}>Save RGB backup file</button>
-        <p class="muted small">${r.service?.backupRequired ? 'Changed since your last RGB backup.' : 'Backup up to date.'} Restoring needs this same MASKED wallet.</p>
+        <p class="muted small">${r.isMain && r.cloudOn ? 'A file is an extra copy you keep yourself.' : r.service?.backupRequired ? 'Changed since your last RGB backup.' : 'Backup up to date.'} Restoring needs this same MASKED wallet.</p>
         <button class="btn ghost wide" data-rgb="off" ${r.busy ? 'disabled' : ''}>Turn off RGB for now</button>
         ${r.isMain ? `<button class="btn ghost wide" data-rgb="betaOff" ${r.busy ? 'disabled' : ''}>Switch off RGB beta</button>` : ''}` : `
         ${r.exists ? '' : `<button class="btn primary wide" data-rgb="on" ${r.busy ? 'disabled' : ''}>Turn on RGB</button>`}`}
         <details><summary>Restore an RGB backup</summary><input id="rgbRestore" type="file" accept=".json,application/json"><button class="btn ghost wide" data-rgb="restore" ${r.busy ? 'disabled' : ''}>Restore</button></details>
         ${msg(r)}
       </div></details></section>`;
+  }
+  /** Settings → RGB → cloud backup: status, and the switch. */
+  static cloud(r) {
+    const ago = (t) => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : dayLabel(t); };
+    if (!r.cloudOn) return `<div class="cloud-box"><div class="cloud-h"><b>Cloud backup</b><span class="muted small">off</span></div>
+      <p class="muted small">Save a backup file after every RGB change, or switch the encrypted cloud backup back on.</p>
+      <button class="btn ghost wide" data-rgb="cloudOn" ${r.busy ? 'disabled' : ''}>Switch on cloud backup</button></div>`;
+    if (r.cloudAsk) return `<div class="cloud-box rgb-ask"><b>Switch off cloud backup?</b>
+      <p class="muted small">Every copy on MASKED's server is deleted. Your RGB tokens then depend on backup files you save yourself, after every change.</p>
+      <button class="btn primary wide" data-rgb="cloudOffYes" ${r.busy ? 'disabled' : ''}>Switch off and delete</button>
+      <button class="btn ghost wide" data-rgb="cloudKeep">Keep cloud backup</button></div>`;
+    const state = r.cloud.saving ? 'saving…' : r.cloud.error ? 'not saved' : r.cloudAt ? `saved ${ago(r.cloudAt)}` : r.ready ? 'waiting' : 'on';
+    return `<div class="cloud-box"><div class="cloud-h"><b>Cloud backup (encrypted)</b><span class="small ${r.cloud.error ? 'warn' : 'muted'}">${state}</span></div>
+      <p class="muted small">Saved after every RGB change. It's encrypted in this browser with keys from your recovery phrase, then signed, so MASKED's server only stores data it can't read or change. A new browser with the same phrase restores it when you turn on RGB.</p>
+      ${r.cloud.error ? `<p class="msg warn" role="status">${esc(r.cloud.error)}</p>
+        ${r.cloud.conflict ? `<p class="muted small">If this browser has your latest RGB tokens, make it the cloud backup. Otherwise use RGB in the other browser.</p>
+          <button class="btn ghost wide" data-rgb="cloudReplace" ${r.busy ? 'disabled' : ''}>Use this browser's RGB as the backup</button>`
+          : `<button class="btn ghost wide" data-rgb="cloudRetry" ${r.busy ? 'disabled' : ''}>Try again</button>`}` : ''}
+      <button class="btn ghost wide" data-rgb="cloudOff" ${r.busy ? 'disabled' : ''}>Switch off cloud backup</button></div>`;
   }
 }
