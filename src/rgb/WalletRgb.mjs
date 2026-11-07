@@ -284,9 +284,8 @@ export class WalletRgb {
       return this.action('on');
     }
     if (!this.available) throw new Error('Open your wallet on Signet first.');
-    if (this.isMain && name === 'issue') throw new Error('Creating tokens is off in the mainnet beta.');
     // mainnet: no receive or send while the backup is out of date, so tokens are never only in this browser
-    if (this.isMain && ['invoice', 'review', 'confirm'].includes(name) && this.service?.backupRequired) {
+    if (this.isMain && ['invoice', 'review', 'confirm', 'issue'].includes(name) && this.service?.backupRequired) {
       this.message = 'Save your RGB backup first: Home → Save your RGB backup, or Settings → RGB. On mainnet your recovery phrase alone can\'t bring RGB tokens back.';
       return app.render();
     }
@@ -323,6 +322,7 @@ export class WalletRgb {
       case 'send': this.asset = arg; this.pending = null; this.sent = null; this.fields.sendTo = ''; this.fields.sendAmt = ''; state.view = 'rgbsend'; return app.render();
       case 'issue': {
         const params = newAsset(this.fields);
+        if (this.isMain && !confirm(`Create ${params.ticker} on Bitcoin mainnet?\n\nSupply: ${this.fields.supply} (fixed forever, all to this wallet)\nCost: one Bitcoin transaction fee\n\nAfter it is created, save a new RGB backup: the token exists only in your wallet and its backups.`)) return undefined;
         return this.run(async () => {
           this.message = 'Creating…'; app.render();
           const a = await this.withOutputs(() => this.service.issue(this.fields));

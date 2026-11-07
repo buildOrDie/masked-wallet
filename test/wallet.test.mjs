@@ -262,7 +262,13 @@ test('RGB mainnet beta: opt-in, keys of its own, backup before every receive and
   assert.equal(called, false);
   assert.match(app.rgb.message, /Save your RGB backup first/);
   assert.match(app.ui.views.home.render(), /Save your RGB backup/);
-  await assert.rejects(() => app.rgb.action('issue'), /off in the mainnet beta/);
+  // creating a token on mainnet: also blocked while the backup is out of date
+  let issued = false;
+  app.rgb.service.issue = async () => { issued = true; return {}; };
+  app.rgb.message = '';
+  await app.rgb.action('issue');
+  assert.equal(issued, false);
+  assert.match(app.rgb.message, /Save your RGB backup first/);
   localStorage.removeItem('masked.rgb.mainnet-beta');
 });
 

@@ -217,7 +217,6 @@ export class RgbMint {
   /** The "RGB token" tab of Mint: create a token, then a done screen. */
   static render(app) {
     const r = app.rgb;
-    if (r.isMain) return '<section class="card form"><p class="info">Creating RGB tokens is off in the mainnet beta. You can receive and send them.</p></section>';
     if (!r.ready) {
       return `<section class="card form"><p class="info">RGB tokens live off the blockchain: only you and the people you send them to see balances.</p>
         ${r.exists ? `<p class="muted center">${r.phase === 'error' ? esc(r.message) : 'Opening RGB…'}</p>` : `<button class="btn primary wide" data-rgb="on" ${r.busy ? 'disabled' : ''}>${r.busy ? 'Turning on…' : 'Turn on RGB'}</button>`}</section>`;
@@ -226,14 +225,16 @@ export class RgbMint {
       const a = r.find(r.issued.assetId);
       return `<section class="done"><div class="done-ic">${I.check}</div><h1>${esc(r.issued.ticker)} created</h1>
         <p>${a ? r.amount(a, a.balance?.settled ?? a.issuedSupply) : esc(r.issued.supply)} ${esc(r.issued.ticker)} are in your wallet.</p>
-        <p class="muted small">${esc(r.profile.label)} test token · no value</p>
+        <p class="muted small">${r.isMain ? 'Bitcoin mainnet · save a new RGB backup now' : `${esc(r.profile.label)} test token · no value`}</p>
+        ${r.isMain ? `<button class="btn primary wide" data-rgb="backup" ${r.busy ? 'disabled' : ''}>Save RGB backup</button>` : ''}
         ${a ? `<button class="btn primary wide" data-rgb="token" data-rgb-arg="${esc(a.assetId)}">View ${esc(a.ticker)}</button>` : ''}
         <button class="btn ghost wide" data-rgb="issueAgain">Create another</button></section>`;
     }
     const { settled, pending } = r.btc();
     const low = r.data && settled + pending < RGB_LOW_BTC;
-    return `<div class="testnet-note"><span class="dot-warn"></span>${esc(r.profile.label)} · test tokens with no value</div>
-    ${low ? `<button class="hint hint-cta" data-rgb="fund"><span class="hint-ic">${I.recv}</span><span><b>Add test BTC first</b><span>Creating a token needs a little test BTC for the network fee.</span></span><span class="chev">›</span></button>` : ''}
+    const t = r.isMain ? '' : 'test ';
+    return `${r.isMain ? '<div class="testnet-note"><span class="dot-warn"></span>Bitcoin mainnet · RGB beta · the supply is fixed forever</div>' : `<div class="testnet-note"><span class="dot-warn"></span>${esc(r.profile.label)} · test tokens with no value</div>`}
+    ${low ? `<button class="hint hint-cta" data-rgb="fund"><span class="hint-ic">${I.recv}</span><span><b>Add ${t}BTC first</b><span>Creating a token needs a little ${t}BTC for the network fee.</span></span><span class="chev">›</span></button>` : ''}
     <section class="card form">
       <div class="row2">
         ${input(r, 'name', 'Name', 'maxlength="40" placeholder="Masked Dollar"')}
@@ -243,7 +244,7 @@ export class RgbMint {
       <details class="adv"><summary>Decimals</summary>${input(r, 'precision', 'Decimals', 'type="number" min="0" max="8"', '0 to 8')}</details>
       ${msg(r)}
       <button class="btn primary wide" data-rgb="issue" ${r.busy ? 'disabled' : ''}>${r.busy ? esc(r.message || 'Creating…') : 'Create token'}</button>
-      <p class="info">The whole supply goes to your wallet. The first token takes a minute to set up.</p>
+      <p class="info">The whole supply goes to your wallet. The first token takes a minute to set up.${r.isMain ? ' Standard RGB token (NIA): other RGB wallets can receive it.' : ''}</p>
     </section>`;
   }
 }
