@@ -67,3 +67,14 @@ test('only whole class names mark text as untouchable (addr-kind is a label, add
   assert.equal(trHtml('<span class="addr">Send</span>'), '<span class="addr">Send</span>');
   _setLangForTest('en');
 });
+
+test('the review file matches the dictionary (a reviewer\'s edit is imported before release)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const lines = readFileSync(new URL('../docs/i18n/zh-CN.csv', import.meta.url), 'utf8').trim().split('\n');
+  assert.equal(lines[0], 'screen,English,中文,reviewed,note');
+  const rows = lines.slice(1).map((l) => [...l.matchAll(/"((?:[^"]|"")*)"/g)].map((m) => m[1].replace(/""/g, '"')));
+  const inCsv = new Map(rows.map((r) => [r[1], r[2]]));
+  assert.equal(inCsv.size, Object.keys(ZH_CN).length, 'every line is in the review file once (run node scripts/i18n-export.mjs)');
+  for (const [en, zh] of Object.entries(ZH_CN)) assert.equal(inCsv.get(en), zh, `review file out of date for: ${en} (run node scripts/i18n-import.mjs)`);
+  for (const r of rows) assert.ok(['yes', 'no'].includes(r[3]), `reviewed must be yes or no: ${r[1]}`);
+});

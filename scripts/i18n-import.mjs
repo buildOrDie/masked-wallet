@@ -1,4 +1,5 @@
 // Reads docs/i18n/zh-CN.csv back into src/i18n/zh-CN.mjs after review (English keys must not change).
+// A translation that drops a {0} placeholder or an inline tag is refused, with the row named.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { ZH_CN } from '../src/i18n/zh-CN.mjs';
 
@@ -8,8 +9,11 @@ let changed = 0;
 const src = readFileSync('src/i18n/zh-CN.mjs', 'utf8');
 let out = src;
 for (const row of rows) {
-  const [en, zh] = [...row.matchAll(cell)].map((m) => m[1].replace(/""/g, '"'));
+  const c = [...row.matchAll(cell)].map((m) => m[1].replace(/""/g, '"'));
+  const [en, zh] = c.length === 5 ? [c[1], c[2]] : [c[0], c[1]]; // screen, English, 中文, reviewed, note
   if (!(en in ZH_CN) || !zh || zh === ZH_CN[en]) continue;
+  const ph = (s) => (s.match(/\{\d\}/g) || []).sort().join(), tags = (s) => (s.match(/<\/?(b|strong|em|i|u|br)\b[^>]*>/g) || []).join();
+  if (ph(zh) !== ph(en) || tags(zh) !== tags(en)) { console.error(`kept the old translation, {n} or <b> tags differ: ${en}`); continue; }
   const lit = (s) => `'${s.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
   const before = `${lit(en)}: ${lit(ZH_CN[en])},`;
   if (!out.includes(before)) { console.error('could not place:', en); continue; }

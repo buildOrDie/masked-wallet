@@ -23,6 +23,8 @@ It also does:
 
 > Experimental, unaudited software. Use small amounts. Read [SECURITY.md](SECURITY.md).
 
+> 🇨🇳 **Help review the Chinese translation · 帮忙校对中文翻译** — no coding needed: [docs/i18n](docs/i18n/TRANSLATING.md)
+
 ## Screenshots
 
 | Public | Shielded | Shielded token |

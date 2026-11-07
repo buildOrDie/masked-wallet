@@ -1,0 +1,56 @@
+name: "Translation · 翻译"
+description: "A wrong, unclear or missing translation · 翻译有误、不清楚或缺失"
+title: "[zh-CN] "
+labels: ["translation", "zh-CN"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping! 感谢帮忙校对！
+        All lines are in [docs/i18n/zh-CN.csv](https://github.com/buildOrDie/masked-wallet/blob/main/docs/i18n/zh-CN.csv). You can also fix them there directly with the ✏️ button.
+        所有句子都在 [docs/i18n/zh-CN.csv](https://github.com/buildOrDie/masked-wallet/blob/main/docs/i18n/zh-CN.csv)，也可以点 ✏️ 直接修改并提交。
+        **Never post your recovery phrase, password or private keys. 切勿贴出助记词、密码或私钥。**
+  - type: dropdown
+    id: screen
+    attributes:
+      label: "Screen · 页面"
+      options:
+        - "Setup & unlock · 创建与解锁"
+        - "Home · 首页"
+        - "Send & Shield · 发送与转入隐私"
+        - "Receive · 接收"
+        - "Coins & accounts · UTXO 与账户"
+        - "Settings · 设置"
+        - "Messages · 提示"
+        - "Still in English · 还是英文"
+        - "Other · 其他"
+    validations:
+      required: true
+  - type: input
+    id: english
+    attributes:
+      label: "English text · 英文原文"
+      placeholder: "Show recovery phrase"
+    validations:
+      required: true
+  - type: input
+    id: current
+    attributes:
+      label: "Current Chinese · 现在的中文"
+      placeholder: "显示助记词"
+  - type: input
+    id: suggested
+    attributes:
+      label: "Suggested Chinese · 建议的中文"
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: "Why · 原因"
+      description: "What sounds wrong or could confuse someone? 哪里不对，或者可能让人误解？"
+  - type: input
+    id: screenshot
+    attributes:
+      label: "Screenshot (optional) · 截图（可选）"
+      description: "Hide your address and balances. 请遮住你的地址和余额。"
