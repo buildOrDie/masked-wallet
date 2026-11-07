@@ -68,24 +68,31 @@ function rejectPending(id, message = 'User rejected the request.') {
 }
 // RGB servers allowed from the toolbar popup: Chrome's prompt closed the popup, so reopen MASKED at the same step.
 // One approval in all: the reopened page already has the permission and carries on.
+const popupOpen = async () => {
+  if (!chrome.runtime.getContexts) return false;
+  try { return (await chrome.runtime.getContexts({ contextTypes: ['POPUP'] })).length > 0; } catch { return false; }
+};
 chrome.permissions.onAdded.addListener(async () => {
   await new Promise((r) => setTimeout(r, 400)); // a popup that stayed open clears the pending step itself
   let id = null;
   try { id = (await chrome.storage.session.get(RGB_PENDING))[RGB_PENDING]; } catch { return; }
   if (!id) return;
   await chrome.storage.session.remove(RGB_PENDING).catch(() => {});
+  // the popup didn't close after all (it carries on by itself): never open a second MASKED
+  if (await popupOpen()) return;
   const page = `masked.html?popup=1&rgbResume=${encodeURIComponent(id)}`;
   if (chrome.action?.openPopup && ![...pending.values()].some((p) => p.mode === 'popup')) {
     try {
       await chrome.action.setPopup({ popup: page });
       await Promise.race([chrome.action.openPopup(), new Promise((_, no) => setTimeout(() => no(new Error('popup timeout')), 1500))]);
+      // any open popup counts: the page drops ?rgbResume from its address as soon as it has read it
       for (let i = 0; i < 10; i++) {
         await new Promise((r) => setTimeout(r, 100));
-        const ctx = chrome.runtime.getContexts ? await chrome.runtime.getContexts({ contextTypes: ['POPUP'] }) : [{ documentUrl: page }];
-        if (ctx.some((c) => String(c.documentUrl || '').includes(id))) return void resetPopup();
+        if (await popupOpen()) return void resetPopup();
       }
     } catch { /* no focused browser window: a small window instead */ }
     await resetPopup();
+    if (await popupOpen()) return;
   }
   const url = chrome.runtime.getURL(page);
   const browser = await chrome.windows.getLastFocused({ windowTypes: ['normal'] }).catch(() => null);
