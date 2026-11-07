@@ -74,8 +74,8 @@ export class RgbHome {
       : '';
     // RGB's own test BTC (it pays RGB's network fees), with its address: tap to copy
     const addr = r.data.address || '';
-    const feeRow = `<button class="tok-line" data-copy="${esc(addr)}" title="Copy RGB address">${btcLogo}
-        <span class="bal-txt"><b class="tk">${r.isMain ? 'BTC for RGB fees' : 'Test BTC for fees'}</b><span class="mono">${esc(short(addr, 6))} ${I.copy}</span></span>
+    const feeRow = `<button class="tok-line rgb-fee" data-copy="${esc(addr)}" title="Copy RGB address">${btcLogo}
+        <span class="bal-txt"><b class="tk">${r.isMain ? 'RGB fees' : 'Test BTC for fees'}</b><span class="mono">${esc(short(addr, 6))} ${I.copy}</span></span>
         <span class="bal-amt"><b>${fmtBtc(settled)}</b><span>${pending ? `<span class="pend-t">+${fmtBtc(pending)} waiting for a block</span>` : r.isMain ? 'BTC' : 'tBTC'}</span></span></button>`;
     return `<section class="home-toks">
       <div class="list-h"><b>RGB tokens${r.isMain ? ' <span class="badge">beta</span>' : ''}</b><button class="link small" data-rgb="refresh" ${r.busy ? 'disabled' : ''}>${r.busy ? 'Updating…' : 'Refresh'}</button></div>

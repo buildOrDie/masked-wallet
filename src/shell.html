@@ -570,6 +570,10 @@ a.act, a.act:hover { text-decoration: none; color: inherit; }
 .rgb-inv .inv-done { color: #3fd68f; }
 .rgb-inv .inv-expired, .rgb-inv .inv-failed { color: var(--muted, #a89f96); }
 .rgb-inv > span:first-child { display: flex; flex-direction: column; gap: 2px; }
+
+.rgb-fee .bal-txt b, .rgb-fee .bal-amt b { white-space: nowrap; }
+.rgb-fee .bal-txt b { overflow: hidden; text-overflow: ellipsis; }
+.rgb-fee .bal-amt { flex: none; }
 </style>
 </head>
 <body>
