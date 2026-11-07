@@ -377,13 +377,12 @@ export class WalletRgb {
       case 'issueEdit': this.issueAsk = null; return app.render();
       case 'cancelInv': { // one invoice (arg = recipient ID) or every open one (no arg)
         const ids = arg ? [arg] : this.invoices().filter((x) => this.invoiceStatus(x).key === 'waiting').map((x) => x.recipientId);
-        if (!ids.length) { this.message = 'No open invoices to cancel.'; return app.render(); }
         return this.run(async () => {
-          const n = await this.service.cancelInvoices(ids);
+          const n = await this.service.cancelInvoices(arg ? ids : null);
           this.markCancelled(ids);
           if (this.invoice && ids.some((id) => this.invoices().find((x) => x.recipientId === id)?.invoice === this.invoice)) this.invoice = '';
           await this.refresh();
-          app.toast(n ? `${n} invoice${n === 1 ? '' : 's'} cancelled` : 'Invoices cancelled');
+          app.toast(n ? `${n} invoice${n === 1 ? '' : 's'} cancelled` : 'No open invoices: the tokens are held by a transfer in progress');
         });
       }
       case 'showInv': { // reopen an invoice from the list

@@ -106,8 +106,8 @@ export class RgbTokenView extends View {
         <div class="d-row"><span>Available to send</span><b>${r.amount(a, sp)}</b></div>
         ${s > sp ? (() => {
           const open = r.invoices().filter((x) => !x.witness && r.invoiceStatus(x).key === 'waiting').length;
-          return `<p class="info warn small">${r.amount(a, s - sp)} ${esc(a.ticker)} ${open ? `are locked by ${open === 1 ? 'an open Private invoice' : `${open} open Private invoices`}: a Private invoice reserves the RGB output these tokens sit on until it's paid or expires.` : 'are locked by a transfer in progress. They free up once it confirms: tap Refresh in a few minutes.'}</p>
-            ${open ? `<button class="btn ghost wide" data-rgb="cancelInv" ${r.busy ? 'disabled' : ''}>Cancel open invoices</button>` : ''}`;
+          return `<p class="info warn small">${r.amount(a, s - sp)} ${esc(a.ticker)} ${open ? `are locked by ${open === 1 ? 'an open Private invoice' : `${open} open Private invoices`}: a Private invoice reserves the RGB output these tokens sit on until it's paid or expires.` : 'are locked by an open Private invoice or a transfer in progress. An open invoice can be cancelled; a transfer frees them once it confirms.'}</p>
+            <button class="btn ghost wide" data-rgb="cancelInv" ${r.busy ? 'disabled' : ''}>Cancel open invoices</button>`;
         })() : ''}
         <div class="tok-acts">
           <button class="tact" data-rgb="send" data-rgb-arg="${esc(a.assetId)}" ${sp ? '' : 'disabled'}>${I.send}<span>Send</span></button>

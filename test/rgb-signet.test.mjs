@@ -182,3 +182,14 @@ test('cancelling invoices fails only our receives still waiting for the other wa
   assert.deepEqual(failed, [7], 'a settled receive and an outgoing send are never touched');
   assert.equal(f.service.backupRequired, true);
 });
+
+test('cancelling every open invoice (none named) also catches ones made before the list existed', async () => {
+  const f = fixture(); await open(f);
+  const failed = [];
+  const w = f.service.requireWallet();
+  w.listAssets = async () => ({ nia: [] });
+  w.listTransfers = async () => [{ recipientId: 'utxob:OLD', status: 'WaitingCounterparty', kind: 'ReceiveBlind', batchTransferIdx: 3 }];
+  w.failTransfer = async (i) => { failed.push(i); return true; };
+  assert.equal(await f.service.cancelInvoices(), 1);
+  assert.deepEqual(failed, [3]);
+});

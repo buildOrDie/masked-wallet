@@ -96,13 +96,13 @@ export class SignetWallet {
    * Cancel invoices of ours nobody has paid yet (their recipient IDs): the transfers waiting for the other wallet
    * are marked failed, which frees the RGB outputs they reserved. Paid or settled ones are left alone.
    */
-  cancelInvoices(recipientIds) {
-    const want = new Set(recipientIds.map(String));
+  cancelInvoices(recipientIds = null) {
+    const want = recipientIds ? new Set(recipientIds.map(String)) : null; // null: every open invoice, also ones made before the list existed
     return this.mutate(async (wallet) => {
       const assets = Object.values(await wallet.listAssets()).flat().map((a) => a.assetId);
       const all = [];
       for (const id of [null, ...assets]) all.push(...await wallet.listTransfers(id));
-      const idx = [...new Set(all.filter((t) => want.has(String(t?.recipientId ?? '')) && t?.status === 'WaitingCounterparty' && /^Receive/.test(String(t?.kind ?? ''))).map((t) => Number(t.batchTransferIdx)))];
+      const idx = [...new Set(all.filter((t) => (!want || want.has(String(t?.recipientId ?? ''))) && t?.status === 'WaitingCounterparty' && /^Receive/.test(String(t?.kind ?? ''))).map((t) => Number(t.batchTransferIdx)))];
       let n = 0;
       for (const i of idx) if (Number.isFinite(i) && await wallet.failTransfer(i)) n++;
       return n;
