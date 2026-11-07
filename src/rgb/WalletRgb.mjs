@@ -77,6 +77,7 @@ export class WalletRgb {
     /** @type {any} the token about to be created on mainnet, shown for review first */
     this.issueAsk = null;
     this.betaAsk = false; // the mainnet beta explanation is open on Home
+    this.needBackup = false; // an action waited for the first backup: show the button where the message is
     this.betaOk = false;  // its "I understand" box is ticked
     this.pending = null;  // a reviewed send
     this.sent = null;     // { txid, amount, ticker } after Send
@@ -290,11 +291,14 @@ export class WalletRgb {
       return this.action('on');
     }
     if (!this.available) throw new Error('Open your wallet on Signet first.');
-    // mainnet: no receive or send while the backup is out of date, so tokens are never only in this browser
-    if (this.isMain && ['invoice', 'review', 'confirm', 'issue'].includes(name) && this.service?.backupRequired) {
-      this.message = 'Save your RGB backup first: Home → Save your RGB backup, or Settings → RGB. On mainnet your recovery phrase alone can\'t bring RGB tokens back.';
+    // mainnet: one backup must exist before RGB is used (it holds the RGB keys); after that, Home reminds
+    // whenever something changed, without blocking (a block on every change would block every receive)
+    if (this.isMain && ['invoice', 'review', 'confirm', 'issue'].includes(name) && !this.service?.everBackedUp) {
+      this.message = 'Save your RGB backup once before using RGB on mainnet. Your recovery phrase alone can\'t bring RGB tokens back.';
+      this.needBackup = true;
       return app.render();
     }
+    this.needBackup = false;
     if (['fund', 'mint', 'token', 'receive', 'send'].includes(name)) this.message = ''; // a new screen starts clean
     switch (name) {
       case 'on': return this.run(async () => {
@@ -415,6 +419,7 @@ export class WalletRgb {
         const link = document.createElement('a'); link.href = url; link.download = `masked-rgb-${this.profile.id}-backup.json`; link.click();
         setTimeout(() => URL.revokeObjectURL(url), 10000);
         this.service.backupSaved();
+        if (this.needBackup) { this.needBackup = false; this.message = 'Backup saved. You can continue.'; }
         app.toast('RGB backup saved');
       });
       case 'restore': {

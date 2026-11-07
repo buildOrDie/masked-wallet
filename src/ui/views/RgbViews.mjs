@@ -10,7 +10,8 @@ import { I, addrChunks, btcLogo, head, qrSvg, rowKV, tokIcon } from '../html.mjs
 export const rgbBadge = '<span class="badge rgb">RGB</span>';
 const rgbIcon = (ticker, big = false) => tokIcon(ticker || 'RG', big).replace('class="tok-ic', 'class="tok-ic rgb');
 const input = (r, key, label, extra = '', right = '') => `<label class="field"><span class="lbl">${label}${right ? ` <span class="lbl-r">${right}</span>` : ''}</span><input data-rgb-field="${key}" value="${esc(r.fields[key])}" autocomplete="off" spellcheck="false" ${extra}></label>`;
-const msg = (r) => (r.message ? `<p class="msg" role="status">${esc(r.message)}</p>` : '');
+const msg = (r) => (r.message ? `<p class="msg" role="status">${esc(r.message)}</p>` : '')
+  + (r.needBackup && r.isMain ? `<button class="btn ghost wide" data-rgb="backup" ${r.busy ? 'disabled' : ''}>${I.check}<span>Save RGB backup</span></button>` : '');
 
 /** Status words for a transfer, from the person's side. */
 const STATUS = { WaitingCounterparty: 'Waiting for the other wallet', WaitingConfirmations: 'Waiting for a block', Settled: '', Failed: 'Failed' };
@@ -37,7 +38,7 @@ export class RgbHome {
         <h2>RGB tokens on mainnet (beta)</h2>
         <ul class="ask-list">
           <li>RGB tokens can only be restored from an <b>RGB backup file</b>, not from your recovery phrase alone.</li>
-          <li>MASKED asks you to save a backup before every receive, send and new token.</li>
+          <li>MASKED asks you to save one backup before you start, then reminds you after every change.</li>
           <li>RGB has keys of its own: its coins never mix with your Public or Shielded BTC.</li>
           <li>It's a beta: keep amounts small.</li>
         </ul>
@@ -66,7 +67,7 @@ export class RgbHome {
     const { settled, pending } = r.btc();
     const t = r.isMain ? '' : 'test ';
     const backupDue = r.isMain && r.service?.backupRequired
-      ? `<button class="hint hint-cta" data-rgb="backup" ${r.busy ? 'disabled' : ''}><span class="hint-ic">${I.check}</span><span><b>Save your RGB backup</b><span>Needed before your next receive or send. Your recovery phrase alone can't bring RGB tokens back.</span></span><span class="chev">›</span></button>`
+      ? `<button class="hint hint-cta" data-rgb="backup" ${r.busy ? 'disabled' : ''}><span class="hint-ic">${I.check}</span><span><b>Save your RGB backup</b><span>${r.service?.everBackedUp ? 'Something changed since your last backup. Save a new one to keep it.' : 'Needed once before you use RGB. Your recovery phrase alone can\'t bring RGB tokens back.'}</span></span><span class="chev">›</span></button>`
       : '';
     const fund = settled + pending < RGB_LOW_BTC
       ? `<button class="hint hint-cta" data-rgb="fund"><span class="hint-ic">${I.recv}</span><span><b>Add ${t}BTC for RGB</b><span>RGB pays its own network fees. Send ${RGB_FUND_BTC} from your Public balance.</span></span><span class="chev">›</span></button>`

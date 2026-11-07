@@ -253,22 +253,26 @@ test('RGB mainnet beta: opt-in, keys of its own, backup before every receive and
   assert.equal(words, mnemonicFrom(await app.rgb.mainSeed()));
   assert.ok(validateMnemonic(words, wordlist));
   assert.notEqual(words, WORDS);
-  // an out-of-date backup blocks receive and send
+  // no backup saved yet: receive and create wait for the first one, with the button right there
   rgbReady(app);
-  app.rgb.service.backupRequired = true;
+  Object.assign(app.rgb.service, { backupRequired: true, everBackedUp: false });
   let called = false;
   app.rgb.service.receive = async () => { called = true; return { invoice: 'rgb:x' }; };
   await app.rgb.action('invoice');
   assert.equal(called, false);
-  assert.match(app.rgb.message, /Save your RGB backup first/);
+  assert.match(app.rgb.message, /Save your RGB backup once/);
+  assert.match(app.ui.views.receive.render?.() || '', /data-rgb="backup"|/);
   assert.match(app.ui.views.home.render(), /Save your RGB backup/);
-  // creating a token on mainnet: also blocked while the backup is out of date
   let issued = false;
   app.rgb.service.issue = async () => { issued = true; return {}; };
-  app.rgb.message = '';
-  await app.rgb.action('issue');
+  await app.rgb.action('issue', 'go');
   assert.equal(issued, false);
-  assert.match(app.rgb.message, /Save your RGB backup first/);
+  // after one backup: a later change only reminds on Home, it never blocks a receive
+  app.rgb.service.everBackedUp = true;
+  app.rgb.fields.recvType = 'witness';
+  await app.rgb.action('invoice');
+  assert.equal(called, true);
+  assert.match(app.ui.views.home.render(), /Something changed since your last backup/);
   localStorage.removeItem('masked.rgb.mainnet-beta');
 });
 

@@ -14,6 +14,8 @@ export class SignetWallet {
   get dirtyKey() { return dirtyKey(this.profile); }
   get exists() { return !!this.storage.getItem(this.vaultKey); }
   get backupRequired() { return this.storage.getItem(this.dirtyKey) === '1'; }
+  /** A backup file has been saved at least once (it holds the RGB keys; later backups add the latest tokens). */
+  get everBackedUp() { return this.storage.getItem(`${this.vaultKey}.backed-up`) === '1'; }
   async exclusive(fn) {
     if (this.busy) throw new Error('Wait for the current RGB operation.');
     this.busy = true;
@@ -117,7 +119,7 @@ export class SignetWallet {
       return encryptRgb({ mnemonic: this.mnemonic, rgbBackup: b64(bytes) }, this.password, this.profile.id);
     });
   }
-  backupSaved() { this.storage.setItem(this.dirtyKey, '0'); }
+  backupSaved() { this.storage.setItem(this.dirtyKey, '0'); this.storage.setItem(`${this.vaultKey}.backed-up`, '1'); }
   async close() {
     const wallet = this.wallet;
     this.wallet = null; this.mnemonic = ''; this.password = '';
