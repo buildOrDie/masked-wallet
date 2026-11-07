@@ -27,7 +27,11 @@ export function historyRow(t, a, r) {
     if (t.status === 'WaitingCounterparty' && !got) return null; // an invoice nobody has paid yet
     return { label: 'Received', sign: '+', amount: got ? r.amount(a, got) : '…', note: STATUS[t.status] ?? '', txid: t.txid };
   }
-  if (kind === 'Send') return { label: 'Sent', sign: '−', amount: r.amount(a, fungible(t.requestedAssignment)), note: STATUS[t.status] ?? '', txid: t.txid };
+  if (kind === 'Send') {
+    // not broadcast until the other wallet accepts it: no transaction on mempool yet, and it can be cancelled
+    const unsent = t.status === 'WaitingCounterparty';
+    return { label: unsent ? 'Sending' : 'Sent', sign: '−', amount: r.amount(a, fungible(t.requestedAssignment)), note: unsent ? 'Waiting for the other wallet to accept. Not on mempool until then.' : STATUS[t.status] ?? '', txid: unsent ? '' : t.txid, cancel: unsent ? Number(t.batchTransferIdx) : null };
+  }
   return { label: kind || 'Transfer', sign: '', amount: got ? r.amount(a, got) : '', note: STATUS[t.status] ?? '', txid: t.txid };
 }
 
@@ -118,8 +122,14 @@ export class RgbTokenView extends View {
           <button class="btn ghost sm" data-rgb="doubledOk" data-rgb-arg="${esc(a.assetId)}">Got it</button>` : ''}
         ${s > sp ? (() => {
           const open = r.invoices().filter((x) => !x.witness && r.invoiceStatus(x).key === 'waiting').length;
-          return `<p class="info warn small">${r.amount(a, s - sp)} ${esc(a.ticker)} ${open ? `are locked by ${open === 1 ? 'an open Private invoice' : `${open} open Private invoices`}: a Private invoice reserves the RGB output these tokens sit on until it's paid or expires.` : 'are locked by an open Private invoice or a transfer in progress. An open invoice can be cancelled; a transfer frees them once it confirms.'}</p>
-            <button class="btn ghost wide" data-rgb="cancelInv" ${r.busy ? 'disabled' : ''}>Cancel open invoices</button>`;
+          const unsent = r.unsent(a.assetId).length;
+          const why = unsent
+            ? `are held by ${unsent === 1 ? 'a transfer' : `${unsent} transfers`} the other wallet hasn't accepted yet. Nothing has been broadcast, so you can cancel ${unsent === 1 ? 'it' : 'them'}: the tokens come back straight away.`
+            : open ? `are locked by ${open === 1 ? 'an open Private invoice' : `${open} open Private invoices`}: a Private invoice reserves the RGB output these tokens sit on until it's paid or expires.`
+              : 'are held by a transfer waiting for a block. They are freed once it confirms.';
+          return `<p class="info warn small">${r.amount(a, s - sp)} ${esc(a.ticker)} ${why}</p>
+            ${unsent ? `<button class="btn ghost wide" data-rgb="cancelSend" ${r.busy ? 'disabled' : ''}>Cancel unsent transfer${unsent === 1 ? '' : 's'}</button>` : ''}
+            ${open ? `<button class="btn ghost wide" data-rgb="cancelInv" ${r.busy ? 'disabled' : ''}>Cancel open invoices</button>` : ''}`;
         })() : ''}
         <div class="tok-acts">
           <button class="tact" data-rgb="send" data-rgb-arg="${esc(a.assetId)}" ${sp ? '' : 'disabled'}>${I.send}<span>Send</span></button>
@@ -143,7 +153,8 @@ export class RgbTokenView extends View {
       const cls = h.sign === '−' ? 'out' : 'in';
       const inner = `<span class="h-ic ${cls}">${h.sign === '−' ? I.send : h.label === 'Created' ? I.mint : I.recv}</span>
         <span class="bal-txt"><b>${h.label}</b><span>${esc(h.note || 'Confirmed')}</span></span><span class="h-amt ${cls}">${h.sign}${h.amount}</span>`;
-      return sep + (h.txid && onChain ? `<a class="h-row" href="${explorer.tx(h.txid)}" target="_blank" rel="noopener">${inner}</a>` : `<div class="h-row">${inner}</div>`);
+      const cancel = Number.isFinite(h.cancel) ? `<button class="btn ghost sm h-cancel" data-rgb="cancelSend" data-rgb-arg="${h.cancel}" ${r.busy ? 'disabled' : ''}>Cancel transfer</button>` : '';
+      return sep + (h.txid && onChain ? `<a class="h-row" href="${explorer.tx(h.txid)}" target="_blank" rel="noopener">${inner}</a>` : `<div class="h-row">${inner}</div>`) + cancel;
     }).join('');
   }
 

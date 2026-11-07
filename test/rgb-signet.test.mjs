@@ -193,3 +193,22 @@ test('cancelling every open invoice (none named) also catches ones made before t
   assert.equal(await f.service.cancelInvoices(), 1);
   assert.deepEqual(failed, [3]);
 });
+
+test('cancelling unsent transfers fails only our sends the other wallet hasn\'t accepted', async () => {
+  const f = fixture(); await open(f);
+  const failed = [];
+  const w = f.service.requireWallet();
+  w.listAssets = async () => ({ nia: [{ assetId: 'rgb:A' }] });
+  w.listTransfers = async () => [
+    { kind: 'Send', status: 'WaitingCounterparty', txid: 'abc', batchTransferIdx: 4 }, // signed, not broadcast
+    { kind: 'Send', status: 'WaitingConfirmations', txid: 'def', batchTransferIdx: 5 }, // on chain
+    { kind: 'ReceiveBlind', status: 'WaitingCounterparty', batchTransferIdx: 6 }, // an invoice
+    { kind: 'Send', status: 'WaitingCounterparty', batchTransferIdx: 10 }, // accepted meanwhile: the engine refuses
+  ];
+  w.failTransfer = async (i) => { if (i === 10) throw new Error('CannotFailBatchTransfer'); failed.push(i); return true; };
+  assert.equal(await f.service.cancelSends(), 1);
+  assert.deepEqual(failed, [4], 'broadcast sends and invoices are never touched; one refusal does not stop the rest');
+  failed.length = 0;
+  assert.equal(await f.service.cancelSends([5, 6]), 0, 'named, but not unsent sends');
+  assert.deepEqual(failed, []);
+});

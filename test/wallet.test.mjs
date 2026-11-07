@@ -848,3 +848,31 @@ test('RGB mainnet: an invoice is backed up before it is shown; a backup file cou
   localStorage.removeItem('masked.rgb.mainnet-beta');
   for (const k of ['.cloud-version', '.cloud-at', '.file-at', '.confirmed-backup', '.invoices']) localStorage.removeItem('masked.rgb.mainnet.v1' + k);
 });
+
+test('RGB: tokens held by an unsent transfer say so, can be cancelled, and the transfer is not linked to mempool', async () => {
+  const app = rgbApp('main');
+  localStorage.setItem('masked.rgb.mainnet-beta', '1');
+  rgbReady(app);
+  const MUSD = { assetId: 'rgb:musd', ticker: 'MUSD', name: 'Masked USD', precision: 0, issuedSupply: 100000000, balance: { settled: 100000000, future: 99999445, spendable: 99998000 } };
+  app.rgb.data.groups = { nia: [MUSD] };
+  app.rgb.data.transfers = { 'rgb:musd': [
+    { idx: 1, status: 'Settled', kind: 'Issuance', assignments: [{ Fungible: 100000000 }], txid: 'i' },
+    { idx: 2, batchTransferIdx: 12, status: 'WaitingCounterparty', kind: 'Send', txid: 'notbroadcast', requestedAssignment: { Fungible: 555 } },
+  ] };
+  app.rgb.asset = 'rgb:musd'; app.state.view = 'rgbtok';
+  const page = app.ui.views.rgbtok.render();
+  assert.match(page, /2,000 MUSD are held by a transfer the other wallet hasn't accepted yet/);
+  assert.match(page, /data-rgb="cancelSend"[^>]*>Cancel unsent transfer</);
+  assert.doesNotMatch(page, /Cancel open invoices/, 'no invoice to cancel here');
+  assert.match(page, /Sending[\s\S]*Not on mempool until then/);
+  assert.doesNotMatch(page, /notbroadcast/, 'no mempool link for a transaction that was never broadcast');
+  assert.match(page, /data-rgb="cancelSend" data-rgb-arg="12"/);
+  let asked = null;
+  app.rgb.service.cancelSends = async (idx) => { asked = idx; return 1; };
+  app.rgb.refresh = async () => {};
+  await app.rgb.action('cancelSend', '12');
+  assert.deepEqual(asked, [12]);
+  await app.rgb.action('cancelSend');
+  assert.equal(asked, null, 'the page button cancels every unsent transfer');
+  localStorage.removeItem('masked.rgb.mainnet-beta');
+});

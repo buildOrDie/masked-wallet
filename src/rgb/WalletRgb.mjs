@@ -250,6 +250,8 @@ export class WalletRgb {
     const cut = (n) => Math.max(0, Number(n || 0) - d);
     return { settled: cut(b.settled), future: cut(b.future), spendable: cut(b.spendable), doubled: d };
   }
+  /** Sends of this token the other wallet hasn't accepted yet (not broadcast, so they can be cancelled). */
+  unsent(id) { return (this.data?.transfers?.[id] || []).filter((t) => t?.kind === 'Send' && t?.status === 'WaitingCounterparty'); }
   history(id) { return (this.data?.transfers?.[id] || []).slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)); }
   /** Test BTC the RGB wallet holds: { settled, pending } in sats. */
   btc() {
@@ -563,6 +565,13 @@ export class WalletRgb {
           if (this.invoice && ids.some((id) => this.invoices().find((x) => x.recipientId === id)?.invoice === this.invoice)) this.invoice = '';
           await this.refresh();
           app.toast(n ? `${n} invoice${n === 1 ? '' : 's'} cancelled` : 'No open invoices: the tokens are held by a transfer in progress');
+        });
+      }
+      case 'cancelSend': { // a send the other wallet hasn't accepted (arg = batch transfer index), or all of them
+        return this.run(async () => {
+          const n = await this.service.cancelSends(arg !== '' ? [Number(arg)] : null);
+          await this.refresh();
+          app.toast(n ? `${n === 1 ? 'Transfer' : `${n} transfers`} cancelled. Nothing was sent.` : 'This transfer can no longer be cancelled: it may already be on its way.', 6000);
         });
       }
       case 'showInv': { // reopen an invoice from the list

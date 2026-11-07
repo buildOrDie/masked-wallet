@@ -108,6 +108,26 @@ export class SignetWallet {
       return n;
     });
   }
+  /**
+   * Cancel sends the other wallet hasn't accepted yet. Nothing has been broadcast for these (RGB broadcasts only
+   * after the recipient accepts), so cancelling frees the tokens and BTC they hold. Sends already on chain stay.
+   * @param {number[]|null} idx batch transfer indexes, or null for every unsent send
+   */
+  cancelSends(idx = null) {
+    const want = idx ? new Set(idx.map(Number)) : null;
+    return this.mutate(async (wallet) => {
+      const assets = Object.values(await wallet.listAssets()).flat().map((a) => a.assetId);
+      const all = [];
+      for (const id of assets) all.push(...await wallet.listTransfers(id));
+      const open = [...new Set(all.filter((t) => t?.kind === 'Send' && t?.status === 'WaitingCounterparty').map((t) => Number(t.batchTransferIdx)))];
+      let n = 0;
+      for (const i of open) {
+        if (!Number.isFinite(i) || (want && !want.has(i))) continue;
+        try { if (await wallet.failTransfer(i)) n++; } catch { /* accepted meanwhile: it goes ahead */ }
+      }
+      return n;
+    });
+  }
   /** @param {string} url an https:// transfer server URL */
   checkProxy(url) { return this.exclusive(() => this.requireWallet().checkProxy(url)); }
   /** What an invoice asks for (no change to the wallet). */
