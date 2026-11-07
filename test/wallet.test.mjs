@@ -674,7 +674,7 @@ test('RGB proxy permission resumes the same send review in a compact popup windo
     runtime: { getURL: (path) => `chrome-extension://masked/${path}` },
     storage: { session: { set: async (entry) => { [draft] = Object.values(entry); } } },
     windows: {
-      getCurrent: async () => ({ left: 100, top: 20, width: 1500 }),
+      getCurrent: async () => ({ left: 100, top: 20, width: 1500, height: 900, state: 'normal' }),
       create: async (options) => { windowOptions = options; },
     },
   };

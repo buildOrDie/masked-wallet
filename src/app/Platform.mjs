@@ -1,6 +1,18 @@
 // Where the wallet runs: the Chrome extension (chrome.* APIs), the phone app (Capacitor) or a plain page.
 // Everything that touches chrome.* goes through here.
 
+/**
+ * Where the RGB permission window goes: under the toolbar on the right of the browser window, inside it, and no
+ * taller than it. Without usable bounds (minimised, unknown) only the size is given and Chrome places it.
+ * @param {{ left?: number, top?: number, width?: number, height?: number, state?: string } | null} b
+ */
+export function rgbWindowBounds(b, width = 380, height = 660) {
+  const ok = (n) => Number.isFinite(n);
+  if (!b || b.state === 'minimized' || ![b.left, b.top, b.width, b.height].every(ok) || b.width < 200 || b.height < 300) return { width, height };
+  const w = Math.min(width, b.width), h = Math.max(420, Math.min(height, b.height - 80));
+  return { width: w, height: h, left: Math.round(b.left + Math.max(0, b.width - w - 12)), top: Math.round(b.top + Math.max(0, Math.min(72, b.height - h))) };
+}
+
 export class Platform {
   constructor() {
     const params = new URLSearchParams(location.search);
@@ -40,23 +52,26 @@ export class Platform {
   async sessionSet(obj) { if (!this.hasSession) return; try { await chrome.storage.session.set(obj); } catch {} }
   async sessionRemove(key) { if (!this.hasSession) return; try { await chrome.storage.session.remove(key); } catch {} }
 
+  /**
+   * Chrome's permission prompt closes the toolbar popup, so the RGB review continues in a small wallet window
+   * by the toolbar. In full screen (a new window would open on another macOS desktop) it opens as a tab instead,
+   * and if Chrome refuses the position (a window mostly off screen, a second display) Chrome places it itself.
+   */
   async openRgbPermissionWindow(draft) {
-    const width = 380, height = 660;
-    const browser = await chrome.windows.getCurrent();
-    const position = Number.isInteger(browser.left) && Number.isInteger(browser.top) && Number.isInteger(browser.width)
-      ? { left: browser.left + Math.max(0, browser.width - width - 12), top: browser.top + 72 }
-      : {};
     const id = crypto.randomUUID(), key = `masked.rgb.permission.${id}`;
-    await chrome.storage.session.set({ [key]: { ...draft, expires: Date.now() + 60000 } });
+    await chrome.storage.session.set({ [key]: { ...draft, expires: Date.now() + 5 * 60000 } });
+    const url = chrome.runtime.getURL(`masked.html?rgbResume=${id}`);
+    let browser = null;
+    try { browser = await chrome.windows.getCurrent(); } catch { /* no window info: Chrome picks the place */ }
     try {
-      await chrome.windows.create({
-        url: chrome.runtime.getURL(`masked.html?rgbResume=${id}`),
-        type: 'popup',
-        width,
-        height,
-        ...position,
-        focused: true,
-      });
+      if (browser?.state === 'fullscreen' && Number.isInteger(browser.id)) {
+        await chrome.tabs.create({ windowId: browser.id, url, active: true });
+      } else {
+        const bounds = rgbWindowBounds(browser);
+        try { await chrome.windows.create({ url, type: 'popup', focused: true, ...bounds }); } catch {
+          await chrome.windows.create({ url, type: 'popup', focused: true, width: bounds.width, height: bounds.height });
+        }
+      }
     } catch (error) {
       await this.sessionRemove(key);
       throw error;
