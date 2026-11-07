@@ -250,6 +250,8 @@ export class WalletRgb {
     const cut = (n) => Math.max(0, Number(n || 0) - d);
     return { settled: cut(b.settled), future: cut(b.future), spendable: cut(b.spendable), doubled: d };
   }
+  /** A send this browser can't broadcast any more (signed before a restore; the signature isn't in backups). */
+  stranded(t) { return (this.data?.stranded || []).includes(Number(t?.batchTransferIdx)); }
   /** Sends of this token the other wallet hasn't accepted yet (not broadcast, so they can be cancelled). */
   unsent(id) { return (this.data?.transfers?.[id] || []).filter((t) => t?.kind === 'Send' && t?.status === 'WaitingCounterparty'); }
   history(id) { return (this.data?.transfers?.[id] || []).slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)); }

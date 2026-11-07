@@ -876,3 +876,23 @@ test('RGB: tokens held by an unsent transfer say so, can be cancelled, and the t
   assert.equal(asked, null, 'the page button cancels every unsent transfer');
   localStorage.removeItem('masked.rgb.mainnet-beta');
 });
+
+test('RGB: a transfer signed before a restore says it can\'t be finished and offers Cancel', async () => {
+  const app = rgbApp('main');
+  localStorage.setItem('masked.rgb.mainnet-beta', '1');
+  rgbReady(app);
+  const MUSD = { assetId: 'rgb:musd', ticker: 'MUSD', name: 'Masked USD', precision: 0, issuedSupply: 100000000, balance: { settled: 100000000, future: 99999445, spendable: 99998000 } };
+  app.rgb.data.groups = { nia: [MUSD] };
+  app.rgb.data.transfers = { 'rgb:musd': [{ idx: 2, batchTransferIdx: 12, status: 'WaitingCounterparty', kind: 'Send', txid: 'e00c', requestedAssignment: { Fungible: 555 } }] };
+  app.rgb.data.stranded = [12];
+  app.rgb.asset = 'rgb:musd'; app.state.view = 'rgbtok';
+  const page = app.ui.views.rgbtok.render();
+  assert.match(page, /Not sent[\s\S]*signed before this wallet was restored/);
+  assert.match(page, /held by a transfer that can't be finished/);
+  assert.match(page, /data-rgb="cancelSend"/);
+  app.rgb.data.stranded = [];
+  assert.match(app.ui.views.rgbtok.render(), /Sending[\s\S]*Waiting for the other wallet to accept/);
+  app.state.view = 'settings';
+  assert.match(app.ui.views.settings.render(), /a restored wallet can't finish a transfer that was already signed/);
+  localStorage.removeItem('masked.rgb.mainnet-beta');
+});

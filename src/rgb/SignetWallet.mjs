@@ -55,7 +55,11 @@ export class SignetWallet {
   async snapshot({ full = false } = {}) {
     return this.exclusive(async () => {
       const wallet = this.requireWallet();
-      await wallet.syncWallet({ full }); await wallet.refreshWallet();
+      await wallet.syncWallet({ full });
+      // A send signed before a restore can't be broadcast: the engine keeps the signed transaction in this
+      // browser only, never in backups. Once the other wallet accepts, refresh reports it missing.
+      const refreshed = await wallet.refreshWallet() || {};
+      const stranded = Object.entries(refreshed).filter(([, r]) => /signed PSBT not found/i.test(JSON.stringify(r?.failure ?? ''))).map(([idx]) => Number(idx));
       // Sequential: the WASM wallet has a shared RefCell and does not support overlapping calls.
       const address = await wallet.getAddress();
       const btc = await wallet.getBtcBalance();
@@ -63,7 +67,7 @@ export class SignetWallet {
       // history per asset (rgb-lib lists transfers by asset)
       const transfers = {};
       for (const a of Object.values(groups || {}).flat()) if (a?.assetId) transfers[a.assetId] = await wallet.listTransfers(a.assetId);
-      const snapshot = { address, btc, groups, transfers };
+      const snapshot = { address, btc, groups, transfers, stranded };
       const encoded = new TextEncoder().encode(JSON.stringify(snapshot, (_, value) => typeof value === 'bigint' ? value.toString() : value));
       const revision = b64(new Uint8Array(await crypto.subtle.digest('SHA-256', encoded)));
       const key = `${this.vaultKey}.sync-revision`;

@@ -30,7 +30,10 @@ export function historyRow(t, a, r) {
   if (kind === 'Send') {
     // not broadcast until the other wallet accepts it: no transaction on mempool yet, and it can be cancelled
     const unsent = t.status === 'WaitingCounterparty';
-    return { label: unsent ? 'Sending' : 'Sent', sign: '−', amount: r.amount(a, fungible(t.requestedAssignment)), note: unsent ? 'Waiting for the other wallet to accept. Not on mempool until then.' : STATUS[t.status] ?? '', txid: unsent ? '' : t.txid, cancel: unsent ? Number(t.batchTransferIdx) : null };
+    const stuck = unsent && r.stranded(t);
+    const note = stuck ? 'Can\'t be finished: it was signed before this wallet was restored, and backups don\'t keep that signature. Cancel it and send again. The tokens never left.'
+      : unsent ? 'Waiting for the other wallet to accept. Not on mempool until then.' : STATUS[t.status] ?? '';
+    return { label: stuck ? 'Not sent' : unsent ? 'Sending' : 'Sent', sign: '−', amount: r.amount(a, fungible(t.requestedAssignment)), note, txid: unsent ? '' : t.txid, cancel: unsent ? Number(t.batchTransferIdx) : null };
   }
   return { label: kind || 'Transfer', sign: '', amount: got ? r.amount(a, got) : '', note: STATUS[t.status] ?? '', txid: t.txid };
 }
@@ -123,7 +126,10 @@ export class RgbTokenView extends View {
         ${s > sp ? (() => {
           const open = r.invoices().filter((x) => !x.witness && r.invoiceStatus(x).key === 'waiting').length;
           const unsent = r.unsent(a.assetId).length;
-          const why = unsent
+          const stuck = r.unsent(a.assetId).filter((t) => r.stranded(t)).length;
+          const why = stuck
+            ? `are held by a transfer that can't be finished: it was signed before this wallet was restored, and backups don't keep that signature, so it was never broadcast. Cancel it and send again. If the other wallet shows it as incoming, it never arrives there and expires.`
+            : unsent
             ? `are held by ${unsent === 1 ? 'a transfer' : `${unsent} transfers`} the other wallet hasn't accepted yet. Nothing has been broadcast, so you can cancel ${unsent === 1 ? 'it' : 'them'}: the tokens come back straight away.`
             : open ? `are locked by ${open === 1 ? 'an open Private invoice' : `${open} open Private invoices`}: a Private invoice reserves the RGB output these tokens sit on until it's paid or expires.`
               : 'are held by a transfer waiting for a block. They are freed once it confirms.';
@@ -352,6 +358,7 @@ export class RgbSettings {
         <p class="addr mono small">${addrChunks(r.data?.address || '')}</p>
         <button class="btn ghost sm" data-copy="${esc(r.data?.address || '')}">${I.copy}<span>Copy RGB address</span></button>
         <p class="muted small">${esc(r.profile.funding)}</p>
+        ${Object.keys(r.data?.transfers || {}).some((id) => r.unsent(id).length) ? '<p class="info warn small">A transfer is waiting for the other wallet to accept it. Let it finish, or cancel it, before you restore this wallet anywhere else: a restored wallet can\'t finish a transfer that was already signed.</p>' : ''}
         <button class="btn ghost wide" data-rgb="backup" ${r.busy ? 'disabled' : ''}>Save RGB backup file</button>
         <p class="muted small">${r.fileAt ? `Last file: ${ago(r.fileAt)}. ` : 'No backup file saved from this browser yet. '}${r.isMain && r.cloudOn ? (r.cloud.error || r.service?.backupRequired ? 'Changes since the last cloud backup are not saved anywhere yet.' : 'The cloud backup has every change.') : r.service?.backupRequired ? 'Changed since your last RGB backup.' : 'Backup up to date.'} Restoring needs this same MASKED wallet.</p>
         <button class="btn ghost wide" data-rgb="off" ${r.busy ? 'disabled' : ''}>Turn off RGB for now</button>

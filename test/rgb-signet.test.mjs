@@ -212,3 +212,11 @@ test('cancelling unsent transfers fails only our sends the other wallet hasn\'t 
   assert.equal(await f.service.cancelSends([5, 6]), 0, 'named, but not unsent sends');
   assert.deepEqual(failed, []);
 });
+
+test('snapshot names sends the engine can no longer broadcast (signed transaction missing after a restore)', async () => {
+  const f = fixture(); await open(f);
+  const w = f.service.requireWallet();
+  w.refreshWallet = async () => ({ 12: { updatedStatus: null, failure: { Internal: { details: 'signed PSBT not found in transfer artifacts' } } }, 13: { updatedStatus: 'Settled', failure: null } });
+  const snap = await f.service.snapshot();
+  assert.deepEqual(snap.stranded, [12]);
+});
