@@ -704,7 +704,7 @@ test('RGB mainnet: an invoice is backed up before it is shown; a backup file cou
   const r = app.rgb;
   localStorage.setItem('masked.rgb.mainnet-beta', '1');
   localStorage.removeItem('masked.rgb.cloud');
-  for (const k of ['.cloud-version', '.file-at']) localStorage.removeItem('masked.rgb.mainnet.v1' + k);
+  for (const k of ['.cloud-version', '.file-at', '.confirmed-backup', '.invoices']) localStorage.removeItem('masked.rgb.mainnet.v1' + k);
   rgbReady(app);
   let dirty = false, puts = 0, online = true;
   Object.defineProperty(r.service, 'backupRequired', { get: () => dirty }); // (Object.assign would copy the value, not the getter)
@@ -716,17 +716,26 @@ test('RGB mainnet: an invoice is backed up before it is shown; a backup file cou
   });
   r.cloudApi = { put: async () => { if (!online) throw new Error('Could not reach the MASKED backup server.'); puts++; }, latest: async () => null, remove: async () => {} };
   r.fields.recvType = 'witness';
+  app.state.f.recvKind = 'rgb';
+  app.render = () => {
+    if (dirty) assert.doesNotMatch(app.ui.views.receive.render(), /data-copy="rgb:|class="qr-wrap"/);
+  };
   await r.action('invoice');
   assert.equal(r.invoice, 'rgb:~/~/~/bc:wvout:N');
   assert.equal(puts, 1, 'saved before the action finished');
   assert.equal(dirty, false);
-  app.state.f.recvKind = 'rgb';
   assert.doesNotMatch(app.ui.views.receive.render(), /isn't in a backup yet/);
-  // the server is down: the invoice is shown with a warning and a way to back it up first
+  assert.match(app.ui.views.receive.render(), /data-copy="rgb:/);
+  // The server is down: sharing stays blocked on both the invoice and its history.
   online = false; r.invoice = '';
   await r.action('invoice');
   assert.equal(dirty, true);
   assert.match(app.ui.views.receive.render(), /isn't in a backup yet[\s\S]*data-rgb="cloudRetry"/);
+  assert.doesNotMatch(app.ui.views.receive.render(), /data-copy="rgb:|class="qr-wrap"/);
+  const invoice = r.invoice;
+  r.invoice = '';
+  assert.doesNotMatch(app.ui.views.receive.render(), /data-copy="rgb:|data-rgb="showInv"/);
+  r.invoice = invoice;
   // backup file through Chrome's save dialog: cancelled → not marked; written → marked
   const g = /** @type {any} */ (globalThis);
   g.showSaveFilePicker = async () => { throw Object.assign(new Error('cancel'), { name: 'AbortError' }); };
@@ -743,6 +752,21 @@ test('RGB mainnet: an invoice is backed up before it is shown; a backup file cou
   await r.action('backup');
   assert.equal(dirty, true, 'a failed write is not a backup');
   delete g.showSaveFilePicker;
+  const previousDocument = g.document;
+  const previousTimeout = g.setTimeout;
+  const fileAt = r.fileAt;
+  let clicked = false;
+  g.document = { createElement: () => ({ click: () => { clicked = true; } }) };
+  g.setTimeout = () => 0;
+  try {
+    await r.action('backup');
+    assert.ok(clicked);
+    assert.equal(dirty, true, 'an unconfirmed download is not a backup');
+    assert.equal(r.fileAt, fileAt);
+  } finally {
+    g.document = previousDocument;
+    g.setTimeout = previousTimeout;
+  }
   localStorage.removeItem('masked.rgb.mainnet-beta');
-  for (const k of ['.cloud-version', '.cloud-at', '.file-at']) localStorage.removeItem('masked.rgb.mainnet.v1' + k);
+  for (const k of ['.cloud-version', '.cloud-at', '.file-at', '.confirmed-backup', '.invoices']) localStorage.removeItem('masked.rgb.mainnet.v1' + k);
 });

@@ -103,6 +103,16 @@ export class WalletRgb {
   get cloudVersion() { try { return Number(localStorage.getItem(`${RGB_MAINNET.vaultKey}.cloud-version`)) || 0; } catch { return 0; } }
   /** When a backup file was last written from this browser (ms), 0 if never. */
   get fileAt() { try { return Number(localStorage.getItem(`${this.profile.vaultKey}.file-at`)) || 0; } catch { return 0; } }
+  get canShareInvoice() {
+    if (!this.isMain) return true;
+    try {
+      return !!this.service && !this.service.backupRequired && localStorage.getItem(`${this.profile.vaultKey}.confirmed-backup`) === '1';
+    } catch { return false; }
+  }
+  confirmBackup() {
+    localStorage.setItem(`${this.profile.vaultKey}.confirmed-backup`, '1');
+    this.service.backupSaved();
+  }
   /** When the last cloud backup was saved (ms), 0 if never from this browser. */
   get cloudAt() { try { return Number(localStorage.getItem(`${RGB_MAINNET.vaultKey}.cloud-at`)) || 0; } catch { return 0; } }
   cloudMark(version) {
@@ -134,7 +144,7 @@ export class WalletRgb {
       const version = Math.max(this.cloudVersion, replace ? this.cloud.conflict : 0) + 1;
       await this.cloudApi.put(keys.id, await seal(keys, envelope, version));
       this.cloudMark(version);
-      this.service.backupSaved();
+      this.confirmBackup();
       this.cloud.error = ''; this.cloud.conflict = 0;
       return true;
     } catch (e) {
@@ -369,8 +379,8 @@ export class WalletRgb {
     this.busy = true;
     try {
       await fn();
-      // Something the person did (an invoice, a send, a new token): back it up before the screen shows the
-      // result, so an invoice is never handed out before the cloud has it. Background refreshes save a bit later.
+      // Try to save user changes immediately. Receive keeps invoice sharing locked until a backup succeeds.
+      // Background refreshes can save a bit later.
       if (this.isMain && this.service?.backupRequired && this.cloudOn && this.ready) {
         if (quiet) this.scheduleCloud();
         else { this.message = 'Backing up…'; this.app.render(); await this.cloudSave(); this.message = ''; }
@@ -590,21 +600,23 @@ export class WalletRgb {
           }
         }
         return this.run(async () => {
-        const backup = await this.service.backup();
-        const text = JSON.stringify(backup);
-        if (handle) {
-          const w = await handle.createWritable(); await w.write(text); await w.close(); // throws if the write fails
-        } else {
-          // no save dialog here: a download. Chrome doesn't tell us it finished, so say where to check
-          const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
-          const link = document.createElement('a'); link.href = url; link.download = name; link.click();
-          setTimeout(() => URL.revokeObjectURL(url), 10000);
-          app.toast(`Check ${name} is in your Downloads`, 6000);
-        }
-        this.service.backupSaved();
-        try { localStorage.setItem(`${this.profile.vaultKey}.file-at`, String(Date.now())); } catch { /* */ }
-        if (this.needBackup) { this.needBackup = false; this.message = 'Backup saved. You can continue.'; }
-        if (handle) app.toast('RGB backup saved');
+          const text = JSON.stringify(await this.service.backup());
+          if (!handle) {
+            const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+            const link = document.createElement('a'); link.href = url; link.download = name; link.click();
+            setTimeout(() => URL.revokeObjectURL(url), 10000);
+            app.toast('Download started. To confirm a backup, use the save dialog or encrypted cloud backup.', 6000);
+            return;
+          }
+          const writable = await handle.createWritable();
+          try { await writable.write(text); await writable.close(); } catch (error) {
+            try { await writable.abort(); } catch { /* the stream may already be closed */ }
+            throw error;
+          }
+          this.confirmBackup();
+          try { localStorage.setItem(`${this.profile.vaultKey}.file-at`, String(Date.now())); } catch { /* */ }
+          this.needBackup = false;
+          app.toast('RGB backup saved');
         });
       }
       case 'restore': {

@@ -208,6 +208,12 @@ export class RgbSendView extends View {
 }
 
 export class RgbReceive {
+  static backupPrompt(r) {
+    const cloud = r.cloudOn && !r.cloud.conflict;
+    return `<p class="info warn">This invoice isn't in a backup yet${r.cloudOn && r.cloud.error ? `: ${esc(r.cloud.error)}` : ''}. Save a backup to share it.</p>
+      <button class="btn ghost wide" data-rgb="${cloud ? 'cloudRetry' : 'backup'}" ${r.busy ? 'disabled' : ''}>${I.check}<span>${cloud ? 'Save cloud backup' : 'Save backup file'}</span></button>`;
+  }
+
   /** The RGB tab of Receive: an invoice as QR and text. */
   static render(app) {
     const r = app.rgb;
@@ -223,10 +229,8 @@ export class RgbReceive {
       const exp = RGB_EXPIRY.find(([v]) => Number(v) === info.expiry)?.[1] || '';
       return `<section class="card receive">
         <div class="recv-badge">${rgbBadge}<b>${info.amount ? `${esc(info.amount)} ${esc(info.ticker)}` : info.ticker ? `Any amount of ${esc(info.ticker)}` : 'Any RGB token'}</b></div>
-        ${r.isMain && r.service?.backupRequired ? `<p class="info warn">This invoice isn't in a backup yet${r.cloudOn && r.cloud.error ? `: ${esc(r.cloud.error)}` : ''}. If this browser's data is lost before it's backed up, a payment to it can't be recovered. Save a backup before sharing it.</p>
-          <button class="btn ghost wide" data-rgb="${r.cloudOn && r.cloud.error && !r.cloud.conflict ? 'cloudRetry' : 'backup'}" ${r.busy ? 'disabled' : ''}>${I.check}<span>${r.cloudOn && r.cloud.error && !r.cloud.conflict ? 'Try the cloud backup again' : 'Save backup file'}</span></button>` : ''}
-        <div class="qr-wrap">${qrSvg(r.invoice)}</div><p class="addr mono small">${esc(r.invoice)}</p>
-        <button class="btn primary wide" data-copy="${esc(r.invoice)}">${I.copy}<span>Copy invoice</span></button>
+        ${r.canShareInvoice ? `<div class="qr-wrap">${qrSvg(r.invoice)}</div><p class="addr mono small">${esc(r.invoice)}</p>
+        <button class="btn primary wide" data-copy="${esc(r.invoice)}">${I.copy}<span>Copy invoice</span></button>` : RgbReceive.backupPrompt(r)}
         <div class="kv small">${rowKV('Type', info.witness ? 'No BTC needed (witness)' : 'Private (blind)')}${rowKV('Works for', exp || 'a while')}</div>
         <p class="info">Send this to the person paying you. It works once.</p>
         <button class="btn ghost wide" data-rgb="opt" data-rgb-arg="recvType:${type}">New invoice</button>
@@ -251,6 +255,7 @@ export class RgbReceive {
   static history(r) {
     const list = r.invoices().slice(0, 10);
     if (!list.length) return '';
+    const share = r.canShareInvoice;
     return `<section class="card"><div class="list-h"><b>Your invoices</b><button class="link small" data-rgb="refresh" ${r.busy ? 'disabled' : ''}>${r.busy ? 'Updating…' : 'Refresh'}</button></div>
       ${list.map((inv) => {
         const st = r.invoiceStatus(inv);
@@ -258,9 +263,10 @@ export class RgbReceive {
         return `<div class="ec-sent rgb-inv">
           <span><b>${esc(what)}</b><span class="muted small">${esc(new Date(inv.at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }))} · ${inv.witness ? 'No BTC needed' : 'Private'}</span>
             <span class="small inv-${st.key}">${esc(st.text)}</span></span>
-          <span class="ec-sent-btns">${st.key === 'waiting' ? `<button class="btn ghost sm" data-rgb="showInv" data-rgb-arg="${esc(inv.recipientId)}">Show</button><button class="btn ghost sm" data-copy="${esc(inv.invoice)}">Copy</button><button class="btn ghost sm" data-rgb="cancelInv" data-rgb-arg="${esc(inv.recipientId)}" ${r.busy ? 'disabled' : ''}>Cancel</button>` : ''}</span>
+          <span class="ec-sent-btns">${st.key === 'waiting' ? `${share ? `<button class="btn ghost sm" data-rgb="showInv" data-rgb-arg="${esc(inv.recipientId)}">Show</button><button class="btn ghost sm" data-copy="${esc(inv.invoice)}">Copy</button>` : ''}<button class="btn ghost sm" data-rgb="cancelInv" data-rgb-arg="${esc(inv.recipientId)}" ${r.busy ? 'disabled' : ''}>Cancel</button>` : ''}</span>
         </div>`;
       }).join('')}
+      ${!share && list.some((inv) => r.invoiceStatus(inv).key === 'waiting') ? RgbReceive.backupPrompt(r) : ''}
     </section>`;
   }
 }

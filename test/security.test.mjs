@@ -86,3 +86,15 @@ test('signature types from a site must be standard integers: markup or odd value
   const a = app.psbt.analyse(psbt, { toSignInputs: [{ index: 0, sighashTypes: [0x01] }] });
   assert.match(app.ui.views.approve.psbtCard(a, 0, 1), /sighash 0x01/);
 });
+
+test('an ALL signature cannot hide exposure on a separate SINGLE|ANYONECANPAY input', async () => {
+  const { app, psbt } = partialFixture(0x83);
+  const tx = btc.Transaction.fromPSBT(hex.decode(psbt));
+  tx.addInput({ txid: '33'.repeat(32), index: 0, witnessUtxo: { script: hex.decode(app.account.pubSpk()), amount: 10000n } });
+  tx.updateOutput(1, { amount: 508000n });
+  const psbtHex = hex.encode(tx.toPSBT());
+  const review = app.psbt.analyse(psbtHex);
+  assert.deepEqual(review.outputs.map((o) => o.locked), [true, false]);
+  assert.equal(review.net, -510000);
+  await assert.rejects(app.approvals.run({ method: 'signPsbt', prep: [review], params: { psbtHex } }), /Tick the box/);
+});

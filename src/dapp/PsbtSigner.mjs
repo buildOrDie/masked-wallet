@@ -65,15 +65,17 @@ export class PsbtSigner {
       inputs.push({ i, txid, vout: inp.index, value, address: spk ? codec.fromScript(fromHex(spk)) : null, ours, keyed: tk ? tk.kind : null, spk, trade: tk?.kind === 'trade' ? tk.index : null, sign, prot: !!prot, sighash: sighashOrNull, covers: commitment(sighashOrNull), finalized: !!inp.finalScriptWitness });
     }
     const toSign = inputs.filter((x) => x.sign);
-    // Outputs our signatures lock in. One DEFAULT/ALL signature locks every output; SINGLE locks only its own index.
-    // An output nothing of ours covers can be changed after we sign, so it is never counted as money coming back.
-    const coversAll = toSign.some((x) => x.covers === 'all');
+    // An ANYONECANPAY|SINGLE signature can be used without any other input or signature.
+    // Only count outputs that also survive every independently usable partial signature.
+    const standalone = toSign.filter((x) => x.sighash?.includes(0x83));
+    const coversAll = !standalone.length && toSign.some((x) => x.covers === 'all');
     const single = new Set(toSign.filter((x) => x.covers === 'single').map((x) => x.i));
+    if (toSign.some((x) => x.covers === 'single' && x.i >= tx.outputsLength)) throw new Error('SIGHASH_SINGLE needs an output at the same index as the input.');
     for (let i = 0; i < tx.outputsLength; i++) {
       const o = tx.getOutput(i);
       const tk = tradeAcct.keyPathFor(toHex(o.script));
       const ours = toHex(o.script) === ourSpk || !!tk;
-      const locked = coversAll || single.has(i);
+      const locked = standalone.length ? standalone.every((x) => x.i === i) : coversAll || single.has(i);
       if (ours && locked) received += Number(o.amount);
       outputs.push({ i, value: Number(o.amount), address: codec.fromScript(o.script) || (o.script[0] === 0x6a ? 'OP_RETURN' : 'unknown'), ours, locked, keyed: tk ? tk.kind : null, trade: tk?.kind === 'trade' ? tk.index : null });
     }
