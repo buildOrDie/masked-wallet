@@ -27,7 +27,7 @@ const chainInfo = (net) => ({ enum: NETS[net].chain, name: NETS[net].name, netwo
 
 // Approvals open in MASKED's own toolbar popup (like other wallets). If Chrome cannot open it
 // (older Chrome, no focused window), a small popup window is used instead.
-const POPUP = 'masked.html';
+const POPUP = 'masked.html?popup=1';
 async function resetPopup() { if (![...pending.values()].some((p) => p.mode === 'popup')) await chrome.action.setPopup({ popup: POPUP }).catch(() => {}); }
 async function showApproval(id) {
   const url = `masked.html?req=${id}`;

@@ -611,9 +611,12 @@ test('an invoice with its own transfer server: Allow asks Chrome once, then the 
   const app = rgbApp();
   app.rgb.ensure = () => {};
   rgbReady(app);
-  const { newProxies, proxyUrl, rgbError } = await import('../src/rgb/WalletRgb.mjs');
+  const { proxyUrl, rgbError } = await import('../src/rgb/WalletRgb.mjs');
   assert.equal(proxyUrl('rpcs://rgb.example.com/json-rpc'), 'https://rgb.example.com/json-rpc');
-  assert.deepEqual(newProxies(['rpcs://proxy.iriswallet.com/0.2/json-rpc', 'rpcs://rgb.example.com/json-rpc']), ['https://rgb.example.com/json-rpc']);
+  const asked = [];
+  let granted = false;
+  app.platform.hasOrigins = async ([url]) => granted || new URL(url).host === 'proxy.iriswallet.com';
+  app.platform.requestOrigins = async (urls) => { asked.push(urls); granted = true; };
   const checked = [];
   let fail = 'Invalid proxy protocol version: 0.1';
   app.rgb.service.checkProxy = async (u) => { checked.push(u); if (fail) throw fail; };
@@ -624,8 +627,6 @@ test('an invoice with its own transfer server: Allow asks Chrome once, then the 
   assert.match(html, /data-rgb="allowProxy"[^>]*>Allow rgb\.example\.com/);
   assert.match(html, /data-rgb="confirm"[^>]*disabled/, 'no sending before the server is allowed and checked');
   assert.deepEqual(checked, [], 'not checked before it is allowed');
-  const asked = [];
-  app.platform = { requestOrigins: async (u) => { asked.push(u); } };
   await app.rgb.action('allowProxy');
   assert.deepEqual(asked, [['https://rgb.example.com/json-rpc']]);
   assert.deepEqual(checked, ['https://rgb.example.com/json-rpc']);
@@ -635,11 +636,99 @@ test('an invoice with its own transfer server: Allow asks Chrome once, then the 
   await app.rgb.action('recheck');
   assert.equal(app.rgb.pending.check.ok, true);
   assert.doesNotMatch(app.ui.views.rgbsend.render(), /data-rgb="confirm"[^>]*disabled/);
-  app.rgb.service.send = async () => ({ txid: 'ab'.repeat(32) });
+  await app.rgb.action('review');
+  assert.equal(app.rgb.pending.ask.length, 0, 'a later invoice reuses the existing grant');
+  assert.equal(app.rgb.pending.check.ok, true);
+  assert.equal(asked.length, 1);
+  app.platform.hasOrigins = async ([url]) => new URL(url).host === 'proxy.iriswallet.com';
+  app.rgb.service.decode = async () => ({ network: 'signet', transportEndpoints: ['rpcs://rgb.example.com/json-rpc', 'rpcs://proxy.iriswallet.com/0.2/json-rpc'] });
+  await app.rgb.action('review');
+  assert.deepEqual(app.rgb.pending.ask, [], 'a reachable approved endpoint avoids a prompt for an alternate');
+  app.rgb.service.send = async ({ endpoint }) => {
+    assert.equal(endpoint, 'rpcs://proxy.iriswallet.com/0.2/json-rpc');
+    return { txid: 'ab'.repeat(32) };
+  };
   app.rgb.service.snapshot = async () => app.rgb.data;
   await app.rgb.action('confirm');
   assert.equal(app.rgb.sent.txid, 'ab'.repeat(32));
   assert.match(rgbError('Invalid transport endpoints: no valid transport endpoints'), /transfer server named in this invoice/);
+});
+
+test('RGB proxy permission resumes the same send review in a compact popup window', async () => {
+  const popup = rgbApp();
+  rgbReady(popup);
+  popup.state.view = 'rgbsend';
+  popup.rgb.asset = 'rgb:tusd';
+  popup.rgb.fields.sendTo = 'rgb:example';
+  popup.rgb.fields.sendAmt = '2';
+  popup.rgb.service.decode = async () => ({ network: 'signet', transportEndpoints: ['rpcs://rgb.example.com/json-rpc'] });
+  let draft;
+  popup.platform.isPopup = true;
+  popup.platform.hasOrigins = async () => false;
+  const previousChrome = globalThis.chrome;
+  const previousWindow = globalThis.window;
+  let windowOptions;
+  let closed = false;
+  globalThis.window = { close: () => { assert.ok(windowOptions); closed = true; } };
+  globalThis.chrome = {
+    runtime: { getURL: (path) => `chrome-extension://masked/${path}` },
+    storage: { session: { set: async (entry) => { [draft] = Object.values(entry); } } },
+    windows: {
+      getCurrent: async () => ({ left: 100, top: 20, width: 1500 }),
+      create: async (options) => { windowOptions = options; },
+    },
+  };
+  popup.platform.requestOrigins = async () => assert.fail('the popup must not request permission');
+  try {
+    await popup.rgb.action('review');
+    await popup.rgb.action('allowProxy');
+  } finally {
+    if (previousChrome === undefined) delete globalThis.chrome;
+    else globalThis.chrome = previousChrome;
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  }
+  assert.equal(closed, true, 'the toolbar popup closes after the replacement is open');
+  assert.deepEqual({ ...windowOptions, url: undefined }, { url: undefined, type: 'popup', width: 380, height: 660, left: 1208, top: 92, focused: true });
+  assert.match(windowOptions.url, /^chrome-extension:\/\/masked\/masked\.html\?rgbResume=/);
+  assert.equal(draft.fields.sendTo, 'rgb:example');
+  assert.equal(draft.fields.sendAmt, '2');
+
+  const tab = rgbApp();
+  tab.rgb.open = async () => { rgbReady(tab); tab.rgb.service.decode = popup.rgb.service.decode; };
+  let allowed = false;
+  tab.platform.hasOrigins = async () => allowed;
+  tab.platform.requestOrigins = async () => { throw new Error('Permission declined'); };
+  await tab.rgb.resumePermission(draft);
+  assert.equal(tab.state.view, 'rgbsend');
+  assert.equal(tab.rgb.pending.shown, '2');
+  await tab.rgb.action('allowProxy');
+  assert.equal(tab.state.view, 'rgbsend');
+  assert.equal(tab.rgb.pending.ask.length, 1);
+  tab.platform.requestOrigins = async () => { allowed = true; };
+  await tab.rgb.action('allowProxy');
+  assert.equal(tab.state.view, 'rgbsend');
+  assert.equal(tab.rgb.pending.invoice, 'rgb:example');
+  assert.equal(tab.rgb.pending.check.ok, true);
+  assert.equal(tab.rgb.sent, null);
+});
+
+test('RGB beta setup restores the checked consent screen and reveals its button', async () => {
+  const popup = rgbApp('main');
+  let draft;
+  popup.platform.isPopup = true;
+  popup.platform.hasOrigins = async () => false;
+  popup.platform.openRgbPermissionWindow = async (data) => { draft = structuredClone(data); };
+  popup.rgb.betaAsk = popup.rgb.betaOk = true;
+  await popup.rgb.action('betaYes');
+  const replacement = rgbApp('main');
+  let revealed;
+  replacement.platform.revealRgbPermissionAction = (name) => { revealed = name; };
+  await replacement.rgb.resumePermission(draft);
+  assert.equal(replacement.rgb.betaAsk, true);
+  assert.equal(replacement.rgb.betaOk, true);
+  assert.equal(revealed, 'betaYes');
+  assert.match(replacement.ui.views.home.render(), /data-rgbbeta checked[\s\S]*Turn on RGB beta/);
 });
 
 test('RGB: a payment an earlier beta counted twice is left out of the balance and explained', async () => {

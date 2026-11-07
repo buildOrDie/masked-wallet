@@ -40,12 +40,8 @@ function brief(text) {
   return t.length > 140 ? t.slice(0, 137) + '…' : t;
 }
 
-/** Transfer servers MASKED can always reach (listed in the manifest). */
-const KNOWN_PROXIES = ['proxy.iriswallet.com', 'rgb-proxy.utexo.com'];
 /** rpcs://host/path → https://host/path (rpc:// → http://). */
 export const proxyUrl = (e) => String(e).replace(/^rpcs:\/\//i, 'https://').replace(/^rpc:\/\//i, 'http://');
-/** The invoice's transfer servers MASKED is not allowed to reach yet. */
-export const newProxies = (endpoints) => (endpoints || []).map(proxyUrl).filter((u) => { try { return !KNOWN_PROXIES.includes(new URL(u).host); } catch { return false; } });
 const hostOf = (u) => { try { return new URL(proxyUrl(u)).host; } catch { return String(u); } };
 
 /** Errors that mean "no RGB outputs to put the asset on yet". */
@@ -267,13 +263,17 @@ export class WalletRgb {
   async checkProxies() {
     const p = this.pending;
     if (!p) return;
+    const ask = await this.missingOrigins(p.endpoints);
+    const missing = new Set(ask.map((url) => new URL(url).origin));
     const errors = [];
     for (const e of p.endpoints) {
-      try { await this.service.checkProxy(proxyUrl(e)); return void (this.pending = { ...p, check: { ok: true, detail: '' } }); } catch (err) {
+      const url = proxyUrl(e);
+      if (missing.has(new URL(url).origin)) continue;
+      try { await this.service.checkProxy(url); return void (this.pending = { ...p, ask: [], check: { ok: true, endpoint: e, detail: '' } }); } catch (err) {
         errors.push(`${hostOf(e)}: ${brief(typeof err === 'string' ? err : err?.message || String(err))}`);
       }
     }
-    this.pending = { ...p, check: { ok: false, detail: errors.join(' · ') } };
+    this.pending = { ...p, ask, check: errors.length ? { ok: false, detail: errors.join(' · ') } : null };
   }
   /** Blind unless chosen otherwise; witness by default when there is too little test BTC for a blind one. */
   /** Mainnet starts on "No BTC needed": a Private invoice reserves one of your RGB outputs (and the tokens on it) until it's paid or expires. */
@@ -349,7 +349,7 @@ export class WalletRgb {
 
   /** Open RGB by itself when the wallet is open on Signet and a test wallet exists. Called from render. */
   ensure() {
-    if (!this.available || this.ready || this.busy || !this.exists || this.tried === this.profile.id) return;
+    if (this.app.platform.rgbResumeId || !this.available || this.ready || this.busy || !this.exists || this.tried === this.profile.id) return;
     // let the wallet's own sync finish first: both use the same block servers
     // (at most 30 s: a long history rescan should not keep RGB closed)
     if (this.app.sync?.syncing && (this.waitSince ||= Date.now()) > Date.now() - 30000) {
@@ -416,6 +416,53 @@ export class WalletRgb {
   /** The servers an RGB network talks to: its block server and its transfer server. */
   hostsFor(p = this.profile) { return [p.sdk.indexerUrl, p.sdk.transportEndpoint]; }
 
+  async missingOrigins(endpoints) {
+    const urls = new Map();
+    for (const endpoint of endpoints) {
+      try {
+        const url = new URL(proxyUrl(endpoint));
+        if (['https:', 'http:'].includes(url.protocol)) urls.set(url.origin, url.href);
+      } catch { /* unsupported endpoint */ }
+    }
+    const missing = await Promise.all([...urls.values()].map(async (url) => await this.app.platform.hasOrigins([url]) ? null : url));
+    return missing.filter(Boolean);
+  }
+
+  async permissionWindow(name) {
+    const { app } = this;
+    await app.platform.openRgbPermissionWindow({
+      name, view: app.state.view, account: app.account.id, profile: this.profile.id,
+      recvKind: app.state.f.recvKind, mintMode: app.state.f.mintMode,
+      asset: this.asset, fields: this.fields,
+    });
+  }
+
+  async resumePermission(draft) {
+    const { app } = this;
+    if (!draft || !this.unlocked || draft.account !== app.account.id || draft.profile !== this.profile.id) {
+      this.ensure();
+      return;
+    }
+    if (draft.name === 'allowProxy') {
+      this.tried = this.profile.id;
+      await this.run(async () => this.open(await this.walletKey()));
+      if (!this.ready) return;
+      this.asset = draft.asset;
+      this.fields = { ...EMPTY_FIELDS(), ...draft.fields };
+      app.state.view = 'rgbsend';
+      return this.action('review');
+    }
+    app.state.view = draft.view;
+    app.state.f.recvKind = draft.recvKind;
+    app.state.f.mintMode = draft.mintMode;
+    this.fields = { ...EMPTY_FIELDS(), ...draft.fields };
+    if (draft.name === 'betaYes') this.betaAsk = this.betaOk = true;
+    if (draft.name === 'retry') this.phase = 'allow';
+    this.ensure();
+    app.render();
+    app.platform.revealRgbPermissionAction(draft.name);
+  }
+
   // ---- actions (data-rgb="…") ----
   async action(name, arg = '') {
     const app = this.app, state = app.state, f = state.f;
@@ -423,7 +470,18 @@ export class WalletRgb {
     // The RGB servers aren't in the install permissions: people who never use RGB are never asked.
     const opening = { betaYes: RGB_MAINNET, on: this.profile, retry: this.profile, profile: profileOf(arg) }[name];
     if (opening && (name !== 'betaYes' || this.betaOk)) {
-      try { await app.platform.requestOrigins(this.hostsFor(opening)); } catch {
+      const hosts = this.hostsFor(opening);
+      try {
+        if (app.platform.isPopup) {
+          if (this.busy) return;
+          this.busy = true;
+          try {
+            if (!await app.platform.hasOrigins(hosts)) return await this.permissionWindow(name);
+          } finally { this.busy = false; }
+        } else {
+          await app.platform.requestOrigins(hosts);
+        }
+      } catch {
         this.phase = this.exists ? 'allow' : ''; this.message = 'RGB needs permission to reach its servers. Tap again and choose Allow.';
         return app.render();
       }
@@ -435,7 +493,7 @@ export class WalletRgb {
       if (!this.offerable || !this.betaOk) return app.render();
       try { localStorage.setItem(RGB_BETA_KEY, '1'); } catch { /* stays off */ }
       this.betaAsk = false; this.tried = ''; this.phase = '';
-      return this.action('on');
+      name = 'on';
     }
     if (!this.available) throw new Error('Open your wallet on Signet first.');
     // mainnet: one backup must exist before RGB is used (it holds the RGB keys); after that, Home reminds
@@ -559,30 +617,35 @@ export class WalletRgb {
           if (d.amount) this.fields.sendAmt = this.amount(a, d.amount).replace(/,/g, '');
           if (amount > this.bal(a).spendable) throw new Error(`You can send up to ${this.amount(a, this.bal(a).spendable)} ${a.ticker}.`);
           const endpoints = d.transportEndpoints?.length ? d.transportEndpoints : [this.profile.sdk.transportEndpoint];
-          const ask = newProxies(endpoints);
-          this.pending = { assetId: a.assetId, ticker: a.ticker, invoice, amount, shown: this.amount(a, amount), witness: !!d.witness, fixed: !!d.amount, endpoints, proxies: endpoints.map(hostOf), ask, check: null };
-          // a server we can already reach is checked now; a new one waits for "Allow" (Chrome asks on that click)
-          if (!ask.length) await this.checkProxies();
+          if (endpoints.some((e) => {
+            try { return !['http:', 'https:'].includes(new URL(proxyUrl(e)).protocol); } catch { return true; }
+          })) throw new Error('This invoice contains an unsupported transfer server.');
+          this.pending = { assetId: a.assetId, ticker: a.ticker, invoice, amount, shown: this.amount(a, amount), witness: !!d.witness, fixed: !!d.amount, endpoints, proxies: endpoints.map(hostOf), ask: [], check: null };
+          await this.checkProxies();
         });
       }
       case 'allowProxy': {
         const p = this.pending;
-        if (!p) return;
+        if (!p?.ask.length || !this.ready) return;
         return this.run(async () => {
+          if (app.platform.isPopup) return this.permissionWindow(name);
           await app.platform.requestOrigins(p.ask); // first: still the click, so Chrome can show its prompt
-          this.pending = { ...p, ask: [] };
           await this.checkProxies();
         });
       }
       case 'recheck': return this.run(() => this.checkProxies());
-      case 'cancel': this.pending = null; return app.render();
+      case 'cancel': if (!this.busy) this.pending = null; return app.render();
       case 'confirm': {
         const p = this.pending;
         if (!p) return;
         return this.run(async () => {
           this.message = 'Sending…'; app.render();
           if (!p.check?.ok) throw new Error('Check the transfer server first.');
-          const r = await this.service.send({ invoice: p.invoice, assetId: p.assetId, amount: String(p.amount), fee: this.fee() });
+          if (!await app.platform.hasOrigins([proxyUrl(p.check.endpoint)])) {
+            await this.checkProxies();
+            throw new Error('Transfer server permission changed. Review the server and try again.');
+          }
+          const r = await this.service.send({ invoice: p.invoice, assetId: p.assetId, amount: String(p.amount), fee: this.fee(), endpoint: p.check.endpoint });
           this.sent = { txid: r?.txid || '', shown: p.shown, ticker: p.ticker };
           this.pending = null;
           await this.refresh();

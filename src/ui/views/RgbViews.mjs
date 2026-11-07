@@ -187,8 +187,8 @@ export class RgbSendView extends View {
           ${rowKV('Transfer server', `${esc(p.proxies.join(', '))} ${p.ask.length ? '<span class="muted">· not allowed yet</span>' : p.check?.ok ? '<span class="good">· reachable</span>' : p.check ? '<span class="meh">· not usable</span>' : '<span class="muted">· checking…</span>'}`)}
           ${rowKV('Network fee', `${p.witness ? `a few hundred ${r.isMain ? '' : 'test '}sats + 330 sats for their new output` : `a few hundred ${r.isMain ? '' : 'test '}sats`}${r.isMain ? ` · ${esc(r.fee())} sat/vB` : ''}`)}
         </div>
-        ${p.ask.length ? `<p class="info">This invoice uses its own transfer server (${esc(p.ask.map((u) => new URL(u).host).join(', '))}). The token's proof is dropped off there for them to collect. Allow MASKED to reach it:</p>
-          <button class="btn primary wide" data-rgb="allowProxy" ${r.busy ? 'disabled' : ''}>Allow ${esc(new URL(p.ask[0]).host)}</button>` : ''}
+        ${p.ask.length ? `<p class="info">This invoice uses a transfer server that needs permission (${esc(p.ask.map((u) => new URL(u).host).join(', '))}). The token's proof is dropped off there for the recipient.${this.app.platform.isPopup ? ' Continue in a small wallet window to keep this review open during Chrome’s prompt.' : ''}</p>
+          <button class="btn primary wide" data-rgb="allowProxy" ${r.busy ? 'disabled' : ''}>${this.app.platform.isPopup ? 'Continue in wallet window' : p.ask.length === 1 ? `Allow ${esc(new URL(p.ask[0]).host)}` : 'Allow transfer servers'}</button>` : ''}
         ${p.check && !p.check.ok ? `<p class="info warn">MASKED can't use this invoice's transfer server: ${esc(p.check.detail)}</p><button class="btn ghost wide" data-rgb="recheck" ${r.busy ? 'disabled' : ''}>Check again</button>` : ''}
         ${msg(r)}
         <button class="btn primary wide" data-rgb="confirm" ${r.busy || !p.check?.ok ? 'disabled' : ''}>${r.busy ? 'Working…' : 'Confirm & send'}</button>

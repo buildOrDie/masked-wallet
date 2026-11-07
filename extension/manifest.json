@@ -6,7 +6,7 @@
   "description": "Bitcoin wallet with a Public and a Shielded (silent payments) balance. Mint, deploy and trade BRC-20 and BRC2.0. Self-custody.",
   "action": {
     "default_title": "MASKED",
-    "default_popup": "masked.html",
+    "default_popup": "masked.html?popup=1",
     "default_icon": {
       "16": "icons/icon-16.png",
       "32": "icons/icon-32.png",

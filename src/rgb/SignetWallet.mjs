@@ -112,7 +112,7 @@ export class SignetWallet {
   checkProxy(url) { return this.exclusive(() => this.requireWallet().checkProxy(url)); }
   /** What an invoice asks for (no change to the wallet). */
   decode(invoice) { return this.exclusive(() => this.requireWallet().decodeRGBInvoice({ invoice })); }
-  send({ invoice, assetId, amount, fee }) {
+  send({ invoice, assetId, amount, fee, endpoint = '' }) {
     if (!invoice.startsWith('rgb:') || !assetId) throw new Error('Enter an RGB invoice and the exact asset ID.');
     const params = { invoice, assetId, amount: baseUnits(amount), feeRate: testFee(fee) };
     return this.mutate(async wallet => {
@@ -123,7 +123,9 @@ export class SignetWallet {
       if (!this.profile.invoiceNets.includes(String(decoded.network).toLowerCase())) throw new Error(`The invoice is not for ${this.profile.label}.`);
       if (decoded.assetId && decoded.assetId !== assetId) throw new Error('Invoice asset ID does not match.');
       if (decoded.expirationTimestamp && decoded.expirationTimestamp <= Date.now() / 1000) throw new Error('This RGB invoice has expired.');
-      return wallet.onchainSend(params);
+      const endpoints = decoded.transportEndpoints?.length ? decoded.transportEndpoints : [this.profile.sdk.transportEndpoint];
+      if (endpoint && !endpoints.includes(endpoint)) throw new Error('The reviewed transfer server is missing from the invoice.');
+      return wallet.onchainSend(endpoint ? { ...params, endpoint } : params);
     });
   }
   async backup() {

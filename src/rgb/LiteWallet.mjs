@@ -168,7 +168,7 @@ export class LiteWallet {
   }
 
   /** Send to an invoice (blind or witness): build, sign and broadcast. */
-  async onchainSend({ invoice, assetId, amount, feeRate }) {
+  async onchainSend({ invoice, assetId, amount, feeRate, endpoint = '' }) {
     const online = this.requireOnline();
     const d = await this.decodeRGBInvoice({ invoice });
     const recipients = {
@@ -178,7 +178,7 @@ export class LiteWallet {
         // rgb-lib-wasm wants amountSat as a string here (a number is refused), while the token amount is a number
         witnessData: d.witness ? { amountSat: String(LiteWallet.WITNESS_SATS), blinding: null } : null,
         assignment: { Fungible: amount },
-        transportEndpoints: d.transportEndpoints.length ? d.transportEndpoints : [this.transport],
+        transportEndpoints: endpoint ? [rpcEndpoint(endpoint)] : d.transportEndpoints.length ? d.transportEndpoints : [this.transport],
       }],
     };
     const psbt = await this.wallet.sendBegin(online, recipients, false, BigInt(Math.round(feeRate)), 1);

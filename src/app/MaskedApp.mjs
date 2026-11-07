@@ -208,7 +208,7 @@ export class MaskedApp {
 
   /** Start: route fetches through the server pool, attach the UI, then open (or lock) the wallet. */
   /** @param {{ secpWasm: Uint8Array, initFast: (wasm: Uint8Array) => Promise<boolean> }} boot */
-  start(boot) {
+  async start(boot) {
     const { secpWasm, initFast } = boot;
     const { platform, state } = this;
     this.servers.install(window);
@@ -230,7 +230,8 @@ export class MaskedApp {
     this.side.set(this.side.get()); // Send, Receive and Mint start on the side picked on Home
     const v = this.store.get('wren.view');
     if (NAV.some(([k]) => k === v)) state.view = v;
-    return this.lock.boot();
+    await this.lock.boot();
+    if (platform.rgbResumeId) await this.rgb.resumePermission(await platform.takeRgbPermissionDraft());
   }
 }
 
