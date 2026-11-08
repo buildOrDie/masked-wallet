@@ -186,6 +186,7 @@ export class SignetWallet {
   instantListings() { return Object.entries(this.instantStore().all()).filter(([, e]) => e?.role === 'seller').map(([id, e]) => ({ offerId: id, stage: e.stage, assetId: e.assetId, amount: e.amount, priceSats: e.priceSats, txid: e.soldTxid || e.cancelTxid || e.moveTxid || null, at: e.at })); }
   get canSwap() { return !!this.wallet?.canSwap; }
   offerableAmount(p) { return this.exclusive(() => this.requireWallet().offerableAmount(p)); }
+  assetList() { return this.exclusive(() => this.requireWallet().assetList()); }
   prepareBuy(p) { return this.mutate((w) => w.prepareBuy(p, this.swapStore('bought'))); }
   prepareSale(p) { return this.mutate((w) => w.prepareSale(p, this.swapStore('sold'))); }
   signBuy(p) { return this.mutate((w) => w.signBuy(p, this.swapStore('bought'))); }

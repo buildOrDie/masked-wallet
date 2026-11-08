@@ -10,8 +10,8 @@ import { toBase } from '../rgb/config.mjs';
 import { proxyUrl } from '../rgb/WalletRgb.mjs';
 
 /** Methods whose approve button waits for a prepared transaction. */
-export const NEEDS_PREP = ['sendBitcoin', 'inscribeTransfer', 'shareTrade', 'fundTrade', 'moveToTrade', 'returnToShielded', 'cancelShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbInvoice', 'rgbPay', 'rgbSwapAvailable', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbAutoSell', 'rgbInstantList', 'rgbInstantBuy', 'rgbInstantCancel'];
-const SWAP_METHODS = ['rgbSwapAvailable', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbAutoSell', 'rgbInstantList', 'rgbInstantBuy', 'rgbInstantCancel'];
+export const NEEDS_PREP = ['sendBitcoin', 'inscribeTransfer', 'shareTrade', 'fundTrade', 'moveToTrade', 'returnToShielded', 'cancelShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbInvoice', 'rgbPay', 'rgbSwapAvailable', 'rgbListAssets', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbAutoSell', 'rgbInstantList', 'rgbInstantBuy', 'rgbInstantCancel'];
+const SWAP_METHODS = ['rgbSwapAvailable', 'rgbListAssets', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbAutoSell', 'rgbInstantList', 'rgbInstantBuy', 'rgbInstantCancel'];
 const RGB_METHODS = ['rgbInvoice', 'rgbPay', ...SWAP_METHODS];
 const SWAP_SIZE_VB = 320;
 const hostOf = (u) => { try { return new URL(proxyUrl(u)).host; } catch { return String(u); } };
@@ -191,6 +191,7 @@ export class ApprovalController {
   prepareSwap(a, once) {
     const r = this.app.rgb, P = a.params || {}, m = a.method;
     once(async () => {
+      if (m === 'rgbListAssets') return { list: r.assets().map((x) => ({ ticker: x.ticker, assetId: x.assetId })) };
       if (!r.service?.canSwap) throw new Error('This MASKED version can\'t swap RGB tokens yet. Update MASKED.');
       if (m === 'rgbSwapAvailable') {
         const asset = r.find(P.assetId);
@@ -389,6 +390,7 @@ export class ApprovalController {
         if (status === 'failed') throw new Error('The other side refused the transfer. Nothing was sent.');
         return { txid: String(res?.txid || ''), batchTransferIdx: res?.batchTransferIdx ?? null, amount: String(amount), status };
       });
+      case 'rgbListAssets': return this.rgbBusy(async () => { prepared(''); return app.rgb.service.assetList(); });
       case 'rgbSwapAvailable': return this.rgbBusy(async () => { prepared(''); return app.rgb.service.offerableAmount({ assetId: a.params.assetId }); });
       case 'rgbBuyPrepare': return this.rgbBusy(async () => {
         const b = prepared(''), r = app.rgb;

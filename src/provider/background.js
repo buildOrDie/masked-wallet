@@ -14,7 +14,7 @@ const NETS = {
 // MASKED runs on Mainnet and Signet. UniSat reports Signet as "testnet", so that name maps to Signet.
 const FROM_UNISAT = { livenet: 'main', mainnet: 'main', testnet: 'signet', signet: 'signet' };
 const FROM_CHAIN = { BITCOIN_MAINNET: 'main', BITCOIN_SIGNET: 'signet' };
-const _APPROVAL = new Set(['requestAccounts', 'signMessage', 'signPsbt', 'signPsbts', 'sendBitcoin', 'switchNetwork', 'switchChain', 'inscribeTransfer', 'getTradeAccount', 'fundTradeAccount', 'moveToTradeAccount', 'returnToShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbRequestInvoice', 'rgbPayInvoice', 'rgbSwapAvailable', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbAutoSell', 'rgbInstantList', 'rgbInstantBuy', 'rgbInstantCancel']);
+const _APPROVAL = new Set(['requestAccounts', 'signMessage', 'signPsbt', 'signPsbts', 'sendBitcoin', 'switchNetwork', 'switchChain', 'inscribeTransfer', 'getTradeAccount', 'fundTradeAccount', 'moveToTradeAccount', 'returnToShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbRequestInvoice', 'rgbPayInvoice', 'rgbSwapAvailable', 'rgbListAssets', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbAutoSell', 'rgbInstantList', 'rgbInstantBuy', 'rgbInstantCancel']);
 
 const TRADE_SITES = new Set(['https://maskedwallet.com', 'https://www.maskedwallet.com']);
 const err = (code, message) => Object.assign(new Error(message), { code });
@@ -322,6 +322,9 @@ async function handle(origin, method, params) {
       return openApproval(origin, 'rgbPay', { invoice, assetId, amount, feeRate });
     }
     // ---- RGB peer-to-peer swaps: tokens for BTC in one transaction, wallet to wallet ----
+    case 'rgbListAssets':
+      needConnected();
+      return openApproval(origin, 'rgbListAssets', {});
     case 'rgbSwapAvailable':
       needConnected();
       return openApproval(origin, 'rgbSwapAvailable', { assetId: optAssetId(params.assetId) || (() => { throw err(4000, 'assetId is required.'); })() });

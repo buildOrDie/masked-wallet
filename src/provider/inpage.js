@@ -34,7 +34,7 @@
 
   const provider = Object.freeze({
     isMasked: true,
-    version: '1.7.0',
+    version: '1.8.0',
     // accounts
     requestAccounts: () => request('requestAccounts'),
     getAccounts: () => request('getAccounts'),
@@ -82,6 +82,8 @@
       /** Pay an RGB invoice: { assetId?, amount? (tokens as wallets show them), feeRate? } → { txid, batchTransferIdx, status: 'broadcast'|'waiting' } */
       payInvoice: (invoice, o = {}) => request('rgbPayInvoice', { invoice, assetId: o.assetId, amount: o.amount != null ? String(o.amount) : undefined, feeRate: o.feeRate }),
       // peer-to-peer swaps: tokens for BTC in one transaction, wallet to wallet (docs/PROVIDER.md)
+      /** The RGB tokens this wallet holds (asks the person first): [{ assetId, ticker, name, precision, spendable, max }] */
+      getAssets: () => request('rgbListAssets'),
       /** { assetId } → { total, max } in base units */
       offerableAmount: (o = {}) => request('rgbSwapAvailable', o),
       /** buyer: { offerId, network, offer, feeRate? } → session for the seller */

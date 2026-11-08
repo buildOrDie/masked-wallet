@@ -196,3 +196,12 @@ test('Instant purchases and moves put 330 sats on the seal (taproot dust), the f
   assert.equal(INSTANT_SEAL_SATS, 330);
   assert.equal(SEAL_SATS, 1000);
 });
+
+test('assetList: every token held, with the most one offer can sell, leaving out outputs promised to Instant listings', async () => {
+  const lib = fakeLib();
+  const s = wallet({ name: 'seller', lib, chain: fakeChain(), rgb: [unspent('a', 0, [tok(500)]), unspent('b', 0, [tok(200)]), unspent('c', 0, [tok(9, 'rgb:otherAsset000000000')])] });
+  s.w.listAssets = async () => ({ nia: [{ assetId: ASSET, ticker: 'PIZZA', name: 'Pizza', precision: 0, balance: { spendable: 700 } }, { assetId: 'rgb:otherAsset000000000', ticker: 'X', name: 'X', precision: 2, balance: { spendable: 9 } }, { assetId: 'rgb:emptyAsset000000000', ticker: 'E', name: 'E', precision: 0, balance: { spendable: 0 } }], ifa: [] });
+  s.w.reserve([`${T('a')}:0`]);
+  const list = await s.w.assetList();
+  assert.deepEqual(list.map((x) => [x.ticker, x.spendable, x.max]), [['PIZZA', '700', '200'], ['X', '9', '9']]);
+});

@@ -192,6 +192,12 @@ const { invoice } = await window.masked.rgb.requestInvoice({ assetId, baseUnits:
 await window.masked.rgb.payInvoice(escrowInvoice, { assetId, amount: '1500' });
 ```
 
+### `rgb.getAssets(): Promise<{ assetId, ticker, name, precision, spendable, max }[]>` 🔐 *(2.26.1+)*
+
+The RGB tokens this wallet holds, after the person agrees to share them: `spendable` and `max` (the most one offer
+can sell, since one offer uses one output) in base units. Outputs promised to Instant listings don't count. A market
+uses it for "pick a token" instead of asking for the asset ID.
+
 ### Peer-to-peer swaps: `rgb.offerableAmount`, `prepareBuy`, `prepareSale`, `signBuy`, `completeSale` 🔐
 RGB tokens for BTC in one Bitcoin transaction, wallet to wallet: nobody holds anything in between. The site only passes
 the messages from one wallet to the other. The transaction layout and message fields below are the whole format: any

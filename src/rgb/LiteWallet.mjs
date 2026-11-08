@@ -256,6 +256,19 @@ export class LiteWallet {
     if (typeof network === 'string' && network && network.toLowerCase() !== this.net.toLowerCase()) throw new Error(`This RGB wallet is on ${this.net} and the site is on ${network}.`);
   }
 
+  /**
+   * Every RGB token this wallet holds, for a site's "pick a token": [{ assetId, ticker, name, precision, spendable,
+   * max }] with `spendable` and `max` (the most one offer can sell) in base units. Outputs promised to Instant
+   * listings don't count.
+   */
+  async assetList() {
+    try { await this.wallet.sync(this.requireOnline()); } catch { /* last known figures */ }
+    const unspents = (plain(this.wallet.listUnspents(false)) || []).filter((u) => { const o = u.utxo?.outpoint; return !o || !this.reserved.has(`${String(o.txid).toLowerCase()}:${o.vout}`); });
+    const { nia, ifa } = await this.listAssets();
+    return [...nia, ...ifa].map((a) => ({ assetId: a.assetId, ticker: a.ticker, name: a.name, precision: a.precision, spendable: String(a.balance.spendable), max: offerable(unspents, a.assetId).max }))
+      .filter((a) => BigInt(a.spendable) > 0n || BigInt(a.max) > 0n);
+  }
+
   /** How much of an asset this wallet can offer: { total, max } (one swap uses one RGB output). */
   async offerableAmount({ assetId }) {
     try { await this.wallet.sync(this.requireOnline()); } catch { /* last known figures */ }

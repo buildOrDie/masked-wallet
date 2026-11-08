@@ -1149,4 +1149,7 @@ export const ZH_CN = {
   "This is your own listing.": "这是你自己的挂单。",
   "This MASKED build can't make Instant listings yet. Update MASKED.": "此版本的 MASKED 还不能创建即时挂单。请更新 MASKED。",
   "The listing was not signed yet: nothing to move.": "挂单尚未签署：无需移动。",
+  "Share your RGB tokens": "分享你的 RGB 代币",
+  "none yet": "暂无",
+  "The site sees which RGB tokens you hold, their asset IDs and how much of each. Nothing moves.": "该网站将看到你持有哪些 RGB 代币、它们的资产 ID 以及各自的数量。不会转移任何资产。",
 };
