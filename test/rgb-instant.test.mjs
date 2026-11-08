@@ -29,7 +29,7 @@ function fakeLib(net) {
     newSwapPsbt: (ins, outs) => JSON.stringify({ ins: ins.map((i) => i.outpoint), outs }),
     psbtTxid: () => T('7'),
     witnessSealScript: (inv) => `5120seal${inv.slice(-4)}`,
-    presignedListingInfo: (p) => { const j = JSON.parse(p); if (!j.sig) throw new Error('the seller\'s signature is not valid'); return j.info; },
+    presignedListingInfo: (p) => { if (String(p).startsWith('signed:')) return {}; if (String(p).startsWith('old:')) throw new Error('old layout'); const j = JSON.parse(p); if (!j.sig) throw new Error('the seller\'s signature is not valid'); return j.info; },
     presignedBuyPsbt: (tpl, ins, seal, change) => JSON.stringify({ tpl: JSON.parse(tpl), ins, seal, change }),
     checkPresignedFinal: (tpl, hexTx, seal) => { const j = JSON.parse(hexTx); if (j.seal !== seal) throw new Error('the seal does not pay the buyer'); return T('f'); },
     completePresignedConsignment: (bytes, tt, hexTx) => enc({ ...JSON.parse(new TextDecoder().decode(bytes)), final: true }),
@@ -204,4 +204,11 @@ test('assetList: every token held, with the most one offer can sell, leaving out
   s.w.reserve([`${T('a')}:0`]);
   const list = await s.w.assetList();
   assert.deepEqual(list.map((x) => [x.ticker, x.spendable, x.max]), [['PIZZA', '700', '200'], ['X', '9', '9']]);
+});
+
+test('a listing signed in an older layout is flagged once, so the seller cancels and lists again', async () => {
+  const s = wallet({ name: 'seller', lib: fakeLib(), chain: fakeChain() });
+  s.store.set('sw0123456789ab', { role: 'seller', stage: 'ready', psbt: 'old:x', coin: `${T('a')}:0`, assetId: ASSET, amount: '1', priceSats: '1000' });
+  assert.deepEqual(await s.w.instantProgress(s.store, s.store.all()), [{ offerId: 'sw0123456789ab', stage: 'outdated' }]);
+  assert.deepEqual(await s.w.instantProgress(s.store, s.store.all()), [], 'said once');
 });

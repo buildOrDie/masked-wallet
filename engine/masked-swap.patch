@@ -252,7 +252,7 @@ index 31bcf9e..5749424 100644
              received_consignments: HashMap::new(),
              idb_save_in_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
 diff --git a/src/wallet/online.rs b/src/wallet/online.rs
-index d436834..2bf80c9 100644
+index d436834..ec1c289 100644
 --- a/src/wallet/online.rs
 +++ b/src/wallet/online.rs
 @@ -1135,6 +1135,17 @@ impl Wallet {
@@ -290,7 +290,7 @@ index d436834..2bf80c9 100644
              db_txo.spent = ActiveValue::Set(true);
              self.database.update_txo(db_txo)?;
          }
-@@ -3878,3 +3889,404 @@ impl Wallet {
+@@ -3878,3 +3889,414 @@ impl Wallet {
          Ok(res)
      }
  }
@@ -494,11 +494,15 @@ index d436834..2bf80c9 100644
 +// output 0 (the seller's payout) only, so anyone can complete the transaction by adding their own bitcoin, and the
 +// seller is paid its price whoever does. Because the buyer then controls every other output, including the
 +// OP_RETURN, the output must carry exactly the listed amount of one asset and nothing else: whoever spends it can
-+// take everything on it. Layout: input 0 the seller's output; output 0 payout, 1 OP_RETURN, 2 the buyer's seal
-+// (330 sats), then the buyer's change; the buyer's inputs follow input 0.
++// take everything on it. Layout: RGB anchors to the first OP_RETURN or taproot output, so the OP_RETURN is output 0;
++// SIGHASH_SINGLE pairs input i with output i, so the seller's output is input 1 and its payout output 1. Input 0 is a
++// placeholder the buyer replaces with its own (ANYONECANPAY doesn't commit to the other inputs or to the index).
++// Outputs: 0 OP_RETURN, 1 payout, 2 the buyer's seal (330 sats), then the buyer's change.
 +
 +/// Output of the buyer's seal in a pre-signed listing.
 +pub const PRESIGNED_SEAL_VOUT: u32 = 2;
++/// Input (and output) of the seller in a pre-signed listing.
++pub const PRESIGNED_SELLER_INDEX: usize = 1;
 +/// Sats on the buyer's seal output: the dust limit of a taproot output.
 +pub const PRESIGNED_SEAL_SATS: u64 = 330;
 +
@@ -626,19 +630,25 @@ index d436834..2bf80c9 100644
 +        let seller_sats = prev.txout.value.to_sat();
 +        let payout_sats = price_sats.checked_add(seller_sats).ok_or(Error::Internal { details: s!("price too high") })?;
 +
-+        // template: the seal output pays the payout script for now; the buyer puts its own address there
++        // template: input 0 is a placeholder for the buyer's coin; the seal pays the payout script for now (the buyer
++        // puts its own address there)
++        let placeholder = bdk_wallet::bitcoin::OutPoint { txid: bdk_wallet::bitcoin::Txid::from_str(&"00".repeat(31).chars().chain("01".chars()).collect::<String>()).unwrap(), vout: 0 };
 +        let tx = BdkTransaction {
 +            version: Version::TWO,
 +            lock_time: LockTime::ZERO,
-+            input: vec![TxIn { previous_output: bdk_op, script_sig: ScriptBuf::new(), sequence: Sequence::ENABLE_RBF_NO_LOCKTIME, witness: Witness::new() }],
++            input: vec![
++                TxIn { previous_output: placeholder, script_sig: ScriptBuf::new(), sequence: Sequence::ENABLE_RBF_NO_LOCKTIME, witness: Witness::new() },
++                TxIn { previous_output: bdk_op, script_sig: ScriptBuf::new(), sequence: Sequence::ENABLE_RBF_NO_LOCKTIME, witness: Witness::new() },
++            ],
 +            output: vec![
-+                TxOut { value: Amount::from_sat(payout_sats), script_pubkey: payout.clone() },
 +                TxOut { value: Amount::ZERO, script_pubkey: ScriptBuf::new_op_return([]) },
++                TxOut { value: Amount::from_sat(payout_sats), script_pubkey: payout.clone() },
 +                TxOut { value: Amount::from_sat(PRESIGNED_SEAL_SATS), script_pubkey: payout.clone() },
 +            ],
 +        };
 +        let mut psbt = Psbt::from_unsigned_tx(tx).map_err(|e| Error::Internal { details: e.to_string() })?;
-+        psbt.inputs[0].witness_utxo = Some(prev.txout.clone());
++        psbt.inputs[0].witness_utxo = Some(TxOut { value: Amount::ZERO, script_pubkey: payout.clone() });
++        psbt.inputs[PRESIGNED_SELLER_INDEX].witness_utxo = Some(prev.txout.clone());
 +        let recipient_id = crate::utils::recipient_id_from_script_buf(payout.clone(), self.bitcoin_network());
 +
 +        let mut psbt = self
@@ -652,16 +662,16 @@ index d436834..2bf80c9 100644
 +            .and_then(|a| a.consignment_bytes.get(&asset_id).cloned())
 +            .ok_or(Error::Internal { details: s!("the listing's consignment was not made") })?;
 +
-+        // only the colouring may have changed the outputs: same layout, commitment in output 1
++        // only the colouring may have changed the outputs: same layout, commitment in output 0
 +        let outs = &psbt.unsigned_tx.output;
-+        if outs.len() != 3 || outs[0].script_pubkey != payout || outs[0].value.to_sat() != payout_sats || !outs[1].script_pubkey.is_op_return() || outs[2].value.to_sat() != PRESIGNED_SEAL_SATS || psbt.unsigned_tx.input.len() != 1 {
++        if outs.len() != 3 || !outs[0].script_pubkey.is_op_return() || outs[1].script_pubkey != payout || outs[1].value.to_sat() != payout_sats || outs[2].value.to_sat() != PRESIGNED_SEAL_SATS || psbt.unsigned_tx.input.len() != 2 {
 +            return Err(Error::Internal { details: s!("the listing transaction changed while colouring") });
 +        }
 +
-+        psbt.inputs[0].sighash_type = Some(PsbtSighashType::from(TapSighashType::SinglePlusAnyoneCanPay));
++        psbt.inputs[PRESIGNED_SELLER_INDEX].sighash_type = Some(PsbtSighashType::from(TapSighashType::SinglePlusAnyoneCanPay));
 +        let sign_options = SignOptions { allow_all_sighashes: true, ..Default::default() };
 +        self._sign_psbt(&mut psbt, Some(sign_options))?;
-+        if psbt.inputs[0].final_script_witness.is_none() {
++        if psbt.inputs[PRESIGNED_SELLER_INDEX].final_script_witness.is_none() {
 +            return Err(Error::Internal { details: s!("the wallet could not sign its output") });
 +        }
 +        self.reserved_outpoints.insert(op.clone());
@@ -696,7 +706,7 @@ index d436834..2bf80c9 100644
 +}
 +
 diff --git a/src/wallet/rust_only.rs b/src/wallet/rust_only.rs
-index 7cc1b66..72d66cb 100644
+index 7cc1b66..5757e42 100644
 --- a/src/wallet/rust_only.rs
 +++ b/src/wallet/rust_only.rs
 @@ -52,6 +52,12 @@ pub struct ValidateConsignmentResult {
@@ -858,7 +868,7 @@ index 7cc1b66..72d66cb 100644
          };
          let json = serde_json::to_string(&result_invalid).unwrap();
          let deserialized: ValidateConsignmentResult = serde_json::from_str(&json).unwrap();
-@@ -761,3 +858,444 @@ mod tests {
+@@ -761,3 +858,477 @@ mod tests {
          assert_eq!(IndexerProtocol::Esplora.to_string(), "Esplora");
      }
  }
@@ -1019,15 +1029,19 @@ index 7cc1b66..72d66cb 100644
 +
 +const SEAL_VOUT: usize = 2;
 +const SEAL_SATS: u64 = 330;
++/// The seller's input, and its payout output (SIGHASH_SINGLE pairs them). Output 0 is the RGB commitment: RGB anchors
++/// to the first OP_RETURN or taproot output, so nothing taproot may come before it.
++const SELLER: usize = 1;
 +
 +fn bad_listing(what: &str) -> Error {
 +    Error::Internal { details: format!("pre-signed listing: {what}") }
 +}
 +
-+/// Check the seller's input 0 of `tx`: a key-path signature with SIGHASH_SINGLE|ANYONECANPAY that is valid for
-+/// `prev` (the output it spends). With that sighash the signature covers only input 0 and output 0, so the same
++/// Check the seller's input (1) of `tx`: a key-path signature with SIGHASH_SINGLE|ANYONECANPAY that is valid for
++/// `prev` (the output it spends). With that sighash the signature covers only that input and output 1, so the same
 +/// check holds for the template and for the buyer's final transaction.
 +fn check_seller_signature(tx: &BdkTransaction, prev: &TxOut, witness: &bdk_wallet::bitcoin::Witness) -> Result<(), Error> {
++    let index = SELLER;
 +    use bdk_wallet::bitcoin::{key::XOnlyPublicKey, secp256k1::{Message, Secp256k1, schnorr}, sighash::{Prevouts, SighashCache, TapSighashType}};
 +    if !prev.script_pubkey.is_p2tr() {
 +        return Err(bad_listing("the seller's output is not a taproot output"));
@@ -1041,7 +1055,7 @@ index 7cc1b66..72d66cb 100644
 +    }
 +    let key = XOnlyPublicKey::from_slice(&prev.script_pubkey.as_bytes()[2..34]).map_err(|_| bad_listing("bad seller key"))?;
 +    let hash = SighashCache::new(tx)
-+        .taproot_key_spend_signature_hash(0, &Prevouts::One(0, prev), TapSighashType::SinglePlusAnyoneCanPay)
++        .taproot_key_spend_signature_hash(index, &Prevouts::One(index, prev), TapSighashType::SinglePlusAnyoneCanPay)
 +        .map_err(|e| bad_listing(&e.to_string()))?;
 +    let sig = schnorr::Signature::from_slice(&sig[..64]).map_err(|_| bad_listing("bad signature"))?;
 +    let msg = Message::from_digest(hash.to_byte_array());
@@ -1050,43 +1064,44 @@ index 7cc1b66..72d66cb 100644
 +        .map_err(|_| bad_listing("the seller's signature is not valid"))
 +}
 +
-+/// Read and check a pre-signed listing's template PSBT: one input (the seller's, signed), outputs payout /
-+/// OP_RETURN with a commitment / seal, and a valid seller signature.
++/// Read and check a pre-signed listing's template PSBT: a placeholder input 0 and the seller's input 1 (signed);
++/// outputs 0 the commitment (OP_RETURN), 1 the payout, 2 the seal; and a valid seller signature.
 +pub fn presigned_listing_info(psbt: &str) -> Result<PresignedInfo, Error> {
 +    let psbt = Psbt::from_str(psbt)?;
 +    let tx = &psbt.unsigned_tx;
-+    if tx.input.len() != 1 || psbt.inputs.len() != 1 {
-+        return Err(bad_listing("the template must have the seller's input only"));
++    if tx.input.len() != 2 || psbt.inputs.len() != 2 {
++        return Err(bad_listing("the template must have a placeholder and the seller's input"));
 +    }
 +    if tx.output.len() != 3 {
 +        return Err(bad_listing("the template must have three outputs"));
 +    }
 +    let o = &tx.output;
-+    if !o[1].script_pubkey.is_op_return() || o[1].value.to_sat() != 0 || o[1].script_pubkey.len() != 34 {
-+        return Err(bad_listing("output 1 must be the RGB commitment"));
++    if !o[0].script_pubkey.is_op_return() || o[0].value.to_sat() != 0 || o[0].script_pubkey.len() != 34 {
++        return Err(bad_listing("output 0 must be the RGB commitment"));
 +    }
 +    if o[SEAL_VOUT].value.to_sat() != SEAL_SATS {
 +        return Err(bad_listing("output 2 must be the 330-sat seal"));
 +    }
-+    let prev = psbt.inputs[0].witness_utxo.clone().ok_or(bad_listing("the seller's input has no amount"))?;
-+    let witness = psbt.inputs[0].final_script_witness.clone().ok_or(bad_listing("the seller's input is not signed"))?;
++    let prev = psbt.inputs[SELLER].witness_utxo.clone().ok_or(bad_listing("the seller's input has no amount"))?;
++    let witness = psbt.inputs[SELLER].final_script_witness.clone().ok_or(bad_listing("the seller's input is not signed"))?;
 +    check_seller_signature(tx, &prev, &witness)?;
-+    if o[0].value.to_sat() <= prev.value.to_sat() {
++    if o[SELLER].value.to_sat() <= prev.value.to_sat() {
 +        return Err(bad_listing("the payout must be more than the seller's output"));
 +    }
 +    Ok(PresignedInfo {
-+        seller_outpoint: tx.input[0].previous_output.to_string(),
++        seller_outpoint: tx.input[SELLER].previous_output.to_string(),
 +        seller_sats: prev.value.to_sat(),
 +        seller_script: prev.script_pubkey.to_hex_string(),
-+        payout_script: o[0].script_pubkey.to_hex_string(),
-+        payout_sats: o[0].value.to_sat(),
-+        opret_script: o[1].script_pubkey.to_hex_string(),
++        payout_script: o[SELLER].script_pubkey.to_hex_string(),
++        payout_sats: o[SELLER].value.to_sat(),
++        opret_script: o[0].script_pubkey.to_hex_string(),
 +        template_txid: tx.compute_txid().to_string(),
 +    })
 +}
 +
-+/// The buyer's PSBT for a pre-signed listing: the template's input 0 (signed) and outputs 0-1 unchanged, the seal
-+/// (output 2) paid to `seal_script`, then the buyer's inputs and its change (if any). The buyer signs its inputs.
++/// The buyer's PSBT for a pre-signed listing: the buyer's first input in place of the placeholder (input 0), the
++/// seller's signed input 1 and outputs 0-1 unchanged, the seal (output 2) paid to `seal_script`, then the buyer's other
++/// inputs and its change (if any). The buyer signs its inputs.
 +pub fn presigned_buy_psbt(template: &str, buyer_inputs: Vec<SwapInput>, seal_script: String, change: Option<SwapOutput>) -> Result<String, Error> {
 +    use bdk_wallet::bitcoin::{Amount, Sequence, TxIn, Witness};
 +    presigned_listing_info(template)?;
@@ -1096,28 +1111,37 @@ index 7cc1b66..72d66cb 100644
 +    let t = Psbt::from_str(template)?;
 +    let mut tx = t.unsigned_tx.clone();
 +    tx.output[SEAL_VOUT].script_pubkey = script_from_hex(&seal_script)?;
++    let seller_op = tx.input[SELLER].previous_output;
++    let mut ins = vec![];
 +    for i in &buyer_inputs {
 +        let op = parse_outpoint(&i.outpoint)?;
-+        if op == tx.input[0].previous_output {
++        if op == seller_op {
 +            return Err(bad_listing("the buyer can't pay with the seller's output"));
 +        }
-+        tx.input.push(TxIn { previous_output: op, script_sig: ScriptBuf::new(), sequence: Sequence::ENABLE_RBF_NO_LOCKTIME, witness: Witness::new() });
++        ins.push(TxIn { previous_output: op, script_sig: ScriptBuf::new(), sequence: Sequence::ENABLE_RBF_NO_LOCKTIME, witness: Witness::new() });
 +    }
++    // order: buyer's first, the seller's, the buyer's others (the seller's index must stay 1)
++    let seller_in = tx.input[SELLER].clone();
++    let mut order: Vec<usize> = vec![0]; // positions in buyer_inputs
++    tx.input = vec![ins[0].clone(), seller_in];
++    for (k, i) in ins.iter().enumerate().skip(1) { tx.input.push(i.clone()); order.push(k); }
 +    if let Some(c) = &change {
 +        let script = c.script.as_deref().ok_or(bad_listing("the change needs a script"))?;
 +        tx.output.push(TxOut { value: Amount::from_sat(c.sats), script_pubkey: script_from_hex(script)? });
 +    }
 +    let mut psbt = Psbt::from_unsigned_tx(tx).map_err(|e| Error::Internal { details: e.to_string() })?;
-+    psbt.inputs[0] = t.inputs[0].clone();
-+    for (k, i) in buyer_inputs.iter().enumerate() {
-+        psbt.inputs[k + 1].witness_utxo = Some(TxOut { value: Amount::from_sat(i.sats), script_pubkey: script_from_hex(&i.script)? });
++    psbt.inputs[SELLER] = t.inputs[SELLER].clone();
++    let slots: Vec<usize> = std::iter::once(0).chain(2..psbt.inputs.len()).collect();
++    for (slot, k) in slots.into_iter().zip(order) {
++        let i = &buyer_inputs[k];
++        psbt.inputs[slot].witness_utxo = Some(TxOut { value: Amount::from_sat(i.sats), script_pubkey: script_from_hex(&i.script)? });
 +        if let Some(h) = &i.tx {
 +            let bytes = <Vec<u8> as bdk_wallet::bitcoin::hex::FromHex>::from_hex(h.trim()).map_err(|_| bad_listing("bad previous transaction hex"))?;
 +            let prev: BdkTransaction = bdk_wallet::bitcoin::consensus::deserialize(&bytes).map_err(|_| bad_listing("bad previous transaction"))?;
-+            if prev.compute_txid() != psbt.unsigned_tx.input[k + 1].previous_output.txid {
++            if prev.compute_txid() != psbt.unsigned_tx.input[slot].previous_output.txid {
 +                return Err(bad_listing("previous transaction does not match the input"));
 +            }
-+            psbt.inputs[k + 1].non_witness_utxo = Some(prev);
++            psbt.inputs[slot].non_witness_utxo = Some(prev);
 +        }
 +    }
 +    let ins: u64 = psbt.inputs.iter().map(|i| i.witness_utxo.as_ref().map(|o| o.value.to_sat()).unwrap_or(0)).sum();
@@ -1128,30 +1152,31 @@ index 7cc1b66..72d66cb 100644
 +    Ok(psbt.to_string())
 +}
 +
-+/// The buyer's final check before broadcasting: `final_tx` (hex, signed) still has the template's input 0, payout
-+/// and commitment, the seal at output 2 pays `seal_script`, and the seller's signature is valid for it.
++/// The buyer's final check before broadcasting: `final_tx` (hex, signed) still has the template's seller input 1,
++/// commitment (output 0) and payout (output 1), the seal at output 2 pays `seal_script`, nothing taproot or OP_RETURN
++/// comes before the commitment, and the seller's signature is valid for it.
 +pub fn check_presigned_final(template: &str, final_tx: &str, seal_script: &str) -> Result<String, Error> {
 +    let t = Psbt::from_str(template)?;
 +    let bytes = <Vec<u8> as bdk_wallet::bitcoin::hex::FromHex>::from_hex(final_tx.trim()).map_err(|_| bad_listing("bad transaction hex"))?;
 +    let tx: BdkTransaction = bdk_wallet::bitcoin::consensus::deserialize(&bytes).map_err(|_| bad_listing("bad transaction"))?;
 +    let tt = &t.unsigned_tx;
-+    if tx.version != tt.version || tx.lock_time != tt.lock_time || tx.input.is_empty() || tx.output.len() < 3 {
++    if tx.version != tt.version || tx.lock_time != tt.lock_time || tx.input.len() < 2 || tx.output.len() < 3 {
 +        return Err(bad_listing("the transaction does not follow the template"));
 +    }
-+    if tx.input[0].previous_output != tt.input[0].previous_output || tx.input[0].sequence != tt.input[0].sequence {
-+        return Err(bad_listing("input 0 must be the seller's output"));
++    if tx.input[SELLER].previous_output != tt.input[SELLER].previous_output || tx.input[SELLER].sequence != tt.input[SELLER].sequence {
++        return Err(bad_listing("input 1 must be the seller's output"));
 +    }
-+    if tx.output[0] != tt.output[0] || tx.output[1] != tt.output[1] {
-+        return Err(bad_listing("the payout or the commitment changed"));
++    if tx.output[0] != tt.output[0] || tx.output[SELLER] != tt.output[SELLER] {
++        return Err(bad_listing("the commitment or the payout changed"));
 +    }
 +    if tx.output[SEAL_VOUT].script_pubkey != script_from_hex(seal_script)? || tx.output[SEAL_VOUT].value.to_sat() != SEAL_SATS {
 +        return Err(bad_listing("the seal does not pay the buyer"));
 +    }
-+    if tx.output.iter().skip(1).filter(|o| o.script_pubkey.is_op_return()).count() != 1 {
++    if tx.output.iter().filter(|o| o.script_pubkey.is_op_return()).count() != 1 {
 +        return Err(bad_listing("only one OP_RETURN"));
 +    }
-+    let prev = t.inputs[0].witness_utxo.clone().ok_or(bad_listing("the seller's input has no amount"))?;
-+    check_seller_signature(&tx, &prev, &tx.input[0].witness)?;
++    let prev = t.inputs[SELLER].witness_utxo.clone().ok_or(bad_listing("the seller's input has no amount"))?;
++    check_seller_signature(&tx, &prev, &tx.input[SELLER].witness)?;
 +    Ok(tx.compute_txid().to_string())
 +}
 +
@@ -1207,31 +1232,34 @@ index 7cc1b66..72d66cb 100644
 +        let tweaked = kp.tap_tweak(&secp, None);
 +        let seller = ScriptBuf::new_p2tr(&secp, xonly, None);
 +        let prev = TxOut { value: Amount::from_sat(1000), script_pubkey: seller };
++        let placeholder = TxOut { value: Amount::ZERO, script_pubkey: p2tr(0x11) };
 +        let mut commit = vec![0x6a, 0x20];
 +        commit.extend([9u8; 32]);
++        let txin = |op: String| TxIn { previous_output: parse_outpoint(&op).unwrap(), script_sig: ScriptBuf::new(), sequence: Sequence::ENABLE_RBF_NO_LOCKTIME, witness: Witness::new() };
 +        let tx = BdkTransaction {
 +            version: Version::TWO,
 +            lock_time: LockTime::ZERO,
-+            input: vec![TxIn { previous_output: parse_outpoint(&format!("{}:1", "ab".repeat(32))).unwrap(), script_sig: ScriptBuf::new(), sequence: Sequence::ENABLE_RBF_NO_LOCKTIME, witness: Witness::new() }],
++            input: vec![txin(format!("{}:0", "00".repeat(32))), txin(format!("{}:1", "ab".repeat(32)))],
 +            output: vec![
-+                TxOut { value: Amount::from_sat(51000), script_pubkey: p2tr(0x11) },
 +                TxOut { value: Amount::ZERO, script_pubkey: ScriptBuf::from_bytes(commit) },
++                TxOut { value: Amount::from_sat(51000), script_pubkey: p2tr(0x11) },
 +                TxOut { value: Amount::from_sat(330), script_pubkey: p2tr(0x11) },
 +            ],
 +        };
-+        let all = [prev.clone()];
++        let all = [placeholder.clone(), prev.clone()];
 +        let mut cache = SighashCache::new(&tx);
 +        let hash = if sighash == TapSighashType::SinglePlusAnyoneCanPay {
-+            cache.taproot_key_spend_signature_hash(0, &Prevouts::One(0, &prev), sighash).unwrap()
++            cache.taproot_key_spend_signature_hash(1, &Prevouts::One(1, &prev), sighash).unwrap()
 +        } else {
-+            cache.taproot_key_spend_signature_hash(0, &Prevouts::All(&all), sighash).unwrap()
++            cache.taproot_key_spend_signature_hash(1, &Prevouts::All(&all), sighash).unwrap()
 +        };
 +        let sig = secp.sign_schnorr_no_aux_rand(&Message::from_digest(hash.to_byte_array()), &tweaked.to_keypair());
 +        let mut s = sig.as_ref().to_vec();
 +        s.push(sighash as u8);
 +        let mut psbt = Psbt::from_unsigned_tx(tx).unwrap();
-+        psbt.inputs[0].witness_utxo = Some(prev.clone());
-+        psbt.inputs[0].final_script_witness = Some(Witness::from_slice(&[s]));
++        psbt.inputs[0].witness_utxo = Some(placeholder);
++        psbt.inputs[1].witness_utxo = Some(prev.clone());
++        psbt.inputs[1].final_script_witness = Some(Witness::from_slice(&[s]));
 +        (psbt.to_string(), prev)
 +    }
 +
@@ -1246,32 +1274,43 @@ index 7cc1b66..72d66cb 100644
 +        // the buyer adds its coin and change, puts its seal address: the seller's signature still holds
 +        let buyer = "5120".to_string() + &"22".repeat(32);
 +        let seal = "5120".to_string() + &"33".repeat(32);
-+        let inputs = vec![SwapInput { outpoint: format!("{}:0", "cd".repeat(32)), sats: 60000, script: buyer.clone(), tx: None }];
++        // two buyer coins: the first takes the placeholder's place, the second goes after the seller's input
++        let inputs = vec![
++            SwapInput { outpoint: format!("{}:0", "cd".repeat(32)), sats: 40000, script: buyer.clone(), tx: None },
++            SwapInput { outpoint: format!("{}:2", "ce".repeat(32)), sats: 20000, script: buyer.clone(), tx: None },
++        ];
 +        let change = Some(SwapOutput { script: Some(buyer.clone()), sats: 60000 + 1000 - 51000 - 330 - 700 });
 +        let p = presigned_buy_psbt(&t, inputs.clone(), seal.clone(), change).unwrap();
 +        let psbt = Psbt::from_str(&p).unwrap();
-+        assert_eq!(psbt.unsigned_tx.input.len(), 2);
++        assert_eq!(psbt.unsigned_tx.input.len(), 3);
++        assert_eq!(psbt.unsigned_tx.input[0].previous_output.to_string(), inputs[0].outpoint);
++        assert_eq!(psbt.unsigned_tx.input[1].previous_output.to_string(), format!("{}:1", "ab".repeat(32)));
++        assert_eq!(psbt.unsigned_tx.input[2].previous_output.to_string(), inputs[1].outpoint);
++        assert_eq!(psbt.inputs[2].witness_utxo.as_ref().unwrap().value.to_sat(), 20000);
 +        assert_eq!(psbt.unsigned_tx.output.len(), 4);
-+        assert!(psbt.inputs[0].final_script_witness.is_some(), "the seller's signature is kept");
++        assert!(psbt.unsigned_tx.output[0].script_pubkey.is_op_return(), "the commitment stays first");
++        assert!(psbt.inputs[1].final_script_witness.is_some(), "the seller's signature is kept");
 +        let mut tx = psbt.unsigned_tx.clone();
-+        tx.input[0].witness = psbt.inputs[0].final_script_witness.clone().unwrap();
-+        tx.input[1].witness = Witness::from_slice(&[vec![1u8; 64]]);
++        tx.input[1].witness = psbt.inputs[1].final_script_witness.clone().unwrap();
++        tx.input[0].witness = Witness::from_slice(&[vec![1u8; 64]]);
++        tx.input[2].witness = Witness::from_slice(&[vec![1u8; 64]]);
 +        let hex = bdk_wallet::bitcoin::consensus::encode::serialize_hex(&tx);
 +        let txid = check_presigned_final(&t, &hex, &seal).unwrap();
 +        // from the PSBT itself, once every input is finalized
 +        let mut fin = psbt.clone();
-+        assert!(psbt_extract_hex(&fin.to_string()).is_err(), "the buyer's input isn't signed yet");
-+        fin.inputs[1].final_script_witness = Some(Witness::from_slice(&[vec![1u8; 64]]));
++        assert!(psbt_extract_hex(&fin.to_string()).is_err(), "the buyer's inputs aren't signed yet");
++        fin.inputs[0].final_script_witness = Some(Witness::from_slice(&[vec![1u8; 64]]));
++        fin.inputs[2].final_script_witness = Some(Witness::from_slice(&[vec![1u8; 64]]));
 +        assert_eq!(psbt_extract_hex(&fin.to_string()).unwrap(), hex);
 +        assert_ne!(txid, info.template_txid);
 +
 +        // the seal must pay the buyer; the payout and the commitment can't change; a second OP_RETURN is refused
 +        assert!(check_presigned_final(&t, &hex, &buyer).is_err());
 +        let mut less = tx.clone();
-+        less.output[0].value = Amount::from_sat(50000);
++        less.output[1].value = Amount::from_sat(50000);
 +        assert!(check_presigned_final(&t, &bdk_wallet::bitcoin::consensus::encode::serialize_hex(&less), &seal).is_err());
 +        let mut other = tx.clone();
-+        other.output[1].script_pubkey = ScriptBuf::new_op_return([1u8; 32]);
++        other.output[0].script_pubkey = ScriptBuf::new_op_return([1u8; 32]);
 +        assert!(check_presigned_final(&t, &bdk_wallet::bitcoin::consensus::encode::serialize_hex(&other), &seal).is_err());
 +        let mut two = tx.clone();
 +        two.output.push(TxOut { value: Amount::ZERO, script_pubkey: ScriptBuf::new_op_return([2u8; 32]) });
@@ -1281,7 +1320,7 @@ index 7cc1b66..72d66cb 100644
 +        let poor = vec![SwapInput { outpoint: format!("{}:0", "cd".repeat(32)), sats: 100, script: buyer.clone(), tx: None }];
 +        assert!(presigned_buy_psbt(&t, poor, seal.clone(), None).is_err());
 +        // the seller's own output can't be the buyer's coin
-+        let own = vec![SwapInput { outpoint: format!("{}:1", "ab".repeat(32)), sats: 90000, script: buyer, tx: None }];
++        let own = vec![SwapInput { outpoint: format!("{}:1", "ab".repeat(32)), sats: 90000, script: buyer.clone(), tx: None }];
 +        assert!(presigned_buy_psbt(&t, own, seal, None).is_err());
 +    }
 +
@@ -1293,11 +1332,15 @@ index 7cc1b66..72d66cb 100644
 +        // a signature for another payout
 +        let (t, _) = template(TapSighashType::SinglePlusAnyoneCanPay);
 +        let mut psbt = Psbt::from_str(&t).unwrap();
-+        psbt.unsigned_tx.output[0].value = Amount::from_sat(99000);
++        psbt.unsigned_tx.output[1].value = Amount::from_sat(99000);
 +        assert!(presigned_listing_info(&psbt.to_string()).unwrap_err().to_string().contains("not valid"));
 +        // unsigned
 +        let mut psbt = Psbt::from_str(&t).unwrap();
-+        psbt.inputs[0].final_script_witness = None;
++        psbt.inputs[1].final_script_witness = None;
++        assert!(presigned_listing_info(&psbt.to_string()).is_err());
++        // the old layout (payout first, a taproot output before the commitment) is refused
++        let mut psbt = Psbt::from_str(&t).unwrap();
++        psbt.unsigned_tx.output.swap(0, 1);
 +        assert!(presigned_listing_info(&psbt.to_string()).is_err());
 +        // not a consignment
 +        assert!(complete_presigned_consignment(&[1, 2, 3], &"ab".repeat(32), "00").is_err());

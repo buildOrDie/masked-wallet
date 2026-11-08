@@ -1152,4 +1152,6 @@ export const ZH_CN = {
   "Share your RGB tokens": "分享你的 RGB 代币",
   "none yet": "暂无",
   "The site sees which RGB tokens you hold, their asset IDs and how much of each. Nothing moves.": "该网站将看到你持有哪些 RGB 代币、它们的资产 ID 以及各自的数量。不会转移任何资产。",
+  "signed by an older MASKED: cancel it on the market and list again": "由旧版 MASKED 签署：请在市场上取消并重新挂单",
+  "An Instant listing was signed by an older MASKED and can't sell. Cancel it on the market, then list again.": "有一个即时挂单由旧版 MASKED 签署，无法出售。请在市场上取消，然后重新挂单。",
 };

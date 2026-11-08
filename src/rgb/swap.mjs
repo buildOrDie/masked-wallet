@@ -89,7 +89,7 @@ export function freeSellerCoinFor(unspents, assetId, amount, skip = new Set()) {
   return sellerCoinFor(free, assetId, amount);
 }
 
-/** Instant listing layout (engine: presign_sale): output 0 payout, 1 commitment, 2 the buyer's seal. */
+/** Instant listing layout (engine: presign_sale): inputs 0 the buyer's, 1 the seller's; outputs 0 commitment, 1 payout, 2 the buyer's seal. */
 export const INSTANT_SEAL_OUTPUT = 2;
 /**
  * Sats on the seal output of an Instant purchase, and of the move to an output of its own: the dust limit of a

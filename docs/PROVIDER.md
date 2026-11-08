@@ -239,10 +239,12 @@ How it works:
   output, `listInstant` first moves them to one of their own (`stage: 'moving'`); MASKED signs once that confirms,
   the next time it's open, and sends the listing to `market` itself (`POST {market}/api/swap/offers/{offerId}/presigned`,
   header `x-swap-token`).
-- The signature is SIGHASH_SINGLE|ANYONECANPAY on input 0: it covers only the seller's output and output 0 (the
-  payout: price + the output's own sats). Changing the price, the payout or the seller's input breaks it.
-- Layout: input 0 the seller's output, then the buyer's; output 0 payout, 1 the RGB commitment (OP_RETURN), 2 the
-  buyer's seal (330 sats, the taproot dust limit), then the buyer's change. The buyer pays the network fee.
+- The signature is SIGHASH_SINGLE|ANYONECANPAY on the seller's input (input 1): it covers only that input and output 1
+  (the payout: price + the output's own sats). Changing the price, the payout or the seller's input breaks it.
+- Layout: input 0 the buyer's first coin (a placeholder in the signed listing), input 1 the seller's output, then the
+  buyer's other coins; output 0 the RGB commitment (OP_RETURN: RGB anchors to the first OP_RETURN or taproot output,
+  so it must come first), 1 the payout, 2 the buyer's seal (330 sats, the taproot dust limit), then the buyer's
+  change. The buyer pays the network fee.
 - Before paying, `buyInstant` checks the signature, that the signed payout minus the seller's sats is the offer's price,
   that the seller's output is unspent and is what the listing says, and the transfer (valid history, this token, this
   amount on output 2). It then signs, broadcasts, and posts the completed transfer for its own invoice.

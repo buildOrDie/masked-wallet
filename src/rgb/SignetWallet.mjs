@@ -183,7 +183,7 @@ export class SignetWallet {
     });
   }
   /** This wallet's Instant listings: [{ offerId, stage, txid, … }]. */
-  instantListings() { return Object.entries(this.instantStore().all()).filter(([, e]) => e?.role === 'seller').map(([id, e]) => ({ offerId: id, stage: e.stage, assetId: e.assetId, amount: e.amount, priceSats: e.priceSats, txid: e.soldTxid || e.cancelTxid || e.moveTxid || null, at: e.at })); }
+  instantListings() { return Object.entries(this.instantStore().all()).filter(([, e]) => e?.role === 'seller').map(([id, e]) => ({ offerId: id, stage: e.outdated && e.stage === 'ready' ? 'outdated' : e.stage, assetId: e.assetId, amount: e.amount, priceSats: e.priceSats, txid: e.soldTxid || e.cancelTxid || e.moveTxid || null, at: e.at })); }
   get canSwap() { return !!this.wallet?.canSwap; }
   offerableAmount(p) { return this.exclusive(() => this.requireWallet().offerableAmount(p)); }
   assetList() { return this.exclusive(() => this.requireWallet().assetList()); }

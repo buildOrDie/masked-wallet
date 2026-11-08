@@ -454,6 +454,7 @@ export class WalletRgb {
         this.app.toast(ok ? 'Instant listing is live: buyers can buy it now, even with MASKED closed.' : 'Instant listing signed. Open the market and tap Publish on it.');
       }
       if (c.stage === 'cancelled') this.app.toast('Listing cancelled. Your tokens moved to a new output.');
+      if (c.stage === 'outdated') this.app.toast('An Instant listing was signed by an older MASKED and can\'t sell. Cancel it on the market, then list again.');
     }
     await this.publishPending().catch(() => {});
     if (changes.length && this.isMain && this.cloudOn) this.cloudSave().catch(() => {});

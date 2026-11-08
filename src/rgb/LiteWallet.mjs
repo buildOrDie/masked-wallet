@@ -459,6 +459,8 @@ export class LiteWallet {
     await this.save();
     return this.instantView(offerId, next);
   }
+  /** A listing this engine would accept as a buyer (the current layout). */
+  validListing(psbt) { try { this.lib.WasmWallet.presignedListingInfo(String(psbt)); return true; } catch { return false; } }
   instantView(offerId, e) {
     return { offerId: String(offerId), stage: e.stage, txid: e.soldTxid || e.cancelTxid || e.moveTxid || null, ...(e.stage === 'ready' ? { psbt: e.psbt, consignment: e.consignment, templateTxid: e.templateTxid, sellerOutpoint: e.coin } : {}) };
   }
@@ -474,6 +476,10 @@ export class LiteWallet {
         if (e.stage === 'moving') {
           const v = await this.instantSign(id, e, store);
           if (v.stage === 'ready') changes.push(v);
+        } else if (e.stage === 'ready' && e.psbt && !e.outdated && !this.validListing(e.psbt)) {
+          // signed by an earlier MASKED in a layout buyers refuse: it can't sell; cancelling moves the tokens back
+          store.set(id, { ...e, outdated: true });
+          changes.push({ offerId: id, stage: 'outdated' });
         } else if ((e.stage === 'ready' || e.stage === 'cancelling') && e.coin) {
           const [txid, vout] = e.coin.split(':');
           const sp = await (await this.esplora(`/tx/${txid}/outspend/${vout}`)).json();
