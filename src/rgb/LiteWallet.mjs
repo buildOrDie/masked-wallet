@@ -5,7 +5,7 @@
 
 import * as btc from '@scure/btc-signer';
 import { hex, base64 } from '@scure/base';
-import { SEAL_SATS, SEAL_OUTPUT, SWAP_SIZE_VB, b64, buyerOutputs, outpointOf, completionBlocker, readOffer, buyerCoinFor, offerable, payoutFor, changedTerms, unb64, exactCoinFor, freeSellerCoinFor, INSTANT_SEAL_OUTPUT, INSTANT_SEAL_SATS } from './swap.mjs';
+import { SEAL_SATS, SEAL_OUTPUT, SWAP_SIZE_VB, b64, buyerOutputs, outpointOf, completionBlocker, readOffer, buyerCoinFor, offerable, payoutFor, changedTerms, unb64, exactCoinFor, freeSellerCoinFor, INSTANT_SEAL_OUTPUT, INSTANT_SEAL_SATS, payCoinsFor, EXTRA_INPUT_VB } from './swap.mjs';
 
 /** rgb-lib names for our network ids. Utexo's custom Signet uses Signet rules too. */
 const NETWORKS = { mainnet: 'Mainnet', signet: 'Signet', utexo: 'Signet', testnet: 'Testnet', testnet4: 'Testnet4', regtest: 'Regtest' };
@@ -269,23 +269,31 @@ export class LiteWallet {
       .filter((a) => BigInt(a.spendable) > 0n || BigInt(a.max) > 0n);
   }
 
+  /** This wallet's plain bitcoin coins: confirmed, and all (with its own unconfirmed change). */
+  async btcCoins() {
+    const online = this.requireOnline();
+    const all = (await this.wallet.listUnspentsVanilla(online, 0, false)) || [];
+    const confirmed = (await this.wallet.listUnspentsVanilla(online, 1, true)) || [];
+    return { all, confirmed };
+  }
+
   /** How much of an asset this wallet can offer: { total, max } (one swap uses one RGB output). */
   async offerableAmount({ assetId }) {
     try { await this.wallet.sync(this.requireOnline()); } catch { /* last known figures */ }
     return offerable(plain(this.wallet.listUnspents(false)) || [], String(assetId || ''));
   }
 
-  /** Buyer, step 1: pick a confirmed bitcoin output, make an invoice for the tokens. Returns the session for the seller. */
+  /** Buyer, step 1: pick a bitcoin output (confirmed first), make an invoice for the tokens. Returns the session for the seller. */
   async prepareBuy({ offerId, network, offer, feeRate }, store) {
     this.requireSwaps(); this.checkNet(network);
     const o = readOffer(offer, offerId);
     if (o.state && o.state !== 'OPEN') throw new Error(`The offer is ${o.state.toLowerCase()}.`);
-    const online = this.requireOnline();
     const fee = BigInt(Math.ceil(Math.max(1, Number(feeRate) || 1) * SWAP_SIZE_VB));
     const need = o.priceSats + fee + BigInt(SEAL_SATS);
-    const coins = await this.wallet.listUnspentsVanilla(online, 1, false);
-    const coin = buyerCoinFor(coins, need);
-    if (!coin) throw new Error(`Your RGB wallet needs one confirmed bitcoin output over ${need.toLocaleString('en-US')} sats. Tap Add BTC for RGB on Home, then wait a block.`);
+    const { all, confirmed } = await this.btcCoins();
+    // the four-step format takes one bitcoin input: a confirmed coin, or change from this wallet's last trade
+    const coin = buyerCoinFor(confirmed, need) || buyerCoinFor(all, need);
+    if (!coin) throw new Error(`Your RGB wallet needs one bitcoin output over ${need.toLocaleString('en-US')} sats. Tap Add BTC for RGB on Home.`);
     // an invoice for exactly this amount; no asset ID (the engine only takes known ones), the token is checked at signing
     const r = await this.onchainReceive({ assetId: null, amount: Number(o.amount), durationSeconds: 86400, witness: true });
     const session = {
@@ -404,15 +412,18 @@ export class LiteWallet {
   async instantMove(assetId, amount, from, feeRate) {
     const online = this.requireOnline();
     const fee = BigInt(Math.ceil(Math.max(1, Number(feeRate) || 1) * SWAP_SIZE_VB));
-    const coin = buyerCoinFor(await this.wallet.listUnspentsVanilla(online, 1, false), fee + BigInt(INSTANT_SEAL_SATS));
-    if (!coin) throw new Error(`Your RGB wallet needs one confirmed bitcoin output over ${(fee + BigInt(INSTANT_SEAL_SATS)).toLocaleString('en-US')} sats for the network fee. Tap Add BTC for RGB on Home.`);
-    const [si, fi] = await Promise.all([this.outpointInfo(from.outpoint), this.outpointInfo(coin.outpoint)]);
+    const rate = Math.max(1, Number(feeRate) || 1), perInput = BigInt(Math.ceil(rate * EXTRA_INPUT_VB));
+    const { all, confirmed } = await this.btcCoins();
+    const pay = payCoinsFor(confirmed, all, fee + BigInt(INSTANT_SEAL_SATS) + 546n, perInput);
+    if (!pay) throw new Error(`Your RGB wallet needs about ${(fee + BigInt(INSTANT_SEAL_SATS) + 546n).toLocaleString('en-US')} sats in bitcoin for the network fee. Tap Add BTC for RGB on Home.`);
+    const [si, ...fis] = await Promise.all([this.outpointInfo(from.outpoint), ...pay.coins.map((c) => this.outpointInfo(c.outpoint))]);
     const r = await this.onchainReceive({ assetId, amount: Number(amount), durationSeconds: 86400, witness: true });
     const seal = this.lib.WasmWallet.witnessSealScript(r.invoice);
-    const change = BigInt(si.sats) + BigInt(fi.sats) - BigInt(INSTANT_SEAL_SATS) - fee;
+    const totalFee = fee + perInput * BigInt(pay.coins.length - 1);
+    const change = BigInt(si.sats) + fis.reduce((t, f) => t + BigInt(f.sats), 0n) - BigInt(INSTANT_SEAL_SATS) - totalFee;
     if (change < 546n) throw new Error('Not enough bitcoin for the network fee.');
     const unsigned = this.lib.WasmWallet.newSwapPsbt(
-      [{ outpoint: from.outpoint, sats: si.sats, script: si.script, tx: si.tx }, { outpoint: coin.outpoint, sats: fi.sats, script: fi.script, tx: fi.tx }],
+      [{ outpoint: from.outpoint, sats: si.sats, script: si.script, tx: si.tx }, ...pay.coins.map((c, k) => ({ outpoint: c.outpoint, sats: fis[k].sats, script: fis[k].script, tx: fis[k].tx }))],
       [{ script: seal, sats: INSTANT_SEAL_SATS }, { script: await this.ownScript(), sats: Number(change) }],
     );
     const psbt = await this.wallet.colorSwap(online, unsigned, assetId, BigInt(amount), r.recipientId, SEAL_OUTPUT, BigInt(INSTANT_SEAL_SATS), [this.transport], 1);
@@ -555,15 +566,19 @@ export class LiteWallet {
     const consignment = unb64(String(l.consignment || ''));
     check(consignment, info.templateTxid);
     // pay: one confirmed coin covering the price, the seal and the fee
-    const fee = BigInt(Math.ceil(Math.max(1, Number(feeRate) || 1) * SWAP_SIZE_VB));
+    const rate = Math.max(1, Number(feeRate) || 1), perInput = BigInt(Math.ceil(rate * EXTRA_INPUT_VB));
+    const fee = BigInt(Math.ceil(rate * SWAP_SIZE_VB));
     const need = o.priceSats + BigInt(INSTANT_SEAL_SATS) + fee;
-    const coin = buyerCoinFor(await this.wallet.listUnspentsVanilla(online, 1, false), need);
-    if (!coin) throw new Error(`Your RGB wallet needs one confirmed bitcoin output over ${need.toLocaleString('en-US')} sats. Tap Add BTC for RGB on Home, then wait a block.`);
-    const bi = await this.outpointInfo(coin.outpoint);
+    // confirmed coins first; change from this wallet's last trade too, and several coins if one isn't enough
+    const { all, confirmed } = await this.btcCoins();
+    const pay = payCoinsFor(confirmed, all, need, perInput);
+    if (!pay) throw new Error(`Your RGB wallet needs ${need.toLocaleString('en-US')} sats in bitcoin for this. Tap Add BTC for RGB on Home.`);
+    const bis = await Promise.all(pay.coins.map((c) => this.outpointInfo(c.outpoint)));
     const r = await this.onchainReceive({ assetId: null, amount: Number(o.amount), durationSeconds: 86400, witness: true });
     const seal = this.lib.WasmWallet.witnessSealScript(r.invoice);
-    const change = BigInt(bi.sats) - need;
-    const unsigned = this.lib.WasmWallet.presignedBuyPsbt(String(l.psbt), [{ outpoint: coin.outpoint, sats: bi.sats, script: bi.script, tx: bi.tx }], seal, change >= 546n ? { script: await this.ownScript(), sats: Number(change) } : null);
+    const change = bis.reduce((t, b) => t + BigInt(b.sats), 0n) - need - perInput * BigInt(pay.coins.length - 1);
+    const inputs = pay.coins.map((c, k) => ({ outpoint: c.outpoint, sats: bis[k].sats, script: bis[k].script, tx: bis[k].tx }));
+    const unsigned = this.lib.WasmWallet.presignedBuyPsbt(String(l.psbt), inputs, seal, change >= 546n ? { script: await this.ownScript(), sats: Number(change) } : null);
     const txHex = this.extractHex(this.sign(unsigned));
     const txid = this.lib.WasmWallet.checkPresignedFinal(String(l.psbt), txHex, seal);
     const completed = this.lib.WasmWallet.completePresignedConsignment(consignment, info.templateTxid, txHex);

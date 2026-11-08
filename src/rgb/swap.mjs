@@ -51,6 +51,30 @@ export function buyerCoinFor(coins, need) {
   return ok[0] ? { outpoint: ok[0].outpoint, sats: String(ok[0].sats) } : null;
 }
 
+/** vB one more taproot input adds to a transaction (a little over 57.5). */
+export const EXTRA_INPUT_VB = 58;
+
+/**
+ * Coins to pay `need` sats from the RGB wallet's bitcoin, so a trade never waits for the last one's change to
+ * confirm: one confirmed coin if one is enough, else one coin counting unconfirmed change (this wallet's own
+ * transactions), else several, largest first, up to `max`; each extra coin adds `perInput` sats of fee to `need`.
+ * `confirmed` and `all` come from listUnspentsVanilla with 1 and 0 confirmations.
+ * @returns {{ coins: { outpoint: string, sats: string }[], total: bigint } | null}
+ */
+export function payCoinsFor(confirmed, all, need, perInput = 0n, max = 4) {
+  const one = buyerCoinFor(confirmed, need) || buyerCoinFor(all, need);
+  if (one) return { coins: [one], total: BigInt(one.sats) };
+  const list = (all || []).filter((c) => !c.is_spent && outpointOf(c.outpoint))
+    .map((c) => ({ outpoint: outpointOf(c.outpoint), sats: BigInt(String(c.txout?.value ?? 0)) }))
+    .sort((a, b) => (a.sats > b.sats ? -1 : a.sats < b.sats ? 1 : 0));
+  const picked = []; let total = 0n;
+  for (const c of list.slice(0, max)) {
+    picked.push(c); total += c.sats;
+    if (total > BigInt(need) + BigInt(perInput) * BigInt(picked.length - 1)) return { coins: picked.map((x) => ({ outpoint: x.outpoint, sats: String(x.sats) })), total };
+  }
+  return null;
+}
+
 const heldOn = (u, assetId) => (u.rgbAllocations || []).filter((a) => a.assetId === assetId && a.settled && a.assignment?.Fungible != null)
   .reduce((s, a) => s + BigInt(String(a.assignment.Fungible)), 0n);
 

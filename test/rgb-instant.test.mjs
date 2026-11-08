@@ -212,3 +212,33 @@ test('a listing signed in an older layout is flagged once, so the seller cancels
   assert.deepEqual(await s.w.instantProgress(s.store, s.store.all()), [{ offerId: 'sw0123456789ab', stage: 'outdated' }]);
   assert.deepEqual(await s.w.instantProgress(s.store, s.store.all()), [], 'said once');
 });
+
+test('payCoinsFor: a confirmed coin first, else unconfirmed change, else several coins with their extra fee', async () => {
+  const { payCoinsFor } = await import('../src/rgb/swap.mjs');
+  const c = (ch, sats) => ({ outpoint: `${T(ch)}:0`, txout: { value: sats }, is_spent: false });
+  const confirmed = [c('1', 3000)], all = [c('1', 3000), c('2', 9000), c('3', 4000)];
+  assert.deepEqual(payCoinsFor(confirmed, all, 2000n).coins.map((x) => x.outpoint), [`${T('1')}:0`], 'the confirmed one is enough');
+  assert.deepEqual(payCoinsFor(confirmed, all, 5000n).coins.map((x) => x.outpoint), [`${T('2')}:0`], 'unconfirmed change, one coin');
+  const two = payCoinsFor(confirmed, all, 11000n, 100n);
+  assert.deepEqual(two.coins.map((x) => x.outpoint), [`${T('2')}:0`, `${T('3')}:0`]); assert.equal(two.total, 13000n);
+  assert.equal(payCoinsFor(confirmed, all, 15700n, 100n).coins.length, 3, 'all three, counting two extra inputs');
+  assert.equal(payCoinsFor(confirmed, all, 15800n, 100n), null, 'not enough once the extra inputs pay their fee');
+});
+
+test('buyer: pays with two coins when one is not enough', async () => {
+  const chain = fakeChain();
+  const seller = `${T('a')}:0`, c1 = `${T('d')}:1`, c2 = `${T('e')}:0`;
+  chain.outs[seller] = { sats: 1000, script: '5120sell' };
+  chain.outs[c1] = { sats: 15000, script: '5120buy', tx: 'dd' };
+  chain.outs[c2] = { sats: 9000, script: '5120buy', tx: 'ee' };
+  const info = { sellerOutpoint: seller, sellerSats: 1000, sellerScript: '5120sell', payoutSats: 21000, opretScript: '6a20', templateTxid: T('6') };
+  const listing = { psbt: JSON.stringify({ sig: true, info }), consignment: b64(enc({ valid: true, contractId: ASSET, sealAmount: 500 })), templateTxid: T('6') };
+  const offer = { offerId: 'sw0123456789ab', assetId: ASSET, amount: '500', priceSats: '20000', state: 'OPEN' };
+  const b = wallet({ name: 'buyer', lib: fakeLib(), chain, coins: [{ outpoint: c1, txout: { value: 15000 }, is_spent: false }, { outpoint: c2, txout: { value: 9000 }, is_spent: false }] });
+  let built;
+  b.w.lib.WasmWallet.presignedBuyPsbt = (tpl, ins, seal, change) => { built = { ins, change }; return JSON.stringify({ seal }); };
+  await b.w.instantBuy({ offerId: offer.offerId, network: 'Signet', offer, listing, feeRate: 2 }, b.store);
+  assert.deepEqual(built.ins.map((i) => i.outpoint), [c1, c2]);
+  // 24000 in − 20000 price − 330 seal − 640 fee − 116 for the second input
+  assert.equal(built.change.sats, 24000 - 20000 - 330 - 640 - 116);
+});
