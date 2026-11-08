@@ -192,6 +192,30 @@ const { invoice } = await window.masked.rgb.requestInvoice({ assetId, baseUnits:
 await window.masked.rgb.payInvoice(escrowInvoice, { assetId, amount: '1500' });
 ```
 
+### Peer-to-peer swaps: `rgb.swapSellable`, `swapPrepare`, `swapColor`, `swapSign`, `swapFinish` 🔐
+RGB tokens for BTC in one Bitcoin transaction, wallet to wallet: nobody holds anything in between. The site only passes
+the messages from one wallet to the other. The steps, field names and numbers are the same as the Darkhorse wallet's,
+so MASKED and Darkhorse users can trade with each other. Each step is approved in the wallet doing it.
+
+| Step | Who | Call | Returns |
+| --- | --- | --- | --- |
+| 1 | buyer | `swapPrepare({ offerId, network, offer, feeRate? })` | `session`: `{ offerId, assetId, amount, priceSats, buyerInvoice, buyerSeal, buyerOutpoint, buyerInputSats, buyerChangeScript, feeSats }` |
+| 2 | seller | `swapColor({ offerId, network, session, offer })` | `{ psbt, sellerOutpoint, consignment }` |
+| 3 | buyer | `swapSign({ offerId, psbt, consignment, offer })` | `{ offerId, psbt, … }` (signed) |
+| 4 | seller | `swapFinish({ offerId, psbt, offer })` | `{ txid }` |
+
+`offer` is `{ offerId, assetId, amount, priceSats, state }` with `amount` in base units and `state` `OPEN` (step 1) or
+`MATCHED` (step 2). `network` is `"Signet"` or `"Mainnet"`. `swapSellable({ assetId })` returns `{ total, max }`: one
+swap uses one RGB output, so `max` is the most one offer can sell.
+
+The transaction: input 0 the seller's RGB output, input 1 the buyer's bitcoin; output 0 the RGB commitment
+(OP_RETURN), output 1 the buyer's seal (1,000 sats), output 2 the seller (price + its RGB output's sats − 1,000),
+output 3 the buyer's change. The buyer pays the network fee (`feeSats`, 320 vB at the chosen rate). Before signing,
+the buyer's wallet checks the token transfer (right token, right amount on its seal) and every output and the fee.
+
+Needs MASKED with the swap engine (2.25+). Without it each call fails with "This MASKED version can't swap RGB tokens
+yet".
+
 ## Events
 
 ```js

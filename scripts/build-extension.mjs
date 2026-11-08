@@ -21,9 +21,15 @@ console.log('Extension built at '+out);
 // so only the first build takes a couple of minutes.
 // rgb-lib-wasm's fetch calls go through src/rgb/rgbFetch.mjs (a few requests at a time, polite retries)
 const rgbFetchPath=resolve(root,'src/rgb/rgbFetch.mjs');
+// engine/build.sh puts an engine with peer-to-peer swaps in vendor/rgb-lib-wasm; without it, the npm package
+// (no swaps: the swap requests then say the engine doesn't support them)
+const vendorEngine=resolve(root,'vendor/rgb-lib-wasm');
+const swapEngine=existsSync(resolve(vendorEngine,'rgb_lib_wasm_bindings_bg.wasm'));
+console.log(swapEngine?'RGB engine: vendor/rgb-lib-wasm (with swaps)':'RGB engine: @utexo/rgb-lib-wasm from npm (no swaps; run engine/build.sh to add them)');
 await build({
   bundle:true,minify:true,platform:'browser',format:'esm',target:'es2022',
   entryPoints:[resolve(root,'src/rgb/runtime.mjs')],outfile:resolve(out,'rgb-runtime.mjs'),
+  ...(swapEngine?{alias:{'@utexo/rgb-lib-wasm':resolve(vendorEngine,'rgb_lib_wasm_bindings.js')}}:{}),
   plugins:[{name:'rgb-fetch',setup(b){
     b.onLoad({filter:/rgb_lib_wasm_bindings\.js$/},async({path})=>{
       let src=await readFile(path,'utf8'), n=0;
@@ -34,7 +40,7 @@ await build({
     });
   }}],
 });
-const engine=resolve(root,'node_modules/@utexo/rgb-lib-wasm/rgb_lib_wasm_bindings_bg.wasm');
+const engine=swapEngine?resolve(vendorEngine,'rgb_lib_wasm_bindings_bg.wasm'):resolve(root,'node_modules/@utexo/rgb-lib-wasm/rgb_lib_wasm_bindings_bg.wasm');
 const raw=await readFile(engine);
 const optimizer=resolve(root,'node_modules/binaryen/bin/wasm-opt');
 const { version: binaryenVersion } = JSON.parse(await readFile(resolve(root,'node_modules/binaryen/package.json'),'utf8'));

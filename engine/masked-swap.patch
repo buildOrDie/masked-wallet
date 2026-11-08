@@ -1,0 +1,600 @@
+diff --git a/bindings/wasm/src/lib.rs b/bindings/wasm/src/lib.rs
+index bf8d9d1..703c109 100644
+--- a/bindings/wasm/src/lib.rs
++++ b/bindings/wasm/src/lib.rs
+@@ -482,6 +482,79 @@ impl WasmWallet {
+             .map_err(|e| JsValue::from_str(&e.to_string()))
+     }
+ 
++    /// The seller's half of a peer-to-peer swap (MASKED): colour a PSBT built with `buildSwapPsbt` and return it
++    /// unsigned. Output 0 must be an empty OP_RETURN; `sealVout` pays the buyer's witness invoice. Once both sides
++    /// have signed their own input, `sendEnd` broadcasts it and posts the consignment (recorded as a donation).
++    #[wasm_bindgen(js_name = "swapBegin")]
++    pub async fn swap_begin(
++        &self,
++        online_js: JsValue,
++        psbt: &str,
++        asset_id: &str,
++        amount: u64,
++        recipient_id: &str,
++        seal_vout: u32,
++        seal_amount_sat: u64,
++        transport_endpoints_js: JsValue,
++        min_confirmations: u8,
++    ) -> Result<String, JsValue> {
++        let online: Online = serde_wasm_bindgen::from_value(online_js)
++            .map_err(|e| JsValue::from_str(&format!("Invalid Online object: {e}")))?;
++        let endpoints: Vec<String> = serde_wasm_bindgen::from_value(transport_endpoints_js)
++            .map_err(|e| JsValue::from_str(&format!("Invalid transport endpoints: {e}")))?;
++        let mut wallet = self.inner.borrow_mut();
++        wallet
++            .swap_begin(online, psbt.to_string(), asset_id.to_string(), amount, recipient_id.to_string(), seal_vout, seal_amount_sat, endpoints, min_confirmations)
++            .await
++            .map_err(|e| JsValue::from_str(&e.to_string()))
++    }
++
++    /// The consignment of a transfer begun here and not sent yet, raw bytes (the swap buyer checks it).
++    #[wasm_bindgen(js_name = "transferConsignment")]
++    pub fn transfer_consignment(&self, txid: &str, asset_id: &str) -> Result<Vec<u8>, JsValue> {
++        self.inner
++            .borrow()
++            .transfer_consignment(txid.to_string(), asset_id.to_string())
++            .map_err(|e| JsValue::from_str(&e.to_string()))
++    }
++
++    /// Build an unsigned swap PSBT: `inputs` `[{ outpoint, sats, script, tx? }]`, `outputs` `[{ script, sats }]`
++    /// in order. An empty OP_RETURN is put at output 0.
++    #[wasm_bindgen(js_name = "buildSwapPsbt")]
++    pub fn build_swap_psbt(inputs_js: JsValue, outputs_js: JsValue) -> Result<String, JsValue> {
++        let inputs = serde_wasm_bindgen::from_value(inputs_js).map_err(|e| JsValue::from_str(&format!("Invalid inputs: {e}")))?;
++        let outputs = serde_wasm_bindgen::from_value(outputs_js).map_err(|e| JsValue::from_str(&format!("Invalid outputs: {e}")))?;
++        rgb_lib_wasm::wallet::rust_only::build_swap_psbt(inputs, outputs).map_err(|e| JsValue::from_str(&e.to_string()))
++    }
++
++    /// Check a swap PSBT before signing: `inputs` `["txid:vout"]` in order, `outputs` `[{ script|null, sats }]`
++    /// after the OP_RETURN, and the exact network fee. Throws on any difference.
++    #[wasm_bindgen(js_name = "checkSwapPsbt")]
++    pub fn check_swap_psbt(psbt: &str, inputs_js: JsValue, outputs_js: JsValue, fee_sats: u64) -> Result<(), JsValue> {
++        let inputs = serde_wasm_bindgen::from_value(inputs_js).map_err(|e| JsValue::from_str(&format!("Invalid inputs: {e}")))?;
++        let outputs = serde_wasm_bindgen::from_value(outputs_js).map_err(|e| JsValue::from_str(&format!("Invalid outputs: {e}")))?;
++        rgb_lib_wasm::wallet::rust_only::check_swap_psbt(psbt, inputs, outputs, fee_sats).map_err(|e| JsValue::from_str(&e.to_string()))
++    }
++
++    /// The outpoints a PSBT spends, `["txid:vout"]`.
++    #[wasm_bindgen(js_name = "swapPsbtInputs")]
++    pub fn swap_psbt_inputs(psbt: &str) -> Result<JsValue, JsValue> {
++        let list = rgb_lib_wasm::wallet::rust_only::swap_psbt_inputs(psbt).map_err(|e| JsValue::from_str(&e.to_string()))?;
++        to_js(&list)
++    }
++
++    /// The txid of a PSBT's unsigned transaction.
++    #[wasm_bindgen(js_name = "swapPsbtTxid")]
++    pub fn swap_psbt_txid(psbt: &str) -> Result<String, JsValue> {
++        rgb_lib_wasm::wallet::rust_only::swap_psbt_txid(psbt).map_err(|e| JsValue::from_str(&e.to_string()))
++    }
++
++    /// The output script (hex) a witness invoice's seal is paid to.
++    #[wasm_bindgen(js_name = "invoiceSealScript")]
++    pub fn invoice_seal_script(invoice: &str) -> Result<String, JsValue> {
++        rgb_lib_wasm::wallet::rust_only::invoice_seal_script(invoice).map_err(|e| JsValue::from_str(&e.to_string()))
++    }
++
+     /// Send RGB assets (end): broadcast a signed PSBT. Returns an OperationResult JS object.
+     #[wasm_bindgen(js_name = "sendEnd")]
+     pub async fn send_end(
+@@ -832,20 +905,23 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
+ /// Works before the witness transaction is broadcast. Takes the raw consignment
+ /// bytes (strict-encoded, not base64), the witness transaction ID, and the Bitcoin network.
+ ///
+-/// Returns a JS object: `{ valid: boolean, warnings?: string[], error?: string, details?: string }`
++/// Returns a JS object: `{ valid, warnings?, error?, details?, contractId?, sealAmount? }`. With `sealVout`,
++/// `sealAmount` is what the witness transaction assigns to that output.
+ #[wasm_bindgen(js_name = "validateConsignmentOffchain")]
+ pub fn validate_consignment_offchain(
+     consignment_bytes: &[u8],
+     txid: &str,
+     network: &str,
++    seal_vout: Option<u32>,
+ ) -> Result<JsValue, JsValue> {
+     let bitcoin_network = network
+         .parse::<rgb_lib_wasm::BitcoinNetwork>()
+         .map_err(|e| JsValue::from_str(&e.to_string()))?;
+-    let result = rgb_lib_wasm::wallet::rust_only::validate_consignment_offchain(
++    let result = rgb_lib_wasm::wallet::rust_only::validate_swap_consignment_offchain(
+         consignment_bytes,
+         txid,
+         bitcoin_network,
++        seal_vout,
+     )
+     .map_err(|e| JsValue::from_str(&e.to_string()))?;
+     to_js(&result)
+diff --git a/src/wallet/online.rs b/src/wallet/online.rs
+index d436834..5cacd60 100644
+--- a/src/wallet/online.rs
++++ b/src/wallet/online.rs
+@@ -1377,11 +1377,11 @@ impl Wallet {
+             if internal_unspents_outpoints.contains(&(txid.clone(), vout)) {
+                 continue;
+             }
+-            let mut db_txo: DbTxoActMod = self
+-                .database
+-                .get_txo(&Outpoint { txid, vout })?
+-                .expect("outpoint should be in the DB")
+-                .into();
++            // a peer-to-peer swap also spends the other side's output, which this wallet doesn't know
++            let Some(db_txo) = self.database.get_txo(&Outpoint { txid, vout })? else {
++                continue;
++            };
++            let mut db_txo: DbTxoActMod = db_txo.into();
+             db_txo.spent = ActiveValue::Set(true);
+             self.database.update_txo(db_txo)?;
+         }
+@@ -3878,3 +3878,170 @@ impl Wallet {
+         Ok(res)
+     }
+ }
++
++
++// ---- peer-to-peer swaps (MASKED) ----
++// A swap is one Bitcoin transaction with two inputs: the seller's RGB output and the buyer's bitcoin. Output 0
++// is the RGB commitment (OP_RETURN), output `seal_vout` pays the buyer's witness seal, the others pay the seller
++// and the buyer's change. The buyer builds nothing: the seller colours the PSBT here, both sign their own input,
++// and the seller's `send_end` broadcasts it and posts the consignment, recorded as a donation.
++impl Wallet {
++    /// The seller's half of a swap on a PSBT built by the caller (see `build_swap_psbt`). Colours it through the
++    /// same path as `send_begin` and returns it unsigned. The RGB input must be one of the PSBT's inputs; any
++    /// asset change goes to another output of this wallet, as with a normal send.
++    pub async fn swap_begin(
++        &mut self,
++        online: Online,
++        psbt: String,
++        asset_id: String,
++        amount: u64,
++        recipient_id: String,
++        seal_vout: u32,
++        seal_amount_sat: u64,
++        transport_endpoints: Vec<String>,
++        min_confirmations: u8,
++    ) -> Result<String, Error> {
++        info!(self.logger, "Swap (begin) for {asset_id}...");
++        if amount == 0 {
++            return Err(Error::InvalidAmountZero);
++        }
++        let mut psbt = Psbt::from_str(&psbt)?;
++        // the commitment output must be the first one, and the seal must be the one the buyer asked for
++        let outputs = &psbt.unsigned_tx.output;
++        if outputs.is_empty() || !outputs[0].script_pubkey.is_op_return() || outputs[0].value.to_sat() != 0 {
++            return Err(Error::Internal { details: s!("swap PSBT: output 0 must be an empty OP_RETURN") });
++        }
++        if seal_vout == 0 || seal_vout as usize >= outputs.len() {
++            return Err(Error::Internal { details: s!("swap PSBT: no output at the seal position") });
++        }
++        let seal_script = crate::utils::script_buf_from_recipient_id(recipient_id.clone())?
++            .ok_or(Error::InvalidRecipientData { details: s!("a swap pays a witness (wvout) invoice") })?;
++        let seal_out = &outputs[seal_vout as usize];
++        if seal_out.script_pubkey != seal_script || seal_out.value.to_sat() != seal_amount_sat {
++            return Err(Error::Internal { details: s!("swap PSBT: the seal output does not pay the buyer's invoice") });
++        }
++
++        let (_fee_rate, unspents, input_unspents, mut runtime) = self._get_transfer_begin_data(online, 1)?;
++
++        let asset = self.database.check_asset_exists(asset_id.clone())?;
++        self.check_schema_support(&asset.schema)?;
++        if !matches!(asset.schema, AssetSchema::Nia | AssetSchema::Ifa) {
++            return Err(Error::InvalidAssignment);
++        }
++
++        let chainnet: ChainNet = self.bitcoin_network().into();
++        let beneficiary = XChainNet::<Beneficiary>::from_str(&recipient_id).map_err(|_| Error::InvalidRecipientID)?;
++        if beneficiary.chain_network() != chainnet {
++            return Err(Error::InvalidRecipientNetwork);
++        }
++        self.check_transport_endpoints(&transport_endpoints)?;
++        let mut endpoints: Vec<LocalTransportEndpoint> = vec![];
++        let mut found_valid = false;
++        for endpoint_str in &transport_endpoints {
++            let te = TransportEndpoint::new(endpoint_str.clone())?;
++            let mut lte = LocalTransportEndpoint {
++                transport_type: te.transport_type,
++                endpoint: te.endpoint.clone(),
++                used: false,
++                usable: false,
++            };
++            if crate::utils::check_proxy_async(&te.endpoint).await.is_ok() {
++                lte.usable = true;
++                found_valid = true;
++            }
++            endpoints.push(lte);
++        }
++        if !found_valid {
++            return Err(Error::InvalidTransportEndpoints { details: s!("no valid transport endpoints") });
++        }
++
++        let assignment = Assignment::Fungible(amount);
++        let mut needed = AssignmentsCollection::default();
++        assignment.add_to_assignments(&mut needed);
++        let recipient = LocalRecipient {
++            recipient_id: recipient_id.clone(),
++            local_recipient_data: LocalRecipientData::Witness(LocalWitnessData {
++                amount_sat: seal_amount_sat,
++                blinding: None,
++                vout: seal_vout,
++            }),
++            assignment,
++            transport_endpoints: endpoints,
++        };
++
++        // only this wallet's outputs that the PSBT already spends can carry the asset
++        let psbt_inputs: HashSet<Outpoint> = psbt
++            .unsigned_tx
++            .input
++            .iter()
++            .map(|i| Outpoint::from(i.previous_output))
++            .collect();
++        let swap_unspents: Vec<LocalUnspent> = input_unspents
++            .iter()
++            .filter(|u| psbt_inputs.contains(&u.utxo.outpoint()))
++            .cloned()
++            .collect();
++        if swap_unspents.is_empty() {
++            return Err(Error::Internal { details: s!("swap PSBT: none of its inputs is an RGB output of this wallet") });
++        }
++        let asset_spend = self._select_rgb_inputs(asset_id.clone(), &needed, swap_unspents)?;
++        if asset_spend.txo_map.values().any(|o| !psbt_inputs.contains(o)) {
++            return Err(Error::Internal { details: s!("swap PSBT: the asset is on an output the PSBT does not spend") });
++        }
++        let all_inputs: HashSet<BdkOutPoint> = asset_spend.txo_map.values().map(|o| o.clone().into()).collect();
++        self._restore_missing_bdk_inputs(&all_inputs).await?;
++
++        let contract_id = ContractId::from_str(&asset_id).map_err(|_| Error::AssetNotFound { asset_id: asset_id.clone() })?;
++        let mut transfer_info_map: BTreeMap<String, InfoAssetTransfer> = BTreeMap::new();
++        transfer_info_map.insert(
++            asset_id.clone(),
++            InfoAssetTransfer {
++                asset_info: AssetInfo { contract_id, reject_list_url: asset.reject_list_url },
++                recipients: vec![recipient],
++                asset_spend,
++                change: AssignmentsCollection::default(),
++                original_assignments_needed: needed.clone(),
++                assignments_needed: needed,
++                assignments_spent: HashMap::new(),
++                main_transition: TypeOfTransition::Transfer,
++            },
++        );
++
++        let txid = psbt.clone().extract_tx().map_err(InternalError::from)?.compute_txid().to_string();
++        let mut rejected = HashSet::new();
++        let ok = self
++            ._prepare_rgb_psbt_wasm(
++                &mut psbt,
++                &mut transfer_info_map,
++                &txid,
++                true,
++                unspents,
++                &mut runtime,
++                min_confirmations,
++                None,
++                &mut rejected,
++            )
++            .await?;
++        if !ok {
++            return Err(Error::Internal { details: s!("part of this asset is on the issuer's reject list: it can't be swapped") });
++        }
++        let final_txid = psbt.clone().extract_tx().map_err(InternalError::from)?.compute_txid().to_string();
++        if final_txid != txid {
++            if let Some(artifacts) = self.transfer_artifacts.remove(&txid) {
++                self.transfer_artifacts.insert(final_txid, artifacts);
++            }
++        }
++        info!(self.logger, "Swap (begin) completed");
++        Ok(psbt.to_string())
++    }
++
++    /// The consignment for a transfer begun here (`swap_begin` or `send_begin`) and not sent yet. The buyer
++    /// checks it against the transaction before signing.
++    pub fn transfer_consignment(&self, txid: String, asset_id: String) -> Result<Vec<u8>, Error> {
++        self.transfer_artifacts
++            .get(&txid)
++            .and_then(|a| a.consignment_bytes.get(&asset_id))
++            .cloned()
++            .ok_or(Error::UnknownTransfer { txid })
++    }
++}
+diff --git a/src/wallet/rust_only.rs b/src/wallet/rust_only.rs
+index 7cc1b66..655269d 100644
+--- a/src/wallet/rust_only.rs
++++ b/src/wallet/rust_only.rs
+@@ -52,6 +52,12 @@ pub struct ValidateConsignmentResult {
+     pub error: Option<String>,
+     /// Detailed error/failure description (when invalid).
+     pub details: Option<String>,
++    /// The asset (contract) the consignment is for.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub contract_id: Option<String>,
++    /// With a seal output given: what the transaction assigns to that output of the witness transaction.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub seal_amount: Option<u64>,
+ }
+ 
+ impl Wallet {
+@@ -646,6 +652,18 @@ pub fn validate_consignment_offchain(
+     consignment_bytes: &[u8],
+     txid: &str,
+     bitcoin_network: BitcoinNetwork,
++) -> Result<ValidateConsignmentResult, Error> {
++    validate_swap_consignment_offchain(consignment_bytes, txid, bitcoin_network, None)
++}
++
++/// [`validate_consignment_offchain`], and with `seal_vout`: the asset amount the witness transaction assigns to
++/// that output (a swap buyer checks it before signing).
++#[cfg(feature = "esplora")]
++pub fn validate_swap_consignment_offchain(
++    consignment_bytes: &[u8],
++    txid: &str,
++    bitcoin_network: BitcoinNetwork,
++    seal_vout: Option<u32>,
+ ) -> Result<ValidateConsignmentResult, Error> {
+     let consignment = RgbTransfer::load(consignment_bytes).map_err(|e| Error::Internal {
+         details: format!("Failed to load consignment: {e}"),
+@@ -672,6 +690,26 @@ pub fn validate_consignment_offchain(
+     match consignment.clone().validate(&resolver, &validation_config) {
+         Ok(valid_consignment) => {
+             let status = valid_consignment.validation_status();
++            let seal_amount = seal_vout.map(|vout| {
++                let mut total = 0u64;
++                for bundle in consignment.bundles.iter().filter(|b| b.witness_id() == witness_id) {
++                    for KnownTransition { transition, .. } in bundle.bundle.known_transitions.iter() {
++                        for (ass_type, typed_assigns) in transition.assignments.iter() {
++                            if *ass_type != OS_ASSET {
++                                continue;
++                            }
++                            for a in typed_assigns.as_fungible().iter() {
++                                if let Assign::Revealed { seal, state, .. } = a {
++                                    if seal.txid == TxPtr::WitnessTx && seal.vout.into_u32() == vout {
++                                        total = total.saturating_add(state.as_u64());
++                                    }
++                                }
++                            }
++                        }
++                    }
++                }
++                total
++            });
+             Ok(ValidateConsignmentResult {
+                 valid: true,
+                 warnings: Some(
+@@ -683,6 +721,8 @@ pub fn validate_consignment_offchain(
+                 ),
+                 error: None,
+                 details: None,
++                contract_id: Some(consignment.contract_id().to_string()),
++                seal_amount,
+             })
+         }
+         Err(ValidationError::InvalidConsignment(failure)) => Ok(ValidateConsignmentResult {
+@@ -690,12 +730,16 @@ pub fn validate_consignment_offchain(
+             warnings: None,
+             error: Some("invalid".to_string()),
+             details: Some(failure.to_string()),
++            contract_id: None,
++            seal_amount: None,
+         }),
+         Err(ValidationError::ResolverError(e)) => Ok(ValidateConsignmentResult {
+             valid: false,
+             warnings: None,
+             error: Some("resolver".to_string()),
+             details: Some(e.to_string()),
++            contract_id: None,
++            seal_amount: None,
+         }),
+     }
+ }
+@@ -704,6 +748,55 @@ pub fn validate_consignment_offchain(
+ mod tests {
+     use super::*;
+ 
++    fn swap_fixture() -> (Vec<SwapInput>, Vec<SwapOutput>) {
++        let seller = "5120".to_string() + &"11".repeat(32);
++        let buyer = "5120".to_string() + &"22".repeat(32);
++        let seal = "5120".to_string() + &"33".repeat(32);
++        let inputs = vec![
++            SwapInput { outpoint: format!("{}:0", "aa".repeat(32)), sats: 1000, script: seller.clone(), tx: None },
++            SwapInput { outpoint: format!("{}:3", "bb".repeat(32)), sats: 60000, script: buyer.clone(), tx: None },
++        ];
++        // seal 1000, seller gets price 50000 (+ its 1000 input - 1000 seal), buyer change 60000-50000-640
++        let outputs = vec![
++            SwapOutput { script: Some(seal), sats: 1000 },
++            SwapOutput { script: Some(seller), sats: 50000 },
++            SwapOutput { script: Some(buyer), sats: 9360 },
++        ];
++        (inputs, outputs)
++    }
++
++    #[test]
++    fn swap_seal_script_from_invoice() {
++        // a Signet witness invoice made by rgb-lib
++        let inv = "rgb:~/~/~/sb:wvout:BW9z6oTM-mN7JZuX-kxryXeu-5Gxcn9E-k33W7g5-07_hkVC-3G83Nmw?expiry=1794139938&endpoints=rpcs://proxy.iriswallet.com/0.2/json-rpc";
++        let script = invoice_seal_script(inv).unwrap();
++        assert!(script.starts_with("5120") && script.len() == 68, "{script}");
++        assert!(invoice_seal_script("rgb:nonsense").is_err());
++    }
++
++    #[test]
++    fn swap_psbt_build_and_check() {
++        let (inputs, outputs) = swap_fixture();
++        let psbt = build_swap_psbt(inputs.clone(), outputs.clone()).unwrap();
++        let ins = swap_psbt_inputs(&psbt).unwrap();
++        assert_eq!(ins, inputs.iter().map(|i| i.outpoint.clone()).collect::<Vec<_>>());
++        assert_eq!(swap_psbt_txid(&psbt).unwrap().len(), 64);
++        // the buyer's view: the seller's payout script is unknown to it
++        let mut view = outputs.clone();
++        view[1].script = None;
++        check_swap_psbt(&psbt, ins.clone(), view.clone(), 640).unwrap();
++        // a different fee, amount, input order or address is refused
++        assert!(check_swap_psbt(&psbt, ins.clone(), view.clone(), 641).is_err());
++        let mut more = view.clone();
++        more[2].sats = 9000;
++        assert!(check_swap_psbt(&psbt, ins.clone(), more, 640).is_err());
++        let rev: Vec<String> = ins.iter().rev().cloned().collect();
++        assert!(check_swap_psbt(&psbt, rev, view.clone(), 640).is_err());
++        let mut other = view.clone();
++        other[0].script = Some("5120".to_string() + &"44".repeat(32));
++        assert!(check_swap_psbt(&psbt, ins, other, 640).is_err());
++    }
++
+     #[test]
+     fn validate_consignment_offchain_invalid_bytes() {
+         let result = validate_consignment_offchain(
+@@ -737,6 +830,8 @@ mod tests {
+             warnings: Some(vec!["warn1".to_string()]),
+             error: None,
+             details: None,
++            contract_id: None,
++            seal_amount: None,
+         };
+         let json = serde_json::to_string(&result).unwrap();
+         let deserialized: ValidateConsignmentResult = serde_json::from_str(&json).unwrap();
+@@ -749,6 +844,8 @@ mod tests {
+             warnings: None,
+             error: Some("invalid".to_string()),
+             details: Some("schema mismatch".to_string()),
++            contract_id: None,
++            seal_amount: None,
+         };
+         let json = serde_json::to_string(&result_invalid).unwrap();
+         let deserialized: ValidateConsignmentResult = serde_json::from_str(&json).unwrap();
+@@ -761,3 +858,134 @@ mod tests {
+         assert_eq!(IndexerProtocol::Esplora.to_string(), "Esplora");
+     }
+ }
++
++
++// ---- swap PSBT helpers (no wallet needed) ----
++
++/// One input of a swap PSBT: `outpoint` "txid:vout", its value and output script (hex), and optionally the full
++/// previous transaction (hex).
++#[derive(Debug, Clone, Serialize, Deserialize)]
++pub struct SwapInput {
++    /// "txid:vout"
++    pub outpoint: String,
++    /// value in sats
++    pub sats: u64,
++    /// output script, hex
++    pub script: String,
++    /// the previous transaction, hex (optional)
++    #[serde(default)]
++    pub tx: Option<String>,
++}
++
++/// One output of a swap PSBT. `script: None` in a check means "any script" (the other side's output).
++#[derive(Debug, Clone, Serialize, Deserialize)]
++pub struct SwapOutput {
++    /// output script, hex
++    pub script: Option<String>,
++    /// value in sats
++    pub sats: u64,
++}
++
++fn parse_outpoint(s: &str) -> Result<OutPoint, Error> {
++    OutPoint::from_str(s.trim()).map_err(|_| Error::Internal { details: format!("not an outpoint: {s}") })
++}
++fn script_from_hex(h: &str) -> Result<ScriptBuf, Error> {
++    ScriptBuf::from_hex(h.trim()).map_err(|_| Error::Internal { details: s!("bad output script hex") })
++}
++
++/// An unsigned swap PSBT: the inputs in order, an empty OP_RETURN at output 0 (where the RGB commitment goes),
++/// then `outputs` in order. Version 2, RBF signalled, no lock time.
++pub fn build_swap_psbt(inputs: Vec<SwapInput>, outputs: Vec<SwapOutput>) -> Result<String, Error> {
++    use bdk_wallet::bitcoin::{Amount, Sequence, TxIn, Witness, absolute::LockTime, consensus::deserialize, transaction::Version};
++    if inputs.len() < 2 || outputs.is_empty() {
++        return Err(Error::Internal { details: s!("a swap has at least two inputs and one output") });
++    }
++    let mut tx_in = vec![];
++    for i in &inputs {
++        tx_in.push(TxIn { previous_output: parse_outpoint(&i.outpoint)?, script_sig: ScriptBuf::new(), sequence: Sequence::ENABLE_RBF_NO_LOCKTIME, witness: Witness::new() });
++    }
++    let mut tx_out = vec![TxOut { value: Amount::ZERO, script_pubkey: ScriptBuf::new_op_return([]) }];
++    for o in &outputs {
++        let script = o.script.as_deref().ok_or(Error::Internal { details: s!("every output needs a script") })?;
++        tx_out.push(TxOut { value: Amount::from_sat(o.sats), script_pubkey: script_from_hex(script)? });
++    }
++    let tx = BdkTransaction { version: Version::TWO, lock_time: LockTime::ZERO, input: tx_in, output: tx_out };
++    let mut psbt = Psbt::from_unsigned_tx(tx).map_err(|e| Error::Internal { details: e.to_string() })?;
++    for (k, i) in inputs.iter().enumerate() {
++        psbt.inputs[k].witness_utxo = Some(TxOut { value: Amount::from_sat(i.sats), script_pubkey: script_from_hex(&i.script)? });
++        if let Some(h) = &i.tx {
++            let bytes = <Vec<u8> as bdk_wallet::bitcoin::hex::FromHex>::from_hex(h.trim()).map_err(|_| Error::Internal { details: s!("bad previous transaction hex") })?;
++            let prev: BdkTransaction = deserialize(&bytes).map_err(|_| Error::Internal { details: s!("bad previous transaction") })?;
++            let op = psbt.unsigned_tx.input[k].previous_output;
++            if prev.compute_txid() != op.txid {
++                return Err(Error::Internal { details: s!("previous transaction does not match the input") });
++            }
++            psbt.inputs[k].non_witness_utxo = Some(prev);
++        }
++    }
++    Ok(psbt.to_string())
++}
++
++/// The outpoints a PSBT spends, "txid:vout", in order.
++pub fn swap_psbt_inputs(psbt: &str) -> Result<Vec<String>, Error> {
++    let psbt = Psbt::from_str(psbt)?;
++    Ok(psbt.unsigned_tx.input.iter().map(|i| i.previous_output.to_string()).collect())
++}
++
++/// The txid of a PSBT's unsigned transaction (the witness id its consignment carries).
++pub fn swap_psbt_txid(psbt: &str) -> Result<String, Error> {
++    let psbt = Psbt::from_str(psbt)?;
++    Ok(psbt.unsigned_tx.compute_txid().to_string())
++}
++
++/// Check a swap PSBT against what was agreed, before signing it: exactly these inputs in this order, output 0 an
++/// OP_RETURN, then exactly these outputs (a `None` script matches any script, the amount must still match), and
++/// a network fee of exactly `fee_sats` (input values from the PSBT; a wrong value makes every signature invalid).
++pub fn check_swap_psbt(psbt: &str, inputs: Vec<String>, outputs: Vec<SwapOutput>, fee_sats: u64) -> Result<(), Error> {
++    let bad = |m: &str| Error::Internal { details: format!("swap check: {m}") };
++    let psbt = Psbt::from_str(psbt)?;
++    let tx = &psbt.unsigned_tx;
++    if tx.input.len() != inputs.len() {
++        return Err(bad("the number of inputs changed"));
++    }
++    for (k, want) in inputs.iter().enumerate() {
++        if tx.input[k].previous_output != parse_outpoint(want)? {
++            return Err(bad(&format!("input {k} is not the agreed one")));
++        }
++    }
++    if tx.output.len() != outputs.len() + 1 {
++        return Err(bad("the number of outputs changed"));
++    }
++    if !tx.output[0].script_pubkey.is_op_return() || tx.output[0].value.to_sat() != 0 {
++        return Err(bad("output 0 must be the RGB commitment"));
++    }
++    for (k, want) in outputs.iter().enumerate() {
++        let got = &tx.output[k + 1];
++        if got.value.to_sat() != want.sats {
++            return Err(bad(&format!("output {} pays {} sats, agreed {}", k + 1, got.value.to_sat(), want.sats)));
++        }
++        if let Some(h) = &want.script {
++            if got.script_pubkey != script_from_hex(h)? {
++                return Err(bad(&format!("output {} pays another address", k + 1)));
++            }
++        }
++    }
++    let mut ins = 0u64;
++    for (k, i) in psbt.inputs.iter().enumerate() {
++        let v = i.witness_utxo.as_ref().map(|o| o.value.to_sat()).ok_or(bad(&format!("input {k} has no amount")))?;
++        ins = ins.saturating_add(v);
++    }
++    let outs: u64 = tx.output.iter().map(|o| o.value.to_sat()).sum();
++    if ins < outs || ins - outs != fee_sats {
++        return Err(bad(&format!("the network fee is {} sats, agreed {fee_sats}", ins.saturating_sub(outs))));
++    }
++    Ok(())
++}
++
++/// The output script a witness invoice's seal must be paid to, hex.
++pub fn invoice_seal_script(invoice: &str) -> Result<String, Error> {
++    let inv = RgbInvoice::from_str(invoice.trim()).map_err(|_| Error::InvalidInvoice { details: s!("not an RGB invoice") })?;
++    let rid = inv.beneficiary.to_string();
++    let script = crate::utils::script_buf_from_recipient_id(rid)?.ok_or(Error::InvalidRecipientData { details: s!("a swap needs a witness (wvout) invoice") })?;
++    Ok(script.to_hex_string())
++}

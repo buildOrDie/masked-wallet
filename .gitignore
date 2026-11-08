@@ -1,3 +1,6 @@
 node_modules/
 .DS_Store
 *.zip
+
+# RGB engine with swaps, built by engine/build.sh
+vendor/rgb-lib-wasm/

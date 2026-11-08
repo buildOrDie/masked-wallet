@@ -13,7 +13,7 @@ const NETS = {
 // MASKED runs on Mainnet and Signet. UniSat reports Signet as "testnet", so that name maps to Signet.
 const FROM_UNISAT = { livenet: 'main', mainnet: 'main', testnet: 'signet', signet: 'signet' };
 const FROM_CHAIN = { BITCOIN_MAINNET: 'main', BITCOIN_SIGNET: 'signet' };
-const _APPROVAL = new Set(['requestAccounts', 'signMessage', 'signPsbt', 'signPsbts', 'sendBitcoin', 'switchNetwork', 'switchChain', 'inscribeTransfer', 'getTradeAccount', 'fundTradeAccount', 'moveToTradeAccount', 'returnToShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbRequestInvoice', 'rgbPayInvoice']);
+const _APPROVAL = new Set(['requestAccounts', 'signMessage', 'signPsbt', 'signPsbts', 'sendBitcoin', 'switchNetwork', 'switchChain', 'inscribeTransfer', 'getTradeAccount', 'fundTradeAccount', 'moveToTradeAccount', 'returnToShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbRequestInvoice', 'rgbPayInvoice', 'rgbSwapSellable', 'rgbSwapPrepare', 'rgbSwapColor', 'rgbSwapSign', 'rgbSwapFinish']);
 
 const TRADE_SITES = new Set(['https://maskedwallet.com', 'https://www.maskedwallet.com']);
 const err = (code, message) => Object.assign(new Error(message), { code });
@@ -130,6 +130,26 @@ const optAssetId = (v) => {
   if (s && !/^rgb:[A-Za-z0-9~_\-!$.%]{10,120}$/.test(s)) throw err(4000, 'assetId must be an RGB asset ID (rgb:…).');
   return s;
 };
+/** A swap request's fields, checked for shape and size (the wallet checks the substance). */
+function swapParams(method, p) {
+  const id = String(p.offerId ?? '');
+  if (!/^[A-Za-z0-9_.:-]{1,100}$/.test(id)) throw err(4000, 'offerId must be a short id.');
+  const o = p.offer;
+  if (!o || typeof o !== 'object') throw err(4000, 'offer is required: { assetId, amount, priceSats, state }.');
+  const offer = { offerId: o.offerId == null ? undefined : String(o.offerId), assetId: optAssetId(o.assetId), amount: String(o.amount ?? ''), priceSats: String(o.priceSats ?? ''), state: o.state == null ? undefined : String(o.state).slice(0, 20) };
+  if (!offer.assetId || !/^\d{1,20}$/.test(offer.amount) || !/^\d{1,16}$/.test(offer.priceSats)) throw err(4000, 'offer needs assetId, amount and priceSats as whole numbers.');
+  const out = { offerId: id, offer, network: p.network == null ? undefined : String(p.network).slice(0, 20) };
+  const str = (v, max, what) => { if (typeof v !== 'string' || !v || v.length > max) throw err(4000, `${what} is missing or too large.`); return v; };
+  if (method === 'rgbSwapPrepare' && p.feeRate != null) { const f = Number(p.feeRate); if (!(f >= 1 && f <= 500)) throw err(4000, 'feeRate must be between 1 and 500 sat/vB.'); out.feeRate = f; }
+  if (method === 'rgbSwapColor') {
+    const s = p.session;
+    if (!s || typeof s !== 'object') throw err(4000, 'session (from the buyer) is required.');
+    out.session = Object.fromEntries(['offerId', 'assetId', 'amount', 'priceSats', 'buyerInvoice', 'buyerSeal', 'buyerOutpoint', 'buyerInputSats', 'buyerChangeScript', 'feeSats'].map((k) => [k, String(s[k] ?? '').slice(0, 3000)]));
+  }
+  if (method === 'rgbSwapSign') { out.psbt = str(p.psbt, 200_000, 'psbt'); out.consignment = str(p.consignment, 4_000_000, 'consignment'); }
+  if (method === 'rgbSwapFinish') out.psbt = str(p.psbt, 200_000, 'psbt');
+  return out;
+}
 const checkAmount = (a) => { if (!/^\d+(\.\d+)?$/.test(String(a || '')) || /^0+(\.0+)?$/.test(String(a))) throw err(4000, 'amount must be a positive number.'); return String(a); };
 /** What a site sees of private trading: the trade address and the Shielded totals. */
 const tradeView = (t) => ({ address: t.address, publicKey: t.publicKey, index: t.index, features: t.features || [], shielded: { sats: t.shielded?.sats || 0, tokens: (t.shielded?.tokens || []).map((x) => ({ ticker: x.tick, amount: String(x.amt) })), transfers: t.shielded?.transfers || [] } });
@@ -286,6 +306,14 @@ async function handle(origin, method, params) {
       const feeRate = params.feeRate == null ? 0 : Number(params.feeRate);
       if (feeRate && (!Number.isFinite(feeRate) || feeRate < 1 || feeRate > 500)) throw err(4000, 'feeRate must be between 1 and 500 sat/vB.');
       return openApproval(origin, 'rgbPay', { invoice, assetId, amount, feeRate });
+    }
+    // ---- RGB peer-to-peer swaps (tokens for BTC in one transaction; same steps as the Darkhorse wallet) ----
+    case 'rgbSwapSellable':
+      needConnected();
+      return openApproval(origin, 'rgbSwapSellable', { assetId: optAssetId(params.assetId) || (() => { throw err(4000, 'assetId is required.'); })() });
+    case 'rgbSwapPrepare': case 'rgbSwapColor': case 'rgbSwapSign': case 'rgbSwapFinish': {
+      needConnected();
+      return openApproval(origin, method, swapParams(method, params));
     }
     // ---- ecash (Cashu) ----
     case 'cashuGetLockKey': {

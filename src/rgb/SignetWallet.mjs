@@ -139,6 +139,23 @@ export class SignetWallet {
       return errors.length ? { n, errors } : n;
     });
   }
+  // ---- peer-to-peer swaps: each step's state is kept with this RGB wallet, across approval windows ----
+  swapStore(kind) {
+    const key = `${this.vaultKey}.swaps.${kind}`;
+    const read = () => { try { return JSON.parse(this.storage.getItem(key) || '{}'); } catch { return {}; } };
+    const write = (m) => this.storage.setItem(key, JSON.stringify(m));
+    return {
+      get: (id) => read()[String(id)] || null,
+      set: (id, v) => { const m = read(); m[String(id)] = v; for (const [k, x] of Object.entries(m)) if (Date.now() - (x?.at || 0) > 7 * 86400_000) delete m[k]; write(m); },
+      del: (id) => { const m = read(); delete m[String(id)]; write(m); },
+    };
+  }
+  get canSwap() { return !!this.wallet?.canSwap; }
+  swapSellable(p) { return this.exclusive(() => this.requireWallet().swapSellable(p)); }
+  swapPrepare(p) { return this.mutate((w) => w.swapPrepare(p, this.swapStore('bought'))); }
+  swapColor(p) { return this.mutate((w) => w.swapColor(p, this.swapStore('sold'))); }
+  swapSign(p) { return this.mutate((w) => w.swapSign(p, this.swapStore('bought'))); }
+  swapFinish(p) { return this.mutate((w) => w.swapFinish(p, this.swapStore('sold'))); }
   /** @param {string} url an https:// transfer server URL */
   checkProxy(url) { return this.exclusive(() => this.requireWallet().checkProxy(url)); }
   /** What an invoice asks for (no change to the wallet). */

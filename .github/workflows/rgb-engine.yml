@@ -1,0 +1,20 @@
+# Builds MASKED's RGB engine with peer-to-peer swaps (engine/build.sh) on GitHub's machines.
+# Actions → "RGB engine" → Run workflow, then download the "rgb-lib-wasm" artifact into vendor/rgb-lib-wasm/.
+name: RGB engine
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - run: cargo install wasm-pack@0.14.0
+      - run: bash engine/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rgb-lib-wasm
+          path: vendor/rgb-lib-wasm/
