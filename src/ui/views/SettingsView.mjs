@@ -39,7 +39,7 @@ export class SettingsView extends View {
       ${this.phraseRows(w, hasVault)}
     </section>
     <section class="card lang-row" translate="no"><span class="lbl">Language · 语言</span>
-      <div class="seg">${Object.entries(LANGS).map(([code, name]) => `<button data-lang="${code}" class="${lang() === code ? 'on' : ''}">${name}${code === 'zh-CN' ? ' <small>beta</small>' : ''}</button>`).join('')}</div>
+      <div class="seg" role="radiogroup">${Object.entries(LANGS).map(([code, name]) => `<button role="radio" aria-checked="${lang() === code}" data-lang="${code}">${name}${code === 'zh-CN' ? ' <small>beta</small>' : ''}</button>`).join('')}</div>
       ${lang() === 'zh-CN' ? '<p class="muted small">中文翻译仍在测试中。欢迎懂中文的朋友帮忙校对。</p>' : ''}
     </section>
     <section class="card menu">

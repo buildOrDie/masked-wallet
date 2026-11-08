@@ -1005,4 +1005,9 @@ export const ZH_CN = {
   "Everyone gets a <b>silent payment</b>. On-chain, nobody can see who was paid.": "每个人都会收到一笔<b>静默支付</b>。在链上，没人能看到谁收到了付款。",
   "Paste addresses, one per line, or copy a whole X reply thread.": "粘贴地址，每行一个，或复制整个 X 回复串。",
   "Signed payments": "已签名的付款",
+  "Restoring history · {0} blocks left": "正在恢复历史 · 还剩 {0} 个区块",
+  "{0} blocks left ›": "还剩 {0} 个区块 ›",
+  "{0} blocks left": "还剩 {0} 个区块",
+  "Checking older block {0}": "正在检查较早的区块 {0}",
+  "Scanning block {0} · {1}/{2}": "正在扫描区块 {0} · {1}/{2}",
 };
