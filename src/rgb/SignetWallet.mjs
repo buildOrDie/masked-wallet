@@ -151,11 +151,11 @@ export class SignetWallet {
     };
   }
   get canSwap() { return !!this.wallet?.canSwap; }
-  swapSellable(p) { return this.exclusive(() => this.requireWallet().swapSellable(p)); }
-  swapPrepare(p) { return this.mutate((w) => w.swapPrepare(p, this.swapStore('bought'))); }
-  swapColor(p) { return this.mutate((w) => w.swapColor(p, this.swapStore('sold'))); }
-  swapSign(p) { return this.mutate((w) => w.swapSign(p, this.swapStore('bought'))); }
-  swapFinish(p) { return this.mutate((w) => w.swapFinish(p, this.swapStore('sold'))); }
+  offerableAmount(p) { return this.exclusive(() => this.requireWallet().offerableAmount(p)); }
+  prepareBuy(p) { return this.mutate((w) => w.prepareBuy(p, this.swapStore('bought'))); }
+  prepareSale(p) { return this.mutate((w) => w.prepareSale(p, this.swapStore('sold'))); }
+  signBuy(p) { return this.mutate((w) => w.signBuy(p, this.swapStore('bought'))); }
+  completeSale(p) { return this.mutate((w) => w.completeSale(p, this.swapStore('sold'))); }
   /** @param {string} url an https:// transfer server URL */
   checkProxy(url) { return this.exclusive(() => this.requireWallet().checkProxy(url)); }
   /** What an invoice asks for (no change to the wallet). */

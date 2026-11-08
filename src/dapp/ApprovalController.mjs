@@ -10,9 +10,10 @@ import { toBase } from '../rgb/config.mjs';
 import { proxyUrl } from '../rgb/WalletRgb.mjs';
 
 /** Methods whose approve button waits for a prepared transaction. */
-export const NEEDS_PREP = ['sendBitcoin', 'inscribeTransfer', 'shareTrade', 'fundTrade', 'moveToTrade', 'returnToShielded', 'cancelShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbInvoice', 'rgbPay', 'rgbSwapSellable', 'rgbSwapPrepare', 'rgbSwapColor', 'rgbSwapSign', 'rgbSwapFinish'];
-const RGB_METHODS = ['rgbInvoice', 'rgbPay', 'rgbSwapSellable', 'rgbSwapPrepare', 'rgbSwapColor', 'rgbSwapSign', 'rgbSwapFinish'];
-const SWAP_VBYTES = 320;
+export const NEEDS_PREP = ['sendBitcoin', 'inscribeTransfer', 'shareTrade', 'fundTrade', 'moveToTrade', 'returnToShielded', 'cancelShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbInvoice', 'rgbPay', 'rgbSwapAvailable', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbAutoSell'];
+const SWAP_METHODS = ['rgbSwapAvailable', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbAutoSell'];
+const RGB_METHODS = ['rgbInvoice', 'rgbPay', ...SWAP_METHODS];
+const SWAP_SIZE_VB = 320;
 const hostOf = (u) => { try { return new URL(proxyUrl(u)).host; } catch { return String(u); } };
 
 export class ApprovalController {
@@ -135,7 +136,7 @@ export class ApprovalController {
       return;
     }
     a.rgbWait = '';
-    if (a.method.startsWith('rgbSwap')) return this.prepareSwap(a, once);
+    if (SWAP_METHODS.includes(a.method)) return this.prepareSwap(a, once);
     if (a.method === 'rgbInvoice') once(async () => {
       const asset = P.assetId ? r.find(P.assetId) : null;
       const base = P.baseUnits ? Number(P.baseUnits) : 0;
@@ -191,7 +192,7 @@ export class ApprovalController {
     const r = this.app.rgb, P = a.params || {}, m = a.method;
     once(async () => {
       if (!r.service?.canSwap) throw new Error('This MASKED version can\'t swap RGB tokens yet. Update MASKED.');
-      if (m === 'rgbSwapSellable') {
+      if (m === 'rgbSwapAvailable') {
         const asset = r.find(P.assetId);
         return { asset, assetId: P.assetId };
       }
@@ -201,17 +202,23 @@ export class ApprovalController {
       const asset = r.find(o.assetId);
       const shown = asset ? `${r.amount(asset, Number(o.amount))} ${asset.ticker}` : `${Number(o.amount).toLocaleString('en-US')} units`;
       const base = { asset, assetId: o.assetId, shown, price: Number(o.priceSats), newToken: !asset };
-      if (m === 'rgbSwapPrepare') {
+      if (m === 'rgbBuyPrepare') {
         const rate = P.feeRate || Number(r.fee());
-        return { ...base, fee: Math.ceil(rate * SWAP_VBYTES), rate };
+        return { ...base, fee: Math.ceil(rate * SWAP_SIZE_VB), rate };
       }
-      if (m === 'rgbSwapColor') {
+      if (m === 'rgbAutoSell') {
+        if (!asset) throw new Error('You don\'t hold this token in RGB.');
+        if (Number(o.amount) > r.bal(asset).spendable) throw new Error(`You can sell up to ${r.amount(asset, r.bal(asset).spendable)} ${asset.ticker}.`);
+        let host = ''; try { host = new URL(P.market).host; } catch { throw new Error('The market address is not valid.'); }
+        return { ...base, market: host, autoOn: r.autoOn };
+      }
+      if (m === 'rgbSalePrepare') {
         if (!asset) throw new Error('You don\'t hold this token in RGB.');
         if (Number(o.amount) > r.bal(asset).spendable) throw new Error(`You can sell up to ${r.amount(asset, r.bal(asset).spendable)} ${asset.ticker}.`);
         return base;
       }
-      const stored = r.service.swapStore(m === 'rgbSwapSign' ? 'bought' : 'sold').get(P.offerId);
-      if (!stored) throw new Error(m === 'rgbSwapSign' ? 'This wallet did not prepare that purchase (or it was already signed).' : 'This wallet did not prepare that sale (or it was already sent).');
+      const stored = r.service.swapStore(m === 'rgbBuySign' ? 'bought' : 'sold').get(P.offerId);
+      if (!stored) throw new Error(m === 'rgbBuySign' ? 'This wallet did not prepare that purchase (or it was already signed).' : 'This wallet did not prepare that sale (or it was already sent).');
       return { ...base, fee: stored.feeSats ? Number(stored.feeSats) : null };
     });
   }
@@ -367,27 +374,33 @@ export class ApprovalController {
         if (status === 'failed') throw new Error('The other side refused the transfer. Nothing was sent.');
         return { txid: String(res?.txid || ''), batchTransferIdx: res?.batchTransferIdx ?? null, amount: String(amount), status };
       });
-      case 'rgbSwapSellable': return this.rgbBusy(async () => { prepared(''); return app.rgb.service.swapSellable({ assetId: a.params.assetId }); });
-      case 'rgbSwapPrepare': return this.rgbBusy(async () => {
+      case 'rgbSwapAvailable': return this.rgbBusy(async () => { prepared(''); return app.rgb.service.offerableAmount({ assetId: a.params.assetId }); });
+      case 'rgbBuyPrepare': return this.rgbBusy(async () => {
         const b = prepared(''), r = app.rgb;
         await this.rgbBackedUp(r);
-        const session = await r.service.swapPrepare({ ...a.params, feeRate: b.rate });
+        const session = await r.service.prepareBuy({ ...a.params, feeRate: b.rate });
         // the buyer's invoice is only safe to hand out once it's in a backup (mainnet)
         await this.rgbBackedUp(r);
         if (!r.canShareInvoice) throw new Error('Save your RGB backup first (Settings → RGB backup), then try again.');
         return session;
       });
-      case 'rgbSwapColor': return this.rgbBusy(async () => {
+      case 'rgbSalePrepare': return this.rgbBusy(async () => {
         prepared(''); const r = app.rgb;
         await this.rgbBackedUp(r);
-        const out = await r.service.swapColor(a.params);
+        const out = await r.service.prepareSale(a.params);
         await this.rgbBackedUp(r).catch(() => {});
         return out;
       });
-      case 'rgbSwapSign': return this.rgbBusy(async () => { prepared(''); return app.rgb.service.swapSign(a.params); });
-      case 'rgbSwapFinish': return this.rgbBusy(async () => {
+      case 'rgbBuySign': return this.rgbBusy(async () => { prepared(''); return app.rgb.service.signBuy(a.params); });
+      case 'rgbAutoSell': return this.rgbBusy(async () => {
         prepared(''); const r = app.rgb;
-        const out = await r.service.swapFinish(a.params);
+        if (!r.autoOn && !app.state.f.apRisk) throw new Error('Tick the box to switch on Sell automatically.');
+        if (!r.autoOn) await r.setAutoSell(true); else await r.publishPass();
+        return { ok: true, profile: r.profile.id };
+      });
+      case 'rgbSaleComplete': return this.rgbBusy(async () => {
+        prepared(''); const r = app.rgb;
+        const out = await r.service.completeSale(a.params);
         await r.refresh().catch(() => {});
         await this.rgbBackedUp(r).catch(() => {});
         return out;

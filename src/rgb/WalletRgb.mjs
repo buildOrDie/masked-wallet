@@ -1,7 +1,12 @@
 import { RGB_BETA_KEY, RGB_MAINNET, RGB_PROFILE_KEY, fromBase, newAsset, profileOf, toBase } from './config.mjs';
 import { toHex, enc } from '../core/bytes.mjs';
 import { encryptRgb } from './backup.mjs';
-import { CLOUD_KEY, RgbCloud, cloudKeys, seal, open as openCloud } from './cloud.mjs';
+import { CLOUD_KEY, RgbCloud, cloudKeys, cloudMaterial, seal, open as openCloud } from './cloud.mjs';
+
+/** Sell automatically (src/provider/autosell.js): the setting, and the RGB key left in Chrome's session memory. */
+export const AUTO_ON = 'masked.autosell.on';
+export const PASS_KEY = 'masked.rgb.agentPass';
+const ext = () => (typeof chrome !== 'undefined' && chrome.storage?.session ? chrome : null);
 
 /** Fee rate for RGB's own transactions on the test networks (sat/vB). */
 const RGB_FEE = '2';
@@ -92,6 +97,62 @@ export class WalletRgb {
     this.cloudAsk = false; // the "switch off cloud backup?" panel is open
     /** @type {any} */ this.cloudTimer = null;
     this.cloudApi = new RgbCloud();
+    /** sell automatically: the setting (read from Chrome at start) and the offers set to it */
+    this.autoOn = false;
+    /** @type {any[]} */ this.autoList = [];
+    ext()?.storage.local.get(AUTO_ON).then((r) => { this.autoOn = !!r[AUTO_ON]; if (this.autoOn) this.loadAutoList(); }).catch(() => {});
+  }
+
+  // ---- sell automatically ----
+  /**
+   * While the setting is on, an unlocked MASKED leaves the RGB wallet's key in Chrome's session memory, so the
+   * background can finish sales the person approved. Session memory is never written to disk and is cleared when
+   * Chrome closes or the setting goes off.
+   */
+  async publishPass() {
+    const c = ext();
+    if (!c || !this.autoOn || !this.unlocked || !this.ready) return false;
+    const pass = {
+      profile: this.profile.id, key: await this.walletKey(), cloudOn: this.cloudOn,
+      cloud: this.isMain ? cloudMaterial(this.app.lock.secret) : '',
+      indexers: (this.app.servers?.list?.() || []).map((u) => String(u).replace(/\/+$/, '')),
+    };
+    const cur = (await c.storage.session.get(PASS_KEY))[PASS_KEY] || {};
+    await c.storage.session.set({ [PASS_KEY]: { ...cur, [pass.profile]: pass } });
+    return true;
+  }
+  async setAutoSell(on) {
+    const c = ext();
+    if (!c) throw new Error('Sell automatically works in the MASKED extension only.');
+    this.autoOn = !!on;
+    await c.storage.local.set({ [AUTO_ON]: this.autoOn });
+    if (this.autoOn) await this.publishPass(); else await c.storage.session.remove(PASS_KEY);
+    await this.loadAutoList();
+  }
+  async loadAutoList() {
+    try { const r = await chrome.runtime.sendMessage({ type: 'autosell:list' }); this.autoList = r?.ok ? r.result || [] : []; } catch { this.autoList = []; }
+    return this.autoList;
+  }
+  /** Steps the background couldn't take because RGB is open here: this window does them. */
+  async autoSellDue() {
+    if (!ext() || !this.autoOn || !this.ready) return;
+    let due = [];
+    try { const r = await chrome.runtime.sendMessage({ type: 'autosell:due' }); due = r?.ok ? r.result || [] : []; } catch { return; }
+    if (!due.length || this.busy) return;
+    this.busy = true;
+    try {
+      for (const { step, offer } of due) {
+        try {
+          const result = step === 'sale'
+            ? await this.service.prepareSale({ offerId: offer.id, network: offer.network, session: offer.session, offer: offer.offer })
+            : await this.service.completeSale({ offerId: offer.id, psbt: offer.signedPsbt, offer: offer.offer });
+          if (this.isMain && this.cloudOn && this.service.backupRequired) await this.cloudSave().catch(() => {});
+          await chrome.runtime.sendMessage({ type: 'autosell:report', offerId: offer.id, step, result });
+          if (step === 'complete') this.app.toast(`Sold automatically: ${offer.ticker || 'RGB tokens'}`);
+        } catch (e) { this.message = rgbError(e, this.profile); }
+      }
+    } finally { this.busy = false; }
+    await this.loadAutoList();
   }
 
   // ---- encrypted cloud backup (mainnet) ----
@@ -337,6 +398,7 @@ export class WalletRgb {
       this.ready = true;
       if (keyed) this.markKeyed();
       this.startTimer();
+      this.publishPass().catch(() => {});
     } catch (error) { await this.close(); throw error; }
     // Balances: a slow or busy server must not close RGB. Keep it open and retry with the minute timer.
     try {
@@ -369,7 +431,7 @@ export class WalletRgb {
     clearInterval(this.timer);
     this.timer = setInterval(() => {
       if (!this.ready || this.busy || document.visibilityState !== 'visible') return;
-      this.run(async () => { await this.refresh(); this.message = ''; }, { quiet: true });
+      this.run(async () => { await this.refresh(); this.message = ''; await this.autoSellDue(); }, { quiet: true });
     }, 60000);
   }
 
@@ -748,6 +810,9 @@ export class WalletRgb {
         this.cloud = { error: '', conflict: 0, saving: false, last: 0 };
         if (this.ready && await this.cloudSave()) app.toast('Cloud backup is on');
       });
+      case 'autoOn': return this.run(async () => { await this.setAutoSell(true); app.toast('Sell automatically is on'); });
+      case 'autoOff': return this.run(async () => { await this.setAutoSell(false); app.toast('Sell automatically is off. Sales wait for you again.'); });
+      case 'autoStop': return this.run(async () => { await chrome.runtime.sendMessage({ type: 'autosell:remove', offerId: arg }); await this.loadAutoList(); });
       case 'cloudOff': this.cloudAsk = true; return app.render();
       case 'cloudKeep': this.cloudAsk = false; return app.render();
       case 'cloudOffYes': return this.run(async () => {

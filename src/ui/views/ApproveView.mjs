@@ -5,8 +5,8 @@ import { NEEDS_PREP } from '../../dapp/ApprovalController.mjs';
 import { View } from '../View.mjs';
 import { I, btcLogo, rowKV } from '../html.mjs';
 
-const TITLES = { requestAccounts: 'Connect to MASKED', signMessage: 'Sign message', signPsbt: 'Sign transaction', signPsbts: 'Sign transactions', sendBitcoin: 'Send bitcoin', switchNetwork: 'Switch network', inscribeTransfer: 'Inscribe transfer', shareTrade: 'Trade from Shielded', fundTrade: 'Move BTC to trading', moveToTrade: 'Move tokens to trading', returnToShielded: 'Move back to Shielded', cancelShielded: 'Cancel listing', cashuPay: 'Pay with ecash', cashuPayRequest: 'Pay with ecash', cashuReceive: 'Receive ecash', rgbInvoice: 'Receive RGB tokens', rgbPay: 'Send RGB tokens', rgbSwapSellable: 'Share what you can sell', rgbSwapPrepare: 'Buy RGB tokens', rgbSwapColor: 'Sell RGB tokens', rgbSwapSign: 'Confirm your purchase', rgbSwapFinish: 'Complete the sale' };
-const VERBS = { requestAccounts: 'Connect', sendBitcoin: 'Send', inscribeTransfer: 'Inscribe', switchNetwork: 'Switch', shareTrade: 'Allow', fundTrade: 'Move', moveToTrade: 'Move', returnToShielded: 'Move back', cancelShielded: 'Cancel listing', cashuPay: 'Pay', cashuPayRequest: 'Pay', cashuReceive: 'Claim', rgbInvoice: 'Make invoice', rgbPay: 'Send', rgbSwapSellable: 'Share', rgbSwapPrepare: 'Buy', rgbSwapColor: 'Sell', rgbSwapSign: 'Sign and pay', rgbSwapFinish: 'Complete sale' };
+const TITLES = { requestAccounts: 'Connect to MASKED', signMessage: 'Sign message', signPsbt: 'Sign transaction', signPsbts: 'Sign transactions', sendBitcoin: 'Send bitcoin', switchNetwork: 'Switch network', inscribeTransfer: 'Inscribe transfer', shareTrade: 'Trade from Shielded', fundTrade: 'Move BTC to trading', moveToTrade: 'Move tokens to trading', returnToShielded: 'Move back to Shielded', cancelShielded: 'Cancel listing', cashuPay: 'Pay with ecash', cashuPayRequest: 'Pay with ecash', cashuReceive: 'Receive ecash', rgbInvoice: 'Receive RGB tokens', rgbPay: 'Send RGB tokens', rgbSwapAvailable: 'Share what you can sell', rgbBuyPrepare: 'Buy RGB tokens', rgbSalePrepare: 'Sell RGB tokens', rgbBuySign: 'Confirm your purchase', rgbSaleComplete: 'Complete the sale', rgbAutoSell: 'Sell automatically' };
+const VERBS = { requestAccounts: 'Connect', sendBitcoin: 'Send', inscribeTransfer: 'Inscribe', switchNetwork: 'Switch', shareTrade: 'Allow', fundTrade: 'Move', moveToTrade: 'Move', returnToShielded: 'Move back', cancelShielded: 'Cancel listing', cashuPay: 'Pay', cashuPayRequest: 'Pay', cashuReceive: 'Claim', rgbInvoice: 'Make invoice', rgbPay: 'Send', rgbSwapAvailable: 'Share', rgbBuyPrepare: 'Buy', rgbSalePrepare: 'Sell', rgbBuySign: 'Sign and pay', rgbSaleComplete: 'Complete sale', rgbAutoSell: 'Sell automatically' };
 const SHIELDED = `${I.shieldPlain} Shielded`;
 
 /** The approval window for a dApp request: what it asks, what it costs, Reject / Approve. */
@@ -114,7 +114,7 @@ export class ApproveView extends View {
       }
       case 'rgbInvoice': return this.rgbInvoiceBody(a, P, b);
       case 'rgbPay': return this.rgbPayBody(a, P, b);
-      case 'rgbSwapSellable': case 'rgbSwapPrepare': case 'rgbSwapColor': case 'rgbSwapSign': case 'rgbSwapFinish': return this.swapBody(a, P, b);
+      case 'rgbSwapAvailable': case 'rgbBuyPrepare': case 'rgbSalePrepare': case 'rgbBuySign': case 'rgbSaleComplete': case 'rgbAutoSell': return this.swapBody(a, P, b);
       case 'switchNetwork':
         return `<div class="kv">${rowKV('From', esc(account.params.name))}${rowKV('To', `<b>${esc(NETWORKS[P.target]?.name || P.target)}</b>`)}</div>`;
       default: return '';
@@ -155,19 +155,25 @@ export class ApproveView extends View {
   swapBody(a, P, b) {
     const sats = (n) => `${Number(n).toLocaleString('en-US')} sats`;
     const tok = b ? (b.asset ? `${esc(b.asset.ticker)} <span class="mono">${esc(short(b.assetId, 8))}</span>` : `<span class="mono">${esc(short(b.assetId || P.assetId || '', 8))}</span>`) : '…';
-    if (a.method === 'rgbSwapSellable') {
+    if (a.method === 'rgbSwapAvailable') {
       return `<div class="kv">${rowKV('Token', tok)}</div><p class="info">The site sees how much of this token you can offer. Nothing moves.</p>${this.rgbWait(a)}${this.error(a)}`;
     }
-    const m = a.method, buying = m === 'rgbSwapPrepare' || m === 'rgbSwapSign';
+    const m = a.method, buying = m === 'rgbBuyPrepare' || m === 'rgbBuySign';
+    if (m === 'rgbAutoSell') {
+      return `<p class="hero-bal center">${b ? esc(b.shown) : '…'}</p><div class="kv">${rowKV('Token', tok)}${b ? rowKV('You get', `<b>${sats(b.price)}</b>`) : ''}${b ? rowKV('Market', `<span class="mono">${esc(b.market)}</span>`) : ''}${rowKV('Network', esc(this.app.rgb.profile.label))}</div>
+      <p class="info">When a buyer comes, MASKED prepares and completes this sale by itself, without asking you, while Chrome is open. Only this token, this amount and this price; the buyer's bitcoin comes to your RGB wallet in the same transaction as your tokens leave. Stop it any time in Settings → RGB.</p>
+      ${b && !b.autoOn ? `<label class="risk"><input type="checkbox" data-risk ${this.f.apRisk ? 'checked' : ''}><span><b>Switch on Sell automatically.</b> MASKED keeps your RGB wallet's key in Chrome's memory (never on disk) while Chrome is open, so it can sell while you're away.</span></label>` : ''}
+      ${this.rgbWait(a)}${this.error(a)}`;
+    }
     const hero = b ? `<p class="hero-bal center">${esc(b.shown)}</p>` : '<p class="hero-bal center">…</p>';
     const rows = !b ? '' : buying
       ? rowKV('You pay', `<b>${sats(b.price + (b.fee || 0))}</b>`) + rowKV('Price', sats(b.price)) + (b.fee != null ? rowKV('Network fee', sats(b.fee)) : '')
       : rowKV('You get', `<b>${sats(b.price)}</b>`) + rowKV('Network fee', 'paid by the buyer');
     const next = {
-      rgbSwapPrepare: 'MASKED holds one of your bitcoin outputs for this purchase and makes an invoice for the tokens. Nothing is paid yet: you sign once the seller has prepared the swap.',
-      rgbSwapColor: 'MASKED prepares one transaction: your tokens to the buyer, the buyer\'s bitcoin to you. Nothing is sent until both of you have signed.',
-      rgbSwapSign: 'MASKED checked the seller\'s tokens and every output of the transaction. Your bitcoin and the tokens move together in one transaction, or not at all.',
-      rgbSwapFinish: 'This signs and broadcasts the swap the buyer already signed. Your tokens go to the buyer and the bitcoin comes to your RGB wallet.',
+      rgbBuyPrepare: 'MASKED holds one of your bitcoin outputs for this purchase and makes an invoice for the tokens. Nothing is paid yet: you sign once the seller has prepared the swap.',
+      rgbSalePrepare: 'MASKED prepares one transaction: your tokens to the buyer, the buyer\'s bitcoin to you. Nothing is sent until both of you have signed.',
+      rgbBuySign: 'MASKED checked the seller\'s tokens and every output of the transaction. Your bitcoin and the tokens move together in one transaction, or not at all.',
+      rgbSaleComplete: 'This signs and broadcasts the swap the buyer already signed. Your tokens go to the buyer and the bitcoin comes to your RGB wallet.',
     }[m];
     return `${hero}<div class="kv">${rowKV('Token', tok)}${rows}${rowKV('Network', esc(this.app.rgb.profile.label))}</div>
     ${b?.newToken && buying ? '<p class="info">You don\'t hold this token yet. Check its asset ID with the issuer: anyone can give a token any name.</p>' : ''}

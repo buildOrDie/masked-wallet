@@ -26,10 +26,19 @@ const te = new TextEncoder(), td = new TextDecoder();
 const BUCKETS = [64, 256, 1024, 2048, 4096, 8192, 16384].map((k) => k * 1024);
 export const CLOUD_MAX = BUCKETS[BUCKETS.length - 1] - 4;
 
-/** @param {{ words: string, passphrase?: string }} secret */
-export async function cloudKeys(secret) {
+/** The cloud key material (32 bytes, hex) from the recovery phrase. It opens only the RGB cloud backup. */
+export function cloudMaterial(secret) {
   if (!secret?.words) throw new Error('Unlock your wallet first.');
-  const material = sha256(te.encode(`MASKED/rgb-cloud/v1\n${secret.words}\n${secret.passphrase || ''}`));
+  return bytesToHex(sha256(te.encode(`MASKED/rgb-cloud/v1\n${secret.words}\n${secret.passphrase || ''}`)));
+}
+
+/** @param {{ words: string, passphrase?: string }} secret */
+export async function cloudKeys(secret) { return cloudKeysFrom(cloudMaterial(secret)); }
+
+/** The cloud keys from their material (automatic sales back up without the recovery phrase). */
+export async function cloudKeysFrom(materialHex) {
+  if (!/^[0-9a-f]{64}$/.test(String(materialHex))) throw new Error('Bad cloud key material.');
+  const material = Uint8Array.from(materialHex.match(/../g).map((b) => parseInt(b, 16)));
   const signKey = hmac(sha256, material, te.encode('sign'));
   const id = bytesToHex(schnorr.getPublicKey(signKey));
   const encKey = await crypto.subtle.importKey('raw', hmac(sha256, material, te.encode('enc')), 'AES-GCM', false, ['encrypt', 'decrypt']);

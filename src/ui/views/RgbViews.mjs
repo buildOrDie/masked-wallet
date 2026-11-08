@@ -364,12 +364,22 @@ export class RgbSettings {
         ${Object.keys(r.data?.transfers || {}).some((id) => r.unsent(id).length) ? '<p class="info warn small">A transfer is waiting for the other wallet to accept it. Let it finish, or cancel it, before you restore this wallet anywhere else: a restored wallet can\'t finish a transfer that was already signed.</p>' : ''}
         <button class="btn ghost wide" data-rgb="backup" ${r.busy ? 'disabled' : ''}>Save RGB backup file</button>
         <p class="muted small">${r.fileAt ? `Last file: ${ago(r.fileAt)}. ` : 'No backup file saved from this browser yet. '}${r.isMain && r.cloudOn ? (r.cloud.error || r.service?.backupRequired ? 'Changes since the last cloud backup are not saved anywhere yet.' : 'The cloud backup has every change.') : r.service?.backupRequired ? 'Changed since your last RGB backup.' : 'Backup up to date.'} Restoring needs this same MASKED wallet.</p>
+        ${RgbSettings.auto(r)}
         <button class="btn ghost wide" data-rgb="off" ${r.busy ? 'disabled' : ''}>Turn off RGB for now</button>
         ${r.isMain ? `<button class="btn ghost wide" data-rgb="betaOff" ${r.busy ? 'disabled' : ''}>Switch off RGB beta</button>` : ''}` : `
         ${r.exists ? '' : `<button class="btn primary wide" data-rgb="on" ${r.busy ? 'disabled' : ''}>Turn on RGB</button>`}`}
         <details><summary>Restore an RGB backup</summary><input id="rgbRestore" type="file" accept=".json,application/json"><button class="btn ghost wide" data-rgb="restore" ${r.busy ? 'disabled' : ''}>Restore</button></details>
         ${msg(r)}
       </div></details></section>`;
+  }
+  /** Settings → RGB → Sell automatically: the switch, what it means, and the offers set to it. */
+  static auto(r) {
+    const list = r.autoList || [];
+    const rows = list.map((e) => `<li><span>${esc(Number(e.terms.amount).toLocaleString('en-US'))} <span class="mono">${esc(short(e.terms.assetId, 6))}</span> for ${esc(Number(e.terms.priceSats).toLocaleString('en-US'))} sats<small class="muted">${esc({ waiting: 'waiting for a buyer', working: 'selling now', buyer: 'buyer signing', window: 'finishing in this window', locked: 'open MASKED once to resume', stopped: 'stopped: finish by hand', sold: 'sold' }[e.status] || e.status)}${e.lastError ? ` · ${esc(e.lastError)}` : ''}</small></span><button class="btn ghost sm" data-rgb="autoStop" data-rgb-arg="${esc(e.offerId)}">Stop</button></li>`).join('');
+    return `<div class="cloud-box"><div class="cloud-h"><b>Sell automatically</b><span class="muted small">${r.autoOn ? 'on' : 'off'}</span></div>
+      <p class="muted small">${r.autoOn ? 'Offers you approve for it complete by themselves when a buyer comes, while Chrome is open: MASKED keeps the RGB wallet\'s key in Chrome\'s memory (never on disk) until you close Chrome or switch this off.' : 'When on, offers you approve for it complete by themselves when a buyer comes, without asking you. Only for the exact token, amount and price you approved.'}</p>
+      ${rows ? `<ul class="auto-list">${rows}</ul>` : ''}
+      <button class="btn ghost wide" data-rgb="${r.autoOn ? 'autoOff' : 'autoOn'}" ${r.busy ? 'disabled' : ''}>${r.autoOn ? 'Switch off' : 'Switch on'}</button></div>`;
   }
   /** Settings → RGB → cloud backup: status, and the switch. */
   static cloud(r) {

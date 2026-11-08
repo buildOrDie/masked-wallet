@@ -192,20 +192,20 @@ const { invoice } = await window.masked.rgb.requestInvoice({ assetId, baseUnits:
 await window.masked.rgb.payInvoice(escrowInvoice, { assetId, amount: '1500' });
 ```
 
-### Peer-to-peer swaps: `rgb.swapSellable`, `swapPrepare`, `swapColor`, `swapSign`, `swapFinish` 🔐
+### Peer-to-peer swaps: `rgb.offerableAmount`, `prepareBuy`, `prepareSale`, `signBuy`, `completeSale` 🔐
 RGB tokens for BTC in one Bitcoin transaction, wallet to wallet: nobody holds anything in between. The site only passes
-the messages from one wallet to the other. The steps, field names and numbers are the same as the Darkhorse wallet's,
-so MASKED and Darkhorse users can trade with each other. Each step is approved in the wallet doing it.
+the messages from one wallet to the other. The transaction layout and message fields below are the whole format: any
+wallet that follows them can trade with MASKED. Each step is approved in the wallet doing it.
 
 | Step | Who | Call | Returns |
 | --- | --- | --- | --- |
-| 1 | buyer | `swapPrepare({ offerId, network, offer, feeRate? })` | `session`: `{ offerId, assetId, amount, priceSats, buyerInvoice, buyerSeal, buyerOutpoint, buyerInputSats, buyerChangeScript, feeSats }` |
-| 2 | seller | `swapColor({ offerId, network, session, offer })` | `{ psbt, sellerOutpoint, consignment }` |
-| 3 | buyer | `swapSign({ offerId, psbt, consignment, offer })` | `{ offerId, psbt, … }` (signed) |
-| 4 | seller | `swapFinish({ offerId, psbt, offer })` | `{ txid }` |
+| 1 | buyer | `prepareBuy({ offerId, network, offer, feeRate? })` | `session`: `{ offerId, assetId, amount, priceSats, buyerInvoice, buyerSeal, buyerOutpoint, buyerInputSats, buyerChangeScript, feeSats }` |
+| 2 | seller | `prepareSale({ offerId, network, session, offer })` | `{ psbt, sellerOutpoint, consignment }` |
+| 3 | buyer | `signBuy({ offerId, psbt, consignment, offer })` | `{ offerId, psbt, … }` (signed) |
+| 4 | seller | `completeSale({ offerId, psbt, offer })` | `{ txid }` |
 
 `offer` is `{ offerId, assetId, amount, priceSats, state }` with `amount` in base units and `state` `OPEN` (step 1) or
-`MATCHED` (step 2). `network` is `"Signet"` or `"Mainnet"`. `swapSellable({ assetId })` returns `{ total, max }`: one
+`MATCHED` (step 2). `network` is `"Signet"` or `"Mainnet"`. `offerableAmount({ assetId })` returns `{ total, max }`: one
 swap uses one RGB output, so `max` is the most one offer can sell.
 
 The transaction: input 0 the seller's RGB output, input 1 the buyer's bitcoin; output 0 the RGB commitment
@@ -215,6 +215,37 @@ the buyer's wallet checks the token transfer (right token, right amount on its s
 
 Needs MASKED with the swap engine (2.25+). Without it each call fails with "This MASKED version can't swap RGB tokens
 yet".
+
+### Sell automatically: `rgb.autoSell({ offerId, market, token, offer })`, `rgb.stopAutoSell({ offerId })` 🔐 *(2.25.1+)*
+
+After listing, a site can ask MASKED to do the seller's steps 2 and 4 by itself. The person approves once (and, the
+first time, ticks a box to switch the setting on); from then on, when a buyer comes, MASKED prepares and completes
+that one sale without a popup, while Chrome is open.
+
+| Field | |
+|---|---|
+| `offerId` | the market's offer id (`sw` + 12 hex) |
+| `market` | the market's https address; MASKED calls `GET {market}/api/swap/offers/{offerId}` and `POST …/colored`, `…/done` with header `x-swap-token` |
+| `token` | the seller's step token from listing |
+| `offer` | `{ assetId, amount, priceSats }`: the exact terms. If the market ever shows other terms, MASKED stops and the person finishes by hand |
+
+Returns `{ ok: true, profile }`. The market must allow MASKED's extension origin
+(`chrome-extension://pojmpfcbdmacabhckemelcbkmckhaoig`) for CORS.
+
+How it works and what it keeps:
+
+- The background checks approved offers once a minute (`chrome.alarms`). When a step is due it opens a hidden
+  extension page (`chrome.offscreen`, `rgb-agent.html`) that opens the RGB wallet, runs the same checks as an approved
+  sale, does that step and closes the wallet. If RGB is open in a MASKED window, that window does the step instead.
+- To open the RGB wallet without the password, an unlocked MASKED leaves the RGB wallet's key in
+  `chrome.storage.session`: memory only, readable by MASKED's own pages and background only (not by sites or content
+  scripts), gone when Chrome closes or the setting goes off. After a Chrome restart, nothing sells until MASKED is
+  unlocked once.
+- Only the seller's steps run by themselves. The buyer always checks and signs in their own wallet, and the seller's
+  wallet still checks the buyer's signed transaction (right outputs, right payout) before it sends.
+- Approved offers expire after 30 days. Settings → RGB → Sell automatically lists them, with a Stop button each and a
+  switch for the whole setting. The toolbar icon shows `!` when an offer needs the person.
+
 
 ## Events
 

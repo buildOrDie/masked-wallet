@@ -6,11 +6,11 @@ swaps:
 
 | Function | What it does |
 | --- | --- |
-| `wallet.swapBegin(online, psbt, assetId, amount, recipientId, sealVout, sealSats, endpoints, minConf)` | The seller colours a swap PSBT: the same path as `sendBegin`, on a transaction it didn't build, recorded as a donation. `sendEnd` broadcasts it later |
-| `wallet.transferConsignment(txid, assetId)` | The consignment of a transfer begun and not sent yet, for the buyer to check |
-| `WasmWallet.buildSwapPsbt(inputs, outputs)` | An unsigned swap PSBT, OP_RETURN at output 0 |
-| `WasmWallet.checkSwapPsbt(psbt, inputs, outputs, feeSats)` | Refuses any change of input, output, amount or fee, before signing |
-| `WasmWallet.swapPsbtInputs(psbt)`, `swapPsbtTxid(psbt)`, `invoiceSealScript(invoice)` | Read a PSBT and an invoice |
+| `wallet.colorSwap(online, psbt, assetId, amount, recipientId, sealVout, sealSats, endpoints, minConf)` | The seller colours a swap PSBT: the same path as `sendBegin`, on a transaction it didn't build, recorded as a donation. `sendEnd` broadcasts it later |
+| `wallet.pendingConsignment(txid, assetId)` | The consignment of a transfer begun and not sent yet, for the buyer to check |
+| `WasmWallet.newSwapPsbt(inputs, outputs)` | An unsigned swap PSBT, OP_RETURN at output 0 |
+| `WasmWallet.verifySwapPsbt(psbt, inputs, outputs, feeSats)` | Refuses any change of input, output, amount or fee, before signing |
+| `WasmWallet.psbtOutpoints(psbt)`, `psbtTxid(psbt)`, `witnessSealScript(invoice)` | Read a PSBT and an invoice |
 | `validateConsignmentOffchain(bytes, txid, network, sealVout?)` | Also returns `contractId` and, with a seal output, `sealAmount` |
 
 It also lets `sendEnd` broadcast a transaction with an input that isn't the wallet's (the other side of a swap).

@@ -34,7 +34,7 @@
 
   const provider = Object.freeze({
     isMasked: true,
-    version: '1.5.0',
+    version: '1.6.0',
     // accounts
     requestAccounts: () => request('requestAccounts'),
     getAccounts: () => request('getAccounts'),
@@ -81,17 +81,21 @@
       requestInvoice: (o = {}) => request('rgbRequestInvoice', { assetId: o.assetId, baseUnits: o.baseUnits != null ? String(o.baseUnits) : undefined, expirySeconds: o.expirySeconds, kind: o.kind }),
       /** Pay an RGB invoice: { assetId?, amount? (tokens as wallets show them), feeRate? } → { txid, batchTransferIdx, status: 'broadcast'|'waiting' } */
       payInvoice: (invoice, o = {}) => request('rgbPayInvoice', { invoice, assetId: o.assetId, amount: o.amount != null ? String(o.amount) : undefined, feeRate: o.feeRate }),
-      // peer-to-peer swaps, tokens for BTC in one transaction (same steps and messages as the Darkhorse wallet)
+      // peer-to-peer swaps: tokens for BTC in one transaction, wallet to wallet (docs/PROVIDER.md)
       /** { assetId } → { total, max } in base units */
-      swapSellable: (o = {}) => request('rgbSwapSellable', o),
+      offerableAmount: (o = {}) => request('rgbSwapAvailable', o),
       /** buyer: { offerId, network, offer, feeRate? } → session for the seller */
-      swapPrepare: (o = {}) => request('rgbSwapPrepare', o),
+      prepareBuy: (o = {}) => request('rgbBuyPrepare', o),
       /** seller: { offerId, network, session, offer } → { psbt, sellerOutpoint, consignment } */
-      swapColor: (o = {}) => request('rgbSwapColor', o),
+      prepareSale: (o = {}) => request('rgbSalePrepare', o),
       /** buyer: { offerId, psbt, consignment, offer } → { offerId, psbt, … } */
-      swapSign: (o = {}) => request('rgbSwapSign', o),
+      signBuy: (o = {}) => request('rgbBuySign', o),
       /** seller: { offerId, psbt, offer } → { txid } */
-      swapFinish: (o = {}) => request('rgbSwapFinish', o),
+      completeSale: (o = {}) => request('rgbSaleComplete', o),
+      /** Sell automatically: { offerId, market, token, offer } → { ok }. One approval; MASKED does steps 2 and 4 itself. */
+      autoSell: (o = {}) => request('rgbAutoSell', o),
+      /** Stop selling an offer automatically: { offerId } → { ok } */
+      stopAutoSell: (o = {}) => request('rgbAutoSellStop', o),
     }),
     // events: accountsChanged, networkChanged, chainChanged, tradeAccountChanged
     on: (event, fn) => { if (!listeners.has(event)) listeners.set(event, new Set()); listeners.get(event).add(fn); },
