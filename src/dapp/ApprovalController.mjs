@@ -6,9 +6,13 @@ import { UNISAT_NET } from '../bitcoin/networks.mjs';
 import { signMessageBip322, signMessageEcdsa } from '../bitcoin/messages.mjs';
 import { TRADE_SITES } from '../trade/TradeAccount.mjs';
 import { lockKeyOf, peekToken } from '../ecash/EcashBook.mjs';
+import { toBase } from '../rgb/config.mjs';
+import { proxyUrl } from '../rgb/WalletRgb.mjs';
 
 /** Methods whose approve button waits for a prepared transaction. */
-export const NEEDS_PREP = ['sendBitcoin', 'inscribeTransfer', 'shareTrade', 'fundTrade', 'moveToTrade', 'returnToShielded', 'cancelShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive'];
+export const NEEDS_PREP = ['sendBitcoin', 'inscribeTransfer', 'shareTrade', 'fundTrade', 'moveToTrade', 'returnToShielded', 'cancelShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbInvoice', 'rgbPay'];
+const RGB_METHODS = ['rgbInvoice', 'rgbPay'];
+const hostOf = (u) => { try { return new URL(proxyUrl(u)).host; } catch { return String(u); } };
 
 export class ApprovalController {
   /** @param {import('../app/MaskedApp.mjs').MaskedApp} app */
@@ -87,6 +91,7 @@ export class ApprovalController {
         if (t.locks.length && !t.locks.some((k) => k.slice(2) === ecash.myLock.slice(2))) throw new Error('This token is locked to someone else.');
         return { ...t, known: ecash.mints.some((m) => m.url === t.mint) };
       });
+      if (RGB_METHODS.includes(a.method)) this.prepareRgb(a, once);
       if (a.method === 'cancelShielded') once(() => trade.buildShieldedCancel({ outpoint: String(P.outpoint || ''), rate: rate() }));
       const psbt = a.method === 'signPsbt' || a.method === 'signPsbts';
       if (psbt && !a.tradeLoaded && trade.on) {
@@ -106,6 +111,97 @@ export class ApprovalController {
       if (psbt && a.prep.some((p) => p.trade) && !TRADE_SITES.has(a.origin)) { a.prep = null; throw new Error('Only maskedwallet.com can ask MASKED to sign for your trade address or Shielded listings.'); }
     } catch (e) { a.prepErr = friendly(e.message); }
     app.render();
+  }
+
+  /**
+   * RGB requests use the wallet's own RGB account. It opens by itself (as on Home); until then the screen waits.
+   * @param {any} a @param {(fn: () => Promise<any>) => void} once
+   */
+  prepareRgb(a, once) {
+    const app = this.app, r = app.rgb, P = a.params || {};
+    if (a.prep || a.prepBusy) return;
+    if (!r.available || (!r.exists && !r.ready)) {
+      a.prepErr = r.offerable ? 'RGB is off. Open MASKED, turn on RGB (beta) on Home, then try again.' : 'RGB is not set up in this wallet yet. Open MASKED and turn on RGB on Home, then try again.';
+      return;
+    }
+    if (!r.ready) {
+      if (r.phase === 'allow' || r.phase === 'legacy') { a.prepErr = 'Open MASKED and finish setting up RGB on Home, then try again.'; return; }
+      if (r.phase === 'error') { a.prepErr = r.message || 'RGB could not open. Open MASKED and try again.'; return; }
+      r.ensure();
+      a.prepErr = null; a.rgbWait = 'Opening RGB…';
+      clearTimeout(a.rgbTimer);
+      a.rgbTimer = setTimeout(() => this.prepare(), 1500);
+      return;
+    }
+    a.rgbWait = '';
+    if (a.method === 'rgbInvoice') once(async () => {
+      const asset = P.assetId ? r.find(P.assetId) : null;
+      const base = P.baseUnits ? Number(P.baseUnits) : 0;
+      if (base && !Number.isSafeInteger(base)) throw new Error('That amount is too large.');
+      const witness = P.kind ? P.kind === 'witness' : r.recvType() === 'witness';
+      return {
+        assetId: P.assetId || '', asset, amount: base, witness, expiry: Number(P.expiry) || 86400,
+        shown: base ? (asset ? `${r.amount(asset, base)} ${asset.ticker}` : `${base.toLocaleString('en-US')} units`) : 'Any amount',
+        newToken: !!P.assetId && !asset,
+      };
+    });
+    if (a.method === 'rgbPay') once(async () => {
+      let d;
+      try { d = await r.service.decode(P.invoice); } catch { throw new Error('That is not a valid RGB invoice.'); }
+      if (!/utxob:|wvout:/.test(String(d.recipientId || ''))) throw new Error('This is not an RGB invoice MASKED can pay.');
+      if (!r.profile.invoiceNets.includes(String(d.network).toLowerCase())) throw new Error(`This invoice is not for ${r.profile.label}.`);
+      if (d.expirationTimestamp && d.expirationTimestamp <= Date.now() / 1000) throw new Error('This invoice has expired. Ask the site for a new one.');
+      if (d.assetId && P.assetId && d.assetId !== P.assetId) throw new Error('The invoice is for a different token than the site said.');
+      const assetId = d.assetId || P.assetId;
+      if (!assetId) throw new Error('The site did not say which token to send.');
+      const asset = r.find(assetId);
+      if (!asset) throw new Error('You don\'t hold this token in RGB.');
+      let amount = d.amount || 0;
+      if (P.amount) {
+        const asked = toBase(P.amount, asset.precision);
+        if (amount && asked !== amount) throw new Error('The amount the site asked for does not match the invoice.');
+        amount = asked;
+      }
+      if (amount && amount > r.bal(asset).spendable) throw new Error(`You can send up to ${r.amount(asset, r.bal(asset).spendable)} ${asset.ticker}.`);
+      const endpoints = d.transportEndpoints?.length ? d.transportEndpoints : [r.profile.sdk.transportEndpoint];
+      const ask = await r.missingOrigins(endpoints);
+      if (ask.length) throw new Error(`MASKED isn't allowed to reach the transfer server ${ask.map(hostOf).join(', ')}. Send this once from MASKED (RGB → Send) to allow it, or use an invoice with proxy.iriswallet.com.`);
+      let endpoint = '', why = '';
+      for (const e of endpoints) {
+        try { await r.service.checkProxy(proxyUrl(e)); endpoint = e; break; } catch (err) { why = String(err?.message || err); }
+      }
+      if (!endpoint) throw new Error(`The transfer server in this invoice is not answering. ${why}`.trim());
+      const fee = P.feeRate ? String(Math.round(P.feeRate)) : r.fee();
+      return { assetId, asset, ticker: asset.ticker, amount, shown: amount ? r.amount(asset, amount) : '', needAmount: !amount, witness: !!d.witness, endpoint, proxy: hostOf(endpoint), fee, spendable: r.amount(asset, r.bal(asset).spendable) };
+    });
+  }
+
+  /** One RGB step at a time: Home's minute refresh waits while this runs. */
+  async rgbBusy(fn) {
+    const r = this.app.rgb;
+    if (r.busy) throw new Error('RGB is busy. Try again in a moment.');
+    r.busy = true;
+    try { return await fn(); } finally { r.busy = false; }
+  }
+
+  /** Mainnet: RGB changes must be in a backup before tokens can depend on them. */
+  async rgbBackedUp(r) {
+    if (!r.isMain) return;
+    if (r.cloudOn && r.service?.backupRequired) await r.cloudSave();
+    if (!r.service?.everBackedUp || (r.cloudOn && r.service?.backupRequired)) throw new Error('MASKED couldn\'t back up RGB just now. Open MASKED, check Settings → RGB backup, then try again.');
+  }
+
+  /** After a send to an invoice: the other side accepts, then the transaction goes out. Wait up to a minute. */
+  async rgbWaitBroadcast(r, assetId, batch) {
+    for (let i = 0; i < 12; i++) {
+      await new Promise((ok) => setTimeout(ok, 5000));
+      try { await r.refresh(); } catch { continue; }
+      const t = (r.data?.transfers?.[assetId] || []).find((x) => Number(x?.batchTransferIdx) === Number(batch));
+      if (t && String(t.status) === 'Failed') return 'failed';
+      if (t && !['WaitingCounterparty', 'Initiated'].includes(String(t.status))) return 'broadcast';
+      this.active.rgbWait = 'Waiting for the other side to accept…'; this.app.render();
+    }
+    return 'waiting';
   }
 
   finish(payload) {
@@ -213,6 +309,32 @@ export class ApprovalController {
         const r = await app.ecash.receive(b.token);
         return { amount: r.amount, mint: r.mint };
       }
+      case 'rgbInvoice': return this.rgbBusy(async () => {
+        const b = prepared(''), r = app.rgb;
+        await this.rgbBackedUp(r);
+        const opts = { assetId: b.assetId, amount: b.amount, durationSeconds: b.expiry, witness: b.witness };
+        const res = b.witness ? await r.service.receive(opts) : await r.withOutputs(() => r.service.receive(opts));
+        r.logInvoice({ invoice: res.invoice, recipientId: res.recipientId, at: Date.now(), expiresAt: Number(res.expirationTimestamp) || Math.floor(Date.now() / 1000) + b.expiry, witness: b.witness, amount: b.amount && b.asset ? r.amount(b.asset, b.amount) : '', ticker: b.asset?.ticker || '', expiry: b.expiry, site: new URL(a.origin).host });
+        // the invoice is only safe to hand out once it is in a backup (mainnet)
+        await this.rgbBackedUp(r);
+        if (!r.canShareInvoice) throw new Error('Save your RGB backup first (Settings → RGB backup): the invoice is only safe to use once it is backed up.');
+        return { invoice: res.invoice, recipientId: res.recipientId, expirationTimestamp: res.expirationTimestamp ?? null, witness: b.witness };
+      });
+      case 'rgbPay': return this.rgbBusy(async () => {
+        const b = prepared(''), r = app.rgb;
+        let amount = b.amount;
+        if (b.needAmount) {
+          amount = toBase(String(this.state.f.apRgbAmt || '').trim(), b.asset.precision);
+          if (amount > r.bal(b.asset).spendable) throw new Error(`You can send up to ${b.spendable} ${b.ticker}.`);
+        }
+        await this.rgbBackedUp(r);
+        const res = await r.service.send({ invoice: a.params.invoice, assetId: b.assetId, amount: String(amount), fee: b.fee, endpoint: b.endpoint });
+        await r.refresh().catch(() => {});
+        await this.rgbBackedUp(r).catch(() => {}); // the send is out either way; Home reminds about the backup
+        const status = await this.rgbWaitBroadcast(r, b.assetId, res?.batchTransferIdx);
+        if (status === 'failed') throw new Error('The other side refused the transfer. Nothing was sent.');
+        return { txid: String(res?.txid || ''), batchTransferIdx: res?.batchTransferIdx ?? null, amount: String(amount), status };
+      });
       default: throw new Error('Unsupported request.');
     }
   }

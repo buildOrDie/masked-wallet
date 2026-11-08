@@ -5,8 +5,8 @@ import { NEEDS_PREP } from '../../dapp/ApprovalController.mjs';
 import { View } from '../View.mjs';
 import { I, btcLogo, rowKV } from '../html.mjs';
 
-const TITLES = { requestAccounts: 'Connect to MASKED', signMessage: 'Sign message', signPsbt: 'Sign transaction', signPsbts: 'Sign transactions', sendBitcoin: 'Send bitcoin', switchNetwork: 'Switch network', inscribeTransfer: 'Inscribe transfer', shareTrade: 'Trade from Shielded', fundTrade: 'Move BTC to trading', moveToTrade: 'Move tokens to trading', returnToShielded: 'Move back to Shielded', cancelShielded: 'Cancel listing', cashuPay: 'Pay with ecash', cashuPayRequest: 'Pay with ecash', cashuReceive: 'Receive ecash' };
-const VERBS = { requestAccounts: 'Connect', sendBitcoin: 'Send', inscribeTransfer: 'Inscribe', switchNetwork: 'Switch', shareTrade: 'Allow', fundTrade: 'Move', moveToTrade: 'Move', returnToShielded: 'Move back', cancelShielded: 'Cancel listing', cashuPay: 'Pay', cashuPayRequest: 'Pay', cashuReceive: 'Claim' };
+const TITLES = { requestAccounts: 'Connect to MASKED', signMessage: 'Sign message', signPsbt: 'Sign transaction', signPsbts: 'Sign transactions', sendBitcoin: 'Send bitcoin', switchNetwork: 'Switch network', inscribeTransfer: 'Inscribe transfer', shareTrade: 'Trade from Shielded', fundTrade: 'Move BTC to trading', moveToTrade: 'Move tokens to trading', returnToShielded: 'Move back to Shielded', cancelShielded: 'Cancel listing', cashuPay: 'Pay with ecash', cashuPayRequest: 'Pay with ecash', cashuReceive: 'Receive ecash', rgbInvoice: 'Receive RGB tokens', rgbPay: 'Send RGB tokens' };
+const VERBS = { requestAccounts: 'Connect', sendBitcoin: 'Send', inscribeTransfer: 'Inscribe', switchNetwork: 'Switch', shareTrade: 'Allow', fundTrade: 'Move', moveToTrade: 'Move', returnToShielded: 'Move back', cancelShielded: 'Cancel listing', cashuPay: 'Pay', cashuPayRequest: 'Pay', cashuReceive: 'Claim', rgbInvoice: 'Make invoice', rgbPay: 'Send' };
 const SHIELDED = `${I.shieldPlain} Shielded`;
 
 /** The approval window for a dApp request: what it asks, what it costs, Reject / Approve. */
@@ -112,10 +112,42 @@ export class ApproveView extends View {
         ${b && !b.known ? '<p class="info warn">You don\'t use this mint yet. Claiming adds it: the ecash is an IOU from this mint, so only claim from mints you\'re fine holding a little with.</p>' : '<p class="info">The token is swapped at its mint for fresh ecash only you know.</p>'}
         ${this.error(a)}`;
       }
+      case 'rgbInvoice': return this.rgbInvoiceBody(a, P, b);
+      case 'rgbPay': return this.rgbPayBody(a, P, b);
       case 'switchNetwork':
         return `<div class="kv">${rowKV('From', esc(account.params.name))}${rowKV('To', `<b>${esc(NETWORKS[P.target]?.name || P.target)}</b>`)}</div>`;
       default: return '';
     }
+  }
+
+  /** "Opening RGB…" while the RGB account loads in this window. */
+  rgbWait(a) { return a.rgbWait && !a.prepErr ? `<p class="info">${esc(a.rgbWait)}</p>` : ''; }
+
+  rgbInvoiceBody(a, P, b) {
+    const r = this.app.rgb;
+    return `<p class="hero-bal center">${b ? esc(b.shown) : '…'}</p>
+    <div class="kv">${rowKV('Token', b?.asset ? `${esc(b.asset.ticker)} <span class="mono">${esc(short(b.assetId, 8))}</span>` : P.assetId ? `<span class="mono">${esc(short(P.assetId, 8))}</span>` : 'Any token')}
+    ${rowKV('Network', esc(r.profile.label))}
+    ${b ? rowKV('Invoice type', b.witness ? 'No BTC needed (the sender adds a small output)' : 'Private (uses one of your RGB outputs)') : ''}
+    ${rowKV('Works for', `${Math.round((b?.expiry || P.expiry || 86400) / 3600)} hours`)}</div>
+    ${b?.newToken ? '<p class="info">You don\'t hold this token yet. It shows in RGB once it arrives.</p>' : ''}
+    <p class="info">The site gets an invoice to send you tokens. It can't take anything from your wallet. Tokens arrive after one confirmation.</p>
+    ${this.rgbWait(a)}${this.error(a)}`;
+  }
+
+  rgbPayBody(a, P, b) {
+    const r = this.app.rgb;
+    const amount = b && !b.needAmount ? `${esc(b.shown)} <small>${esc(b.ticker)}</small>` : b ? `<small>${esc(b.ticker)}</small>` : '…';
+    return `<p class="hero-bal center">${amount}</p>
+    ${b?.needAmount ? `<label class="field"><span class="lbl">How many ${esc(b.ticker)}</span><input data-bind="apRgbAmt" inputmode="decimal" value="${esc(this.f.apRgbAmt || '')}" placeholder="You have ${esc(b.spendable)}"></label>` : ''}
+    <div class="kv">${rowKV('Token', b ? `${esc(b.ticker)} <span class="mono">${esc(short(b.assetId, 8))}</span>` : '…')}
+    ${b ? rowKV('You have', `${esc(b.spendable)} ${esc(b.ticker)}`) : ''}
+    ${rowKV('To', `<span class="mono">${esc(short(P.invoice || '', 12))}</span>`)}
+    ${b ? rowKV('Transfer server', `<span class="mono">${esc(b.proxy)}</span>`) : ''}
+    ${rowKV('Network', esc(r.profile.label))}
+    ${rowKV('Network fee', b ? `${esc(b.fee)} sat/vB, from your RGB BTC` : a.prepErr ? '—' : 'calculating…')}</div>
+    <p class="info">Tokens sent to an invoice can't be taken back. The other side accepts first, then the transaction goes out: keep this window open for up to a minute.</p>
+    ${this.rgbWait(a)}${this.error(a)}`;
   }
 
   inscribeBody(a, P, b) {

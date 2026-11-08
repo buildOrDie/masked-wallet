@@ -12,7 +12,7 @@ export const FORM_DEFAULTS = {
   ordSide: 'all', ordTo: '',
   sendMode: 'send', dropText: '', dropEach: '1000', dropFrom: 'public',
   // set by the screens that use them
-  homeTok: 'all', tokTab: 'history', rgbTab: 'history', acctMenu: '-1', acctHidden: '', obMode: 'create', backed: false, apRisk: false, rbfInfo: false,
+  homeTok: 'all', tokTab: 'history', rgbTab: 'history', acctMenu: '-1', acctHidden: '', obMode: 'create', backed: false, apRisk: false, apRgbAmt: '', rbfInfo: false,
 };
 
 export class AppState {

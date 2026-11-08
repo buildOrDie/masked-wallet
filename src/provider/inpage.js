@@ -34,7 +34,7 @@
 
   const provider = Object.freeze({
     isMasked: true,
-    version: '1.3.0',
+    version: '1.4.0',
     // accounts
     requestAccounts: () => request('requestAccounts'),
     getAccounts: () => request('getAccounts'),
@@ -74,6 +74,13 @@
       payRequest: (paymentRequest) => request('cashuPayRequest', { request: paymentRequest }),
       /** Give the wallet a token to claim (a refund, a reward) → { amount, mint } */
       receive: (token) => request('cashuReceive', { token }),
+    }),
+    // RGB tokens (the wallet's RGB account): every invoice and send is approved in MASKED
+    rgb: Object.freeze({
+      /** An invoice to receive tokens: { assetId?, baseUnits?, expirySeconds?, kind?: 'blind'|'witness' } → { invoice, recipientId, expirationTimestamp, witness } */
+      requestInvoice: (o = {}) => request('rgbRequestInvoice', { assetId: o.assetId, baseUnits: o.baseUnits != null ? String(o.baseUnits) : undefined, expirySeconds: o.expirySeconds, kind: o.kind }),
+      /** Pay an RGB invoice: { assetId?, amount? (tokens as wallets show them), feeRate? } → { txid, batchTransferIdx, status: 'broadcast'|'waiting' } */
+      payInvoice: (invoice, o = {}) => request('rgbPayInvoice', { invoice, assetId: o.assetId, amount: o.amount != null ? String(o.amount) : undefined, feeRate: o.feeRate }),
     }),
     // events: accountsChanged, networkChanged, chainChanged, tradeAccountChanged
     on: (event, fn) => { if (!listeners.has(event)) listeners.set(event, new Set()); listeners.get(event).add(fn); },

@@ -166,6 +166,32 @@ const { token } = await window.masked.cashu.pay({ amount: 21, mints: ['https://m
 await fetch('/api/unlock', { method: 'POST', body: token }); // your server redeems it at the mint
 ```
 
+## RGB tokens *(MASKED only)*
+
+`window.masked.rgb` lets a site ask for an RGB invoice or ask MASKED to pay one, with the wallet's own RGB account
+(Home → RGB: Signet, or mainnet with the RGB beta on). Every invoice and every send is approved in MASKED. Sites never see
+the RGB balance or its addresses. The escrow marketplace uses both: a seller pays the escrow's invoice, a buyer gives an
+invoice for the tokens they bought.
+
+### `rgb.requestInvoice({ assetId?, baseUnits?, expirySeconds?, kind? }): Promise<{ invoice, recipientId, expirationTimestamp, witness }>` 🔐
+An invoice to receive tokens. `assetId` (`rgb:…`) and `baseUnits` (the amount in the token's smallest unit, as a string)
+fix what it asks for; leave them out for any token or any amount. `expirySeconds`: 600 to 604800 (default 86400).
+`kind`: `'blind'` (private, uses one of the user's RGB outputs) or `'witness'` (no BTC needed: the sender adds a small
+output); MASKED picks when left out. On mainnet the invoice is returned only once it is in a backup.
+
+### `rgb.payInvoice(invoice, { assetId?, amount?, feeRate? }): Promise<{ txid, batchTransferIdx, amount, status }>` 🔐
+Sends tokens to an RGB invoice. `assetId` is needed when the invoice names no token. `amount` is in tokens as wallets
+show them (`'12.5'`); for an invoice with a fixed amount it must match. With no amount anywhere, the user types it on the
+approval screen. The receiver accepts first, then MASKED broadcasts: `status` is `'broadcast'` when that happened within
+about a minute, `'waiting'` when it is still waiting (MASKED finishes it on its next refresh while open). `amount` in the
+result is in base units. The invoice's transfer server must be one MASKED is already allowed to reach (for example
+`proxy.iriswallet.com`).
+
+```js
+const { invoice } = await window.masked.rgb.requestInvoice({ assetId, baseUnits: '150000' });
+await window.masked.rgb.payInvoice(escrowInvoice, { assetId, amount: '1500' });
+```
+
 ## Events
 
 ```js
@@ -187,4 +213,5 @@ const provider = window.masked ?? window.unisat;
 - Sites see the **Public** address, its public key and its balance. With private trading allowed, maskedwallet.com also sees the trade address and the Shielded totals, never the Shielded address or its payments.
 - Shielded coins are invisible to dApps. `getShieldedAddress()` only shares the reusable receive address.
 - Sites never see the ecash balance or mints; a payment shows only the token (or payload) it carries.
+- Sites never see the RGB balance or RGB addresses: only the invoices the user approves, and the result of a send they approve.
 - Provider calls never go to MASKED servers. `getBalance` reads mempool.space and `getInscriptions` reads ordinals.com, straight from the extension.

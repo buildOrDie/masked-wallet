@@ -13,7 +13,7 @@ const NETS = {
 // MASKED runs on Mainnet and Signet. UniSat reports Signet as "testnet", so that name maps to Signet.
 const FROM_UNISAT = { livenet: 'main', mainnet: 'main', testnet: 'signet', signet: 'signet' };
 const FROM_CHAIN = { BITCOIN_MAINNET: 'main', BITCOIN_SIGNET: 'signet' };
-const _APPROVAL = new Set(['requestAccounts', 'signMessage', 'signPsbt', 'signPsbts', 'sendBitcoin', 'switchNetwork', 'switchChain', 'inscribeTransfer', 'getTradeAccount', 'fundTradeAccount', 'moveToTradeAccount', 'returnToShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive']);
+const _APPROVAL = new Set(['requestAccounts', 'signMessage', 'signPsbt', 'signPsbts', 'sendBitcoin', 'switchNetwork', 'switchChain', 'inscribeTransfer', 'getTradeAccount', 'fundTradeAccount', 'moveToTradeAccount', 'returnToShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbRequestInvoice', 'rgbPayInvoice']);
 
 const TRADE_SITES = new Set(['https://maskedwallet.com', 'https://www.maskedwallet.com']);
 const err = (code, message) => Object.assign(new Error(message), { code });
@@ -123,6 +123,12 @@ const checkTicker = (t) => {
   const ticker = String(t || '').trim();
   if (!ticker || new TextEncoder().encode(ticker).length > 6) throw err(4000, 'ticker must be a BRC-20 (4) or BRC2.0 (5-6) ticker.');
   return ticker;
+};
+/** An optional RGB asset ID: '' or rgb:… */
+const optAssetId = (v) => {
+  const s = v == null ? '' : String(v).trim();
+  if (s && !/^rgb:[A-Za-z0-9~_\-!$.%]{10,120}$/.test(s)) throw err(4000, 'assetId must be an RGB asset ID (rgb:…).');
+  return s;
 };
 const checkAmount = (a) => { if (!/^\d+(\.\d+)?$/.test(String(a || '')) || /^0+(\.0+)?$/.test(String(a))) throw err(4000, 'amount must be a positive number.'); return String(a); };
 /** What a site sees of private trading: the trade address and the Shielded totals. */
@@ -256,6 +262,30 @@ async function handle(origin, method, params) {
       const tx = btc.Transaction.fromPSBT(hex.decode(params.psbtHex), { allowUnknownOutputs: true });
       try { tx.finalize(); } catch {}
       return (await api(net, 'tx', { method: 'POST', body: tx.hex })).trim();
+    }
+    // ---- RGB: the wallet's own RGB account (Home → RGB). Every invoice and every send is approved in MASKED ----
+    case 'rgbRequestInvoice': {
+      needConnected();
+      const assetId = optAssetId(params.assetId);
+      const baseUnits = params.baseUnits == null || params.baseUnits === '' ? '' : String(params.baseUnits);
+      if (baseUnits && !/^[1-9]\d{0,17}$/.test(baseUnits)) throw err(4000, 'baseUnits must be a positive whole number (the token amount in its smallest unit).');
+      if (baseUnits && !assetId) throw err(4000, 'Give assetId together with baseUnits.');
+      const expiry = params.expirySeconds == null ? 86400 : Number(params.expirySeconds);
+      if (!Number.isSafeInteger(expiry) || expiry < 600 || expiry > 7 * 86400) throw err(4000, 'expirySeconds must be between 600 and 604800.');
+      const kind = params.kind == null || params.kind === '' ? '' : String(params.kind);
+      if (kind && !['blind', 'witness'].includes(kind)) throw err(4000, 'kind must be "blind" or "witness".');
+      return openApproval(origin, 'rgbInvoice', { assetId, baseUnits, expiry, kind });
+    }
+    case 'rgbPayInvoice': {
+      needConnected();
+      const invoice = typeof params.invoice === 'string' ? params.invoice.trim() : '';
+      if (!/^rgb:/i.test(invoice) || invoice.length > 2000) throw err(4000, 'invoice must be an RGB invoice (rgb:…).');
+      const assetId = optAssetId(params.assetId);
+      const amount = params.amount == null || params.amount === '' ? '' : String(params.amount).replace(/,/g, '');
+      if (amount && (!/^\d+(\.\d+)?$/.test(amount) || /^0+(\.0+)?$/.test(amount))) throw err(4000, 'amount must be a positive number of tokens (as wallets show them).');
+      const feeRate = params.feeRate == null ? 0 : Number(params.feeRate);
+      if (feeRate && (!Number.isFinite(feeRate) || feeRate < 1 || feeRate > 500)) throw err(4000, 'feeRate must be between 1 and 500 sat/vB.');
+      return openApproval(origin, 'rgbPay', { invoice, assetId, amount, feeRate });
     }
     // ---- ecash (Cashu) ----
     case 'cashuGetLockKey': {
