@@ -242,3 +242,10 @@ test('buyer: pays with two coins when one is not enough', async () => {
   // 24000 in − 20000 price − 330 seal − 640 fee − 116 for the second input
   assert.equal(built.change.sats, 24000 - 20000 - 330 - 640 - 116);
 });
+
+test('the consignment check is read whichever way the engine names its fields', async () => {
+  const { inspected } = await import('../src/rgb/LiteWallet.mjs');
+  assert.deepEqual(inspected({ valid: true, contract_id: ASSET, seal_amount: 500 }), { contractId: ASSET, sealAmount: 500 });
+  assert.deepEqual(inspected({ valid: true, contractId: ASSET, sealAmount: 500 }), { contractId: ASSET, sealAmount: 500 });
+  assert.deepEqual(inspected({ valid: true }), { contractId: '', sealAmount: null });
+});

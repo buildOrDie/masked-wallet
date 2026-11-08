@@ -706,7 +706,7 @@ index d436834..ec1c289 100644
 +}
 +
 diff --git a/src/wallet/rust_only.rs b/src/wallet/rust_only.rs
-index 7cc1b66..5757e42 100644
+index 7cc1b66..7ee132d 100644
 --- a/src/wallet/rust_only.rs
 +++ b/src/wallet/rust_only.rs
 @@ -52,6 +52,12 @@ pub struct ValidateConsignmentResult {
@@ -714,10 +714,10 @@ index 7cc1b66..5757e42 100644
      /// Detailed error/failure description (when invalid).
      pub details: Option<String>,
 +    /// The asset (contract) the consignment is for.
-+    #[serde(default, skip_serializing_if = "Option::is_none")]
++    #[serde(default, skip_serializing_if = "Option::is_none", rename = "contractId")]
 +    pub contract_id: Option<String>,
 +    /// With a seal output given: what the transaction assigns to that output of the witness transaction.
-+    #[serde(default, skip_serializing_if = "Option::is_none")]
++    #[serde(default, skip_serializing_if = "Option::is_none", rename = "sealAmount")]
 +    pub seal_amount: Option<u64>,
  }
  
@@ -850,7 +850,7 @@ index 7cc1b66..5757e42 100644
      #[test]
      fn validate_consignment_offchain_invalid_bytes() {
          let result = validate_consignment_offchain(
-@@ -737,6 +830,8 @@ mod tests {
+@@ -737,9 +830,12 @@ mod tests {
              warnings: Some(vec!["warn1".to_string()]),
              error: None,
              details: None,
@@ -859,7 +859,11 @@ index 7cc1b66..5757e42 100644
          };
          let json = serde_json::to_string(&result).unwrap();
          let deserialized: ValidateConsignmentResult = serde_json::from_str(&json).unwrap();
-@@ -749,6 +844,8 @@ mod tests {
++        assert!(!json.contains("contract_id") && !json.contains("seal_amount"), "JS reads contractId / sealAmount");
+         assert!(deserialized.valid);
+         assert_eq!(deserialized.warnings.unwrap(), vec!["warn1".to_string()]);
+         assert!(deserialized.error.is_none());
+@@ -749,6 +845,8 @@ mod tests {
              warnings: None,
              error: Some("invalid".to_string()),
              details: Some("schema mismatch".to_string()),
@@ -868,7 +872,7 @@ index 7cc1b66..5757e42 100644
          };
          let json = serde_json::to_string(&result_invalid).unwrap();
          let deserialized: ValidateConsignmentResult = serde_json::from_str(&json).unwrap();
-@@ -761,3 +858,477 @@ mod tests {
+@@ -761,3 +859,477 @@ mod tests {
          assert_eq!(IndexerProtocol::Esplora.to_string(), "Esplora");
      }
  }

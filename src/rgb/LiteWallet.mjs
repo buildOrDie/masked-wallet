@@ -15,6 +15,8 @@ export const rgbNetwork = (n) => NETWORKS[String(n).toLowerCase()] || (() => { t
 export const rpcEndpoint = (url) => String(url).replace(/^https:\/\//i, 'rpcs://').replace(/^http:\/\//i, 'rpc://');
 
 const num = (x) => Number(x ?? 0);
+/** The token and amount from a consignment check (engines up to 2.26.3 named them contract_id / seal_amount). */
+export const inspected = (v) => ({ contractId: String(v?.contractId ?? v?.contract_id ?? ''), sealAmount: v?.sealAmount ?? v?.seal_amount ?? null });
 const short = (s) => (String(s).length > 20 ? `${String(s).slice(0, 10)}…${String(s).slice(-6)}` : String(s));
 
 /**
@@ -362,8 +364,9 @@ export class LiteWallet {
     let v;
     try { v = plain(this.lib.inspectSwapConsignment(unb64(consignment), txid, this.net, SEAL_OUTPUT)); } catch (e) { throw new Error(`The seller's token transfer does not check out: ${e?.message || e}`); }
     if (!v?.valid) throw new Error(`The seller's token transfer does not check out: ${v?.details || v?.error || 'invalid'}`);
-    if (String(v.contractId || '') !== s.assetId) throw new Error('The transfer is for another token than the offer.');
-    if (v.sealAmount == null || BigInt(String(v.sealAmount)) !== BigInt(s.amount)) throw new Error(`The transfer gives you ${v.sealAmount ?? 'nothing'}, the offer says ${s.amount}.`);
+    const { contractId, sealAmount } = inspected(v);
+    if (contractId !== s.assetId) throw new Error('The transfer is for another token than the offer.');
+    if (sealAmount == null || BigInt(String(sealAmount)) !== BigInt(s.amount)) throw new Error(`The transfer gives you ${sealAmount ?? 'nothing'}, the offer says ${s.amount}.`);
     const si = await this.outpointInfo(sellerOutpoint);
     this.lib.WasmWallet.verifySwapPsbt(String(psbt), [sellerOutpoint, s.buyerOutpoint], buyerOutputs(s, si.sats), BigInt(s.feeSats));
     const signed = this.sign(String(psbt));
@@ -560,8 +563,9 @@ export class LiteWallet {
       let v;
       try { v = plain(this.lib.inspectSwapConsignment(bytes, txid, this.net, INSTANT_SEAL_OUTPUT)); } catch (e) { throw new Error(`The seller's token transfer does not check out: ${e?.message || e}`); }
       if (!v?.valid) throw new Error(`The seller's token transfer does not check out: ${v?.details || v?.error || 'invalid'}`);
-      if (String(v.contractId || '') !== o.assetId) throw new Error('The transfer is for another token than the offer.');
-      if (v.sealAmount == null || BigInt(String(v.sealAmount)) !== o.amount) throw new Error(`The transfer gives you ${v.sealAmount ?? 'nothing'}, the offer says ${o.amount}.`);
+      const { contractId, sealAmount } = inspected(v);
+      if (contractId !== o.assetId) throw new Error('The transfer is for another token than the offer.');
+      if (sealAmount == null || BigInt(String(sealAmount)) !== o.amount) throw new Error(`The transfer gives you ${sealAmount ?? 'nothing'}, the offer says ${o.amount}.`);
     };
     const consignment = unb64(String(l.consignment || ''));
     check(consignment, info.templateTxid);
