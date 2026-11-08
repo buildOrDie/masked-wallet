@@ -14,7 +14,7 @@ const NETS = {
 // MASKED runs on Mainnet and Signet. UniSat reports Signet as "testnet", so that name maps to Signet.
 const FROM_UNISAT = { livenet: 'main', mainnet: 'main', testnet: 'signet', signet: 'signet' };
 const FROM_CHAIN = { BITCOIN_MAINNET: 'main', BITCOIN_SIGNET: 'signet' };
-const _APPROVAL = new Set(['requestAccounts', 'signMessage', 'signPsbt', 'signPsbts', 'sendBitcoin', 'switchNetwork', 'switchChain', 'inscribeTransfer', 'getTradeAccount', 'fundTradeAccount', 'moveToTradeAccount', 'returnToShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbRequestInvoice', 'rgbPayInvoice', 'rgbSwapAvailable', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbAutoSell']);
+const _APPROVAL = new Set(['requestAccounts', 'signMessage', 'signPsbt', 'signPsbts', 'sendBitcoin', 'switchNetwork', 'switchChain', 'inscribeTransfer', 'getTradeAccount', 'fundTradeAccount', 'moveToTradeAccount', 'returnToShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbRequestInvoice', 'rgbPayInvoice', 'rgbSwapAvailable', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbAutoSell', 'rgbInstantList', 'rgbInstantBuy', 'rgbInstantCancel']);
 
 const TRADE_SITES = new Set(['https://maskedwallet.com', 'https://www.maskedwallet.com']);
 const err = (code, message) => Object.assign(new Error(message), { code });
@@ -149,6 +149,19 @@ function swapParams(method, p) {
   }
   if (method === 'rgbBuySign') { out.psbt = str(p.psbt, 200_000, 'psbt'); out.consignment = str(p.consignment, 4_000_000, 'consignment'); }
   if (method === 'rgbSaleComplete') out.psbt = str(p.psbt, 200_000, 'psbt');
+  if (['rgbInstantList', 'rgbInstantBuy', 'rgbInstantCancel'].includes(method) && p.feeRate != null) { const f = Number(p.feeRate); if (!(f >= 1 && f <= 500)) throw err(4000, 'feeRate must be between 1 and 500 sat/vB.'); out.feeRate = f; }
+  if (method === 'rgbInstantList') {
+    // where the wallet sends the signed listing if it's signed later (after the tokens move): https only
+    let u; try { u = new URL(String(p.market || '')); } catch { throw err(4000, 'market must be the market\'s address.'); }
+    if (!(u.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(u.hostname))) throw err(4000, 'market must be an https address.');
+    if (!/^[0-9a-f]{32,128}$/.test(String(p.token || ''))) throw err(4000, 'token (the seller token from listing) is required.');
+    out.market = u.origin + u.pathname.replace(/\/+$/, ''); out.token = String(p.token);
+  }
+  if (method === 'rgbInstantBuy') {
+    const l = p.listing;
+    if (!l || typeof l !== 'object') throw err(4000, 'listing (the signed listing from the market) is required.');
+    out.listing = { psbt: str(l.psbt, 20_000, 'listing.psbt'), consignment: str(l.consignment, 4_000_000, 'listing.consignment'), templateTxid: str(l.templateTxid, 64, 'listing.templateTxid') };
+  }
   return out;
 }
 const checkAmount = (a) => { if (!/^\d+(\.\d+)?$/.test(String(a || '')) || /^0+(\.0+)?$/.test(String(a))) throw err(4000, 'amount must be a positive number.'); return String(a); };
@@ -313,6 +326,11 @@ async function handle(origin, method, params) {
       needConnected();
       return openApproval(origin, 'rgbSwapAvailable', { assetId: optAssetId(params.assetId) || (() => { throw err(4000, 'assetId is required.'); })() });
     case 'rgbBuyPrepare': case 'rgbSalePrepare': case 'rgbBuySign': case 'rgbSaleComplete': {
+      needConnected();
+      return openApproval(origin, method, swapParams(method, params));
+    }
+    // ---- Instant listings (pre-signed): the seller signs once; anyone buys it with the seller offline ----
+    case 'rgbInstantList': case 'rgbInstantBuy': case 'rgbInstantCancel': {
       needConnected();
       return openApproval(origin, method, swapParams(method, params));
     }

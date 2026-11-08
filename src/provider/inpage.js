@@ -34,7 +34,7 @@
 
   const provider = Object.freeze({
     isMasked: true,
-    version: '1.6.0',
+    version: '1.7.0',
     // accounts
     requestAccounts: () => request('requestAccounts'),
     getAccounts: () => request('getAccounts'),
@@ -96,6 +96,13 @@
       autoSell: (o = {}) => request('rgbAutoSell', o),
       /** Stop selling an offer automatically: { offerId } → { ok } */
       stopAutoSell: (o = {}) => request('rgbAutoSellStop', o),
+      // Instant listings: signed once, bought with the seller offline (docs/PROVIDER.md)
+      /** seller: { offerId, offer, market, token, feeRate? } → { stage: 'ready', psbt, consignment, templateTxid, sellerOutpoint } or { stage: 'moving', txid } */
+      listInstant: (o = {}) => request('rgbInstantList', o),
+      /** buyer: { offerId, network, offer, listing, feeRate? } → { txid } (broadcast) */
+      buyInstant: (o = {}) => request('rgbInstantBuy', o),
+      /** seller: { offerId, offer, feeRate? } → { stage, txid } (moves the signed output: an on-chain transaction) */
+      cancelInstant: (o = {}) => request('rgbInstantCancel', o),
     }),
     // events: accountsChanged, networkChanged, chainChanged, tradeAccountChanged
     on: (event, fn) => { if (!listeners.has(event)) listeners.set(event, new Set()); listeners.get(event).add(fn); },

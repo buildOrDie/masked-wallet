@@ -65,6 +65,38 @@ export function sellerCoinFor(unspents, assetId, amount) {
   return { outpoint: `${String(o.txid).toLowerCase()}:${o.vout}`, sats: String(ok.u.utxo.btcAmount) };
 }
 
+/**
+ * Instant (pre-signed) listings: the seller's output must hold exactly the listed amount of one asset and nothing
+ * else, because whoever completes the pre-signed transaction can take everything on that output. Returns it, or
+ * null. `skip`: outputs already promised to other listings.
+ */
+export function exactCoinFor(unspents, assetId, amount, skip = new Set()) {
+  const want = BigInt(amount);
+  for (const u of unspents || []) {
+    if (!u.utxo?.colorable || u.utxo.exists === false) continue;
+    const o = u.utxo.outpoint, op = `${String(o.txid).toLowerCase()}:${o.vout}`;
+    if (skip.has(op)) continue;
+    const all = u.rgbAllocations || [];
+    if (!all.length || all.some((a) => a.assetId !== assetId || !a.settled || a.assignment?.Fungible == null)) continue;
+    if (heldOn(u, assetId) === want) return { outpoint: op, sats: String(u.utxo.btcAmount) };
+  }
+  return null;
+}
+
+/** sellerCoinFor without the outputs promised to Instant listings. */
+export function freeSellerCoinFor(unspents, assetId, amount, skip = new Set()) {
+  const free = (unspents || []).filter((u) => { const o = u.utxo?.outpoint; return !o || !skip.has(`${String(o.txid).toLowerCase()}:${o.vout}`); });
+  return sellerCoinFor(free, assetId, amount);
+}
+
+/** Instant listing layout (engine: presign_sale): output 0 payout, 1 commitment, 2 the buyer's seal. */
+export const INSTANT_SEAL_OUTPUT = 2;
+/**
+ * Sats on the seal output of an Instant purchase, and of the move to an output of its own: the dust limit of a
+ * taproot output. (The four-step swaps keep SEAL_SATS, the value other wallets using that format expect.)
+ */
+export const INSTANT_SEAL_SATS = 330;
+
 /** How much of an asset can be offered: in total, and the most on one output (one swap uses one output). */
 export function offerable(unspents, assetId) {
   let total = 0n, max = 0n;

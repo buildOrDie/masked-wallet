@@ -216,6 +216,35 @@ the buyer's wallet checks the token transfer (right token, right amount on its s
 Needs MASKED with the swap engine (2.25+). Without it each call fails with "This MASKED version can't swap RGB tokens
 yet".
 
+### Instant listings: `rgb.listInstant`, `rgb.buyInstant`, `rgb.cancelInstant` 🔐 *(2.26+)*
+
+The seller's wallet signs the sale once; anyone's MASKED can then buy it in one step, with the seller offline.
+
+| Call | Who | Params | Returns |
+|---|---|---|---|
+| `listInstant` | seller | `{ offerId, offer, market, token, feeRate? }` | `{ stage: 'ready', psbt, consignment, templateTxid, sellerOutpoint }`, or `{ stage: 'moving', txid }` |
+| `buyInstant` | buyer | `{ offerId, network, offer, listing: { psbt, consignment, templateTxid }, feeRate? }` | `{ txid }` (broadcast) |
+| `cancelInstant` | seller | `{ offerId, offer, feeRate? }` | `{ stage, txid }` |
+
+How it works:
+
+- The seller's tokens must sit alone on one output (exactly the listed amount, nothing else), because whoever
+  completes the signed transaction controls everything on that output except the seller's payout. If they share an
+  output, `listInstant` first moves them to one of their own (`stage: 'moving'`); MASKED signs once that confirms,
+  the next time it's open, and sends the listing to `market` itself (`POST {market}/api/swap/offers/{offerId}/presigned`,
+  header `x-swap-token`).
+- The signature is SIGHASH_SINGLE|ANYONECANPAY on input 0: it covers only the seller's output and output 0 (the
+  payout: price + the output's own sats). Changing the price, the payout or the seller's input breaks it.
+- Layout: input 0 the seller's output, then the buyer's; output 0 payout, 1 the RGB commitment (OP_RETURN), 2 the
+  buyer's seal (330 sats, the taproot dust limit), then the buyer's change. The buyer pays the network fee.
+- Before paying, `buyInstant` checks the signature, that the signed payout minus the seller's sats is the offer's price,
+  that the seller's output is unspent and is what the listing says, and the transfer (valid history, this token, this
+  amount on output 2). It then signs, broadcasts, and posts the completed transfer for its own invoice.
+- The listed output is reserved in the seller's engine: no send, change or receive uses it.
+- Cancelling moves the tokens to a new output (a transaction). Until it confirms a buyer can still complete the
+  listing; then the sale goes through at the seller's price. MASKED notices sales and cancels on chain at each refresh.
+- Instant listings are MASKED-only (a different transaction layout from the four-step swaps).
+
 ### Sell automatically: `rgb.autoSell({ offerId, market, token, offer })`, `rgb.stopAutoSell({ offerId })` 🔐 *(2.25.1+)*
 
 After listing, a site can ask MASKED to do the seller's steps 2 and 4 by itself. The person approves once (and, the

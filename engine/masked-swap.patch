@@ -1,8 +1,8 @@
 diff --git a/bindings/wasm/src/lib.rs b/bindings/wasm/src/lib.rs
-index bf8d9d1..5a4092d 100644
+index bf8d9d1..ecb4b0d 100644
 --- a/bindings/wasm/src/lib.rs
 +++ b/bindings/wasm/src/lib.rs
-@@ -482,6 +482,79 @@ impl WasmWallet {
+@@ -482,6 +482,162 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -79,10 +79,93 @@ index bf8d9d1..5a4092d 100644
 +        rgb_lib_wasm::wallet::rust_only::witness_seal_script(invoice).map_err(|e| JsValue::from_str(&e.to_string()))
 +    }
 +
++    // ---- pre-signed listings (MASKED "Instant") ----
++
++    /// Outputs promised to pre-signed listings (`["txid:vout"]`): sends, change and receives never use them.
++    #[wasm_bindgen(js_name = "setReservedOutpoints")]
++    pub fn set_reserved_outpoints(&self, outpoints_js: JsValue) -> Result<(), JsValue> {
++        let list: Vec<String> = serde_wasm_bindgen::from_value(outpoints_js).map_err(|e| JsValue::from_str(&format!("Invalid outpoints: {e}")))?;
++        self.inner.borrow_mut().set_reserved_outpoints(list).map_err(|e| JsValue::from_str(&e.to_string()))
++    }
++
++    /// A pre-signed listing was bought: mark its output spent (the caller checked it on chain).
++    #[wasm_bindgen(js_name = "markOutpointSpent")]
++    pub fn mark_outpoint_spent(&self, outpoint: &str) -> Result<bool, JsValue> {
++        self.inner.borrow_mut().mark_outpoint_spent(outpoint.to_string()).map_err(|e| JsValue::from_str(&e.to_string()))
++    }
++
++    /// Pre-sign a listing of `outpoint` (exactly `amount` of `assetId`, nothing else on it) for `priceSats` paid
++    /// to `payoutScript` (hex). Returns `{ psbt, consignment (bytes), templateTxid, sellerOutpoint, sellerSats }`.
++    #[wasm_bindgen(js_name = "presignSale")]
++    pub async fn presign_sale(
++        &self,
++        online_js: JsValue,
++        asset_id: &str,
++        amount: u64,
++        outpoint: &str,
++        payout_script: &str,
++        price_sats: u64,
++        min_confirmations: u8,
++    ) -> Result<JsValue, JsValue> {
++        let online: Online = serde_wasm_bindgen::from_value(online_js)
++            .map_err(|e| JsValue::from_str(&format!("Invalid Online object: {e}")))?;
++        let mut wallet = self.inner.borrow_mut();
++        let res = wallet
++            .presign_sale(online, asset_id.to_string(), amount, outpoint.to_string(), payout_script.to_string(), price_sats, min_confirmations)
++            .await
++            .map_err(|e| JsValue::from_str(&e.to_string()))?;
++        to_js(&res)
++    }
++
++    /// The buyer of a pre-signed listing posts the completed consignment for its own witness invoice.
++    #[wasm_bindgen(js_name = "postOwnConsignment")]
++    pub async fn post_own_consignment(&self, proxy_url: &str, recipient_id: &str, consignment: &[u8], txid: &str, vout: u32) -> Result<(), JsValue> {
++        let wallet = self.inner.borrow();
++        wallet
++            .post_own_consignment(proxy_url.to_string(), recipient_id.to_string(), consignment.to_vec(), txid.to_string(), vout)
++            .await
++            .map_err(|e| JsValue::from_str(&e.to_string()))
++    }
++
++    /// Read and check a pre-signed listing (the seller's signature included):
++    /// `{ sellerOutpoint, sellerSats, sellerScript, payoutScript, payoutSats, opretScript, templateTxid }`.
++    #[wasm_bindgen(js_name = "presignedListingInfo")]
++    pub fn presigned_listing_info(psbt: &str) -> Result<JsValue, JsValue> {
++        let info = rgb_lib_wasm::wallet::rust_only::presigned_listing_info(psbt).map_err(|e| JsValue::from_str(&e.to_string()))?;
++        to_js(&info)
++    }
++
++    /// The buyer's PSBT for a pre-signed listing: `inputs` `[{ outpoint, sats, script, tx? }]`, the seal script
++    /// (hex), and `change` `{ script, sats }` or null.
++    #[wasm_bindgen(js_name = "presignedBuyPsbt")]
++    pub fn presigned_buy_psbt(template: &str, inputs_js: JsValue, seal_script: &str, change_js: JsValue) -> Result<String, JsValue> {
++        let inputs = serde_wasm_bindgen::from_value(inputs_js).map_err(|e| JsValue::from_str(&format!("Invalid inputs: {e}")))?;
++        let change = if change_js.is_null() || change_js.is_undefined() { None } else { Some(serde_wasm_bindgen::from_value(change_js).map_err(|e| JsValue::from_str(&format!("Invalid change: {e}")))?) };
++        rgb_lib_wasm::wallet::rust_only::presigned_buy_psbt(template, inputs, seal_script.to_string(), change).map_err(|e| JsValue::from_str(&e.to_string()))
++    }
++
++    /// The buyer's last check of its signed transaction (hex) against the template. Returns its txid.
++    #[wasm_bindgen(js_name = "checkPresignedFinal")]
++    pub fn check_presigned_final(template: &str, final_tx: &str, seal_script: &str) -> Result<String, JsValue> {
++        rgb_lib_wasm::wallet::rust_only::check_presigned_final(template, final_tx, seal_script).map_err(|e| JsValue::from_str(&e.to_string()))
++    }
++
++    /// The signed transaction of a finalized PSBT, hex.
++    #[wasm_bindgen(js_name = "psbtExtractHex")]
++    pub fn psbt_extract_hex(psbt: &str) -> Result<String, JsValue> {
++        rgb_lib_wasm::wallet::rust_only::psbt_extract_hex(psbt).map_err(|e| JsValue::from_str(&e.to_string()))
++    }
++
++    /// The listing's consignment with the final transaction (hex) in place of the template.
++    #[wasm_bindgen(js_name = "completePresignedConsignment")]
++    pub fn complete_presigned_consignment(consignment: &[u8], template_txid: &str, final_tx: &str) -> Result<Vec<u8>, JsValue> {
++        rgb_lib_wasm::wallet::rust_only::complete_presigned_consignment(consignment, template_txid, final_tx).map_err(|e| JsValue::from_str(&e.to_string()))
++    }
++
      /// Send RGB assets (end): broadcast a signed PSBT. Returns an OperationResult JS object.
      #[wasm_bindgen(js_name = "sendEnd")]
      pub async fn send_end(
-@@ -832,7 +905,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
+@@ -832,7 +988,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
  /// Works before the witness transaction is broadcast. Takes the raw consignment
  /// bytes (strict-encoded, not base64), the witness transaction ID, and the Bitcoin network.
  ///
@@ -92,7 +175,7 @@ index bf8d9d1..5a4092d 100644
  #[wasm_bindgen(js_name = "validateConsignmentOffchain")]
  pub fn validate_consignment_offchain(
      consignment_bytes: &[u8],
-@@ -850,3 +924,25 @@ pub fn validate_consignment_offchain(
+@@ -850,3 +1007,25 @@ pub fn validate_consignment_offchain(
      .map_err(|e| JsValue::from_str(&e.to_string()))?;
      to_js(&result)
  }
@@ -118,11 +201,79 @@ index bf8d9d1..5a4092d 100644
 +    .map_err(|e| JsValue::from_str(&e.to_string()))?;
 +    to_js(&result)
 +}
+diff --git a/src/wallet/offline.rs b/src/wallet/offline.rs
+index 31bcf9e..5749424 100644
+--- a/src/wallet/offline.rs
++++ b/src/wallet/offline.rs
+@@ -993,6 +993,8 @@ pub struct Wallet {
+     /// Persistent in-memory RGB stock.
+     pub(crate) rgb_stock: std::rc::Rc<std::cell::RefCell<Option<rgbstd::persistence::Stock>>>,
+     pub(crate) vss_client: Option<super::vss::VssBackupClient>,
++    /// Outputs promised to a pre-signed listing (MASKED): never picked for sends, change or receives.
++    pub(crate) reserved_outpoints: HashSet<Outpoint>,
+ }
+ 
+ impl Wallet {
+@@ -1139,6 +1141,7 @@ impl Wallet {
+             online_data: None,
+             #[cfg(feature = "esplora")]
+             transfer_artifacts: HashMap::new(),
++            reserved_outpoints: HashSet::new(),
+             #[cfg(feature = "esplora")]
+             received_consignments: HashMap::new(),
+             idb_save_in_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+@@ -1330,8 +1333,10 @@ impl Wallet {
+             None => rgb_allocations.as_deref().unwrap(),
+         };
+ 
++        let mut exclude: Vec<Outpoint> = exclude_utxos.to_vec();
++        exclude.extend(self.reserved_outpoints.iter().cloned());
+         let mut allocatable =
+-            self.get_available_allocations(unspents, exclude_utxos, max_allocations)?;
++            self.get_available_allocations(unspents, &exclude, max_allocations)?;
+         allocatable.sort_by_key(|t| t.rgb_allocations.len() + t.pending_blinded as usize);
+         match allocatable.first() {
+             Some(mut selected) => {
+@@ -1922,7 +1927,7 @@ impl Wallet {
+         Ok(psbt.to_string())
+     }
+ 
+-    fn _sign_psbt(&self, psbt: &mut Psbt, sign_options: Option<SignOptions>) -> Result<(), Error> {
++    pub(crate) fn _sign_psbt(&self, psbt: &mut Psbt, sign_options: Option<SignOptions>) -> Result<(), Error> {
+         let sign_options = sign_options.unwrap_or_default();
+         self.bdk_wallet
+             .sign(psbt, sign_options)
+@@ -3181,6 +3186,7 @@ mod address_reuse_tests {
+             online_data: None,
+             #[cfg(feature = "esplora")]
+             transfer_artifacts: HashMap::new(),
++            reserved_outpoints: HashSet::new(),
+             #[cfg(feature = "esplora")]
+             received_consignments: HashMap::new(),
+             idb_save_in_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
 diff --git a/src/wallet/online.rs b/src/wallet/online.rs
-index d436834..7bd1632 100644
+index d436834..2bf80c9 100644
 --- a/src/wallet/online.rs
 +++ b/src/wallet/online.rs
-@@ -1377,11 +1377,11 @@ impl Wallet {
+@@ -1135,6 +1135,17 @@ impl Wallet {
+     pub(crate) fn get_input_unspents(
+         &self,
+         unspents: &[LocalUnspent],
++    ) -> Result<Vec<LocalUnspent>, Error> {
++        let mut input_unspents = self.input_unspents_any(unspents)?;
++        input_unspents.retain(|u| !self.reserved_outpoints.contains(&u.utxo.outpoint()));
++        Ok(input_unspents)
++    }
++
++    /// [`get_input_unspents`] including outputs reserved for a pre-signed listing (for the calls that name the
++    /// exact output to spend).
++    pub(crate) fn input_unspents_any(
++        &self,
++        unspents: &[LocalUnspent],
+     ) -> Result<Vec<LocalUnspent>, Error> {
+         let mut input_unspents = unspents.to_vec();
+         // consider the following UTXOs unspendable:
+@@ -1377,11 +1388,11 @@ impl Wallet {
              if internal_unspents_outpoints.contains(&(txid.clone(), vout)) {
                  continue;
              }
@@ -139,7 +290,7 @@ index d436834..7bd1632 100644
              db_txo.spent = ActiveValue::Set(true);
              self.database.update_txo(db_txo)?;
          }
-@@ -3878,3 +3878,170 @@ impl Wallet {
+@@ -3878,3 +3889,404 @@ impl Wallet {
          Ok(res)
      }
  }
@@ -170,7 +321,7 @@ index d436834..7bd1632 100644
 +        if amount == 0 {
 +            return Err(Error::InvalidAmountZero);
 +        }
-+        let mut psbt = Psbt::from_str(&psbt)?;
++        let psbt = Psbt::from_str(&psbt)?;
 +        // the commitment output must be the first one, and the seal must be the one the buyer asked for
 +        let outputs = &psbt.unsigned_tx.output;
 +        if outputs.is_empty() || !outputs[0].script_pubkey.is_op_return() || outputs[0].value.to_sat() != 0 {
@@ -186,7 +337,7 @@ index d436834..7bd1632 100644
 +            return Err(Error::Internal { details: s!("swap PSBT: the seal output does not pay the buyer's invoice") });
 +        }
 +
-+        let (_fee_rate, unspents, input_unspents, mut runtime) = self._get_transfer_begin_data(online, 1)?;
++        let (_fee_rate, unspents, _input_unspents, mut runtime) = self._get_transfer_begin_data(online, 1)?;
 +
 +        let asset = self.database.check_asset_exists(asset_id.clone())?;
 +        self.check_schema_support(&asset.schema)?;
@@ -220,6 +371,31 @@ index d436834..7bd1632 100644
 +            return Err(Error::InvalidTransportEndpoints { details: s!("no valid transport endpoints") });
 +        }
 +
++        let psbt = self
++            ._color_swap_psbt(psbt, &asset_id, amount, recipient_id, seal_vout, seal_amount_sat, endpoints, unspents, &mut runtime, min_confirmations)
++            .await?;
++        info!(self.logger, "Swap (begin) completed");
++        Ok(psbt.to_string())
++    }
++
++    /// Colour `psbt` for `amount` of `asset_id` to the witness seal at `seal_vout` (shared by `color_swap` and
++    /// `presign_sale`). Stores the transfer artifacts under the final txid, like `send_begin`.
++    #[allow(clippy::too_many_arguments)]
++    async fn _color_swap_psbt(
++        &mut self,
++        mut psbt: Psbt,
++        asset_id: &str,
++        amount: u64,
++        recipient_id: String,
++        seal_vout: u32,
++        seal_amount_sat: u64,
++        endpoints: Vec<LocalTransportEndpoint>,
++        unspents: Vec<LocalUnspent>,
++        runtime: &mut RgbRuntime,
++        min_confirmations: u8,
++    ) -> Result<Psbt, Error> {
++        let asset_id = asset_id.to_string();
++        let asset = self.database.check_asset_exists(asset_id.clone())?;
 +        let assignment = Assignment::Fungible(amount);
 +        let mut needed = AssignmentsCollection::default();
 +        assignment.add_to_assignments(&mut needed);
@@ -234,7 +410,9 @@ index d436834..7bd1632 100644
 +            transport_endpoints: endpoints,
 +        };
 +
-+        // only this wallet's outputs that the PSBT already spends can carry the asset
++        // only this wallet's outputs that the PSBT already spends can carry the asset (a PSBT names its inputs, so
++        // an output reserved for a pre-signed listing may be one of them: cancelling spends it)
++        let input_unspents = self.input_unspents_any(&unspents)?;
 +        let psbt_inputs: HashSet<Outpoint> = psbt
 +            .unsigned_tx
 +            .input
@@ -272,7 +450,7 @@ index d436834..7bd1632 100644
 +            },
 +        );
 +
-+        let txid = psbt.clone().extract_tx().map_err(InternalError::from)?.compute_txid().to_string();
++        let txid = psbt.unsigned_tx.compute_txid().to_string();
 +        let mut rejected = HashSet::new();
 +        let ok = self
 +            ._prepare_rgb_psbt_wasm(
@@ -281,7 +459,7 @@ index d436834..7bd1632 100644
 +                &txid,
 +                true,
 +                unspents,
-+                &mut runtime,
++                runtime,
 +                min_confirmations,
 +                None,
 +                &mut rejected,
@@ -290,14 +468,13 @@ index d436834..7bd1632 100644
 +        if !ok {
 +            return Err(Error::Internal { details: s!("part of this asset is on the issuer's reject list: it can't be swapped") });
 +        }
-+        let final_txid = psbt.clone().extract_tx().map_err(InternalError::from)?.compute_txid().to_string();
++        let final_txid = psbt.unsigned_tx.compute_txid().to_string();
 +        if final_txid != txid {
 +            if let Some(artifacts) = self.transfer_artifacts.remove(&txid) {
 +                self.transfer_artifacts.insert(final_txid, artifacts);
 +            }
 +        }
-+        info!(self.logger, "Swap (begin) completed");
-+        Ok(psbt.to_string())
++        Ok(psbt)
 +    }
 +
 +    /// The consignment for a transfer begun here (`color_swap` or `send_begin`) and not sent yet. The buyer
@@ -310,8 +487,216 @@ index d436834..7bd1632 100644
 +            .ok_or(Error::UnknownTransfer { txid })
 +    }
 +}
++
++
++// ---- pre-signed listings (MASKED "Instant") ----
++// The seller signs its RGB output once, with SIGHASH_SINGLE|ANYONECANPAY: the signature covers that input and
++// output 0 (the seller's payout) only, so anyone can complete the transaction by adding their own bitcoin, and the
++// seller is paid its price whoever does. Because the buyer then controls every other output, including the
++// OP_RETURN, the output must carry exactly the listed amount of one asset and nothing else: whoever spends it can
++// take everything on it. Layout: input 0 the seller's output; output 0 payout, 1 OP_RETURN, 2 the buyer's seal
++// (330 sats), then the buyer's change; the buyer's inputs follow input 0.
++
++/// Output of the buyer's seal in a pre-signed listing.
++pub const PRESIGNED_SEAL_VOUT: u32 = 2;
++/// Sats on the buyer's seal output: the dust limit of a taproot output.
++pub const PRESIGNED_SEAL_SATS: u64 = 330;
++
++/// A pre-signed listing: the template PSBT (input 0 signed and finalized), the consignment for its template
++/// transaction (the buyer validates it before paying), and the seller's output.
++#[derive(Debug, Clone, Serialize, Deserialize)]
++#[cfg_attr(feature = "camel_case", serde(rename_all = "camelCase"))]
++pub struct PresignedSale {
++    /// base64 PSBT
++    pub psbt: String,
++    /// strict-encoded consignment for `template_txid`
++    pub consignment: Vec<u8>,
++    /// txid of the template transaction the consignment names (the real one differs: the buyer adds inputs)
++    pub template_txid: String,
++    /// "txid:vout"
++    pub seller_outpoint: String,
++    /// sats on the seller's output (returned to it in the payout)
++    pub seller_sats: u64,
++}
++
++fn parse_db_outpoint(s: &str) -> Result<Outpoint, Error> {
++    let (txid, vout) = s.trim().rsplit_once(':').ok_or(Error::Internal { details: format!("not an outpoint: {s}") })?;
++    let vout = vout.parse::<u32>().map_err(|_| Error::Internal { details: format!("not an outpoint: {s}") })?;
++    bdk_wallet::bitcoin::Txid::from_str(txid).map_err(|_| Error::Internal { details: format!("not an outpoint: {s}") })?;
++    Ok(Outpoint { txid: txid.to_string(), vout })
++}
++
++impl Wallet {
++    /// Outputs promised to pre-signed listings: sends, change and receives never use them. The list lives in
++    /// memory; MASKED sets it every time it opens the wallet.
++    pub fn set_reserved_outpoints(&mut self, outpoints: Vec<String>) -> Result<(), Error> {
++        let mut set = HashSet::new();
++        for o in outpoints {
++            set.insert(parse_db_outpoint(&o)?);
++        }
++        self.reserved_outpoints = set;
++        Ok(())
++    }
++
++    /// A pre-signed listing was bought (the caller checked on chain that `outpoint` is spent by a transaction this
++    /// wallet didn't broadcast): mark the output spent so its tokens leave the balance. Returns false when the
++    /// wallet doesn't know the output.
++    pub fn mark_outpoint_spent(&mut self, outpoint: String) -> Result<bool, Error> {
++        let op = parse_db_outpoint(&outpoint)?;
++        let Some(db_txo) = self.database.get_txo(&op)? else {
++            return Ok(false);
++        };
++        let mut db_txo: DbTxoActMod = db_txo.into();
++        db_txo.spent = ActiveValue::Set(true);
++        self.database.update_txo(db_txo)?;
++        self.reserved_outpoints.remove(&op);
++        Ok(true)
++    }
++
++    /// Pre-sign a listing of `outpoint`, which must hold exactly `amount` of `asset_id` and nothing else, for
++    /// `price_sats` paid to `payout_script` (hex). The payout also returns the output's own sats.
++    pub async fn presign_sale(
++        &mut self,
++        online: Online,
++        asset_id: String,
++        amount: u64,
++        outpoint: String,
++        payout_script: String,
++        price_sats: u64,
++        min_confirmations: u8,
++    ) -> Result<PresignedSale, Error> {
++        use bdk_wallet::bitcoin::{Amount, Sequence, TxIn, Witness, absolute::LockTime, transaction::Version};
++        use bdk_wallet::bitcoin::{psbt::PsbtSighashType, sighash::TapSighashType};
++        info!(self.logger, "Pre-signing a listing of {asset_id}...");
++        if amount == 0 {
++            return Err(Error::InvalidAmountZero);
++        }
++        if price_sats < 1000 {
++            return Err(Error::Internal { details: s!("the price must be at least 1,000 sats") });
++        }
++        let op = parse_db_outpoint(&outpoint)?;
++        let payout = ScriptBuf::from_hex(payout_script.trim())
++            .map_err(|_| Error::Internal { details: s!("bad payout script hex") })?;
++        if payout.is_op_return() || payout.is_empty() {
++            return Err(Error::Internal { details: s!("the payout must go to an address") });
++        }
++
++        let asset = self.database.check_asset_exists(asset_id.clone())?;
++        self.check_schema_support(&asset.schema)?;
++        if !matches!(asset.schema, AssetSchema::Nia | AssetSchema::Ifa) {
++            return Err(Error::InvalidAssignment);
++        }
++        let contract_id = ContractId::from_str(&asset_id).map_err(|_| Error::AssetNotFound { asset_id: asset_id.clone() })?;
++
++        let (_fee_rate, unspents, _input_unspents, mut runtime) = self._get_transfer_begin_data(online, 1)?;
++        let unspent = self
++            .input_unspents_any(&unspents)?
++            .into_iter()
++            .find(|u| u.utxo.outpoint() == op)
++            .ok_or(Error::Internal { details: s!("that output can't be listed: it isn't a settled RGB output of this wallet") })?;
++        // the database's view: one settled allocation of this asset, nothing pending
++        if unspent.rgb_allocations.is_empty()
++            || unspent.rgb_allocations.iter().any(|a| a.asset_id.as_deref() != Some(asset_id.as_str()) || !a.settled() || a.future())
++        {
++            return Err(Error::Internal { details: s!("that output also holds other assets or pending transfers: move the tokens to their own output first") });
++        }
++        // the RGB state's view: only this contract, exactly this amount
++        let bdk_op: BdkOutPoint = op.clone().into();
++        let contracts = runtime.contracts_assigning([bdk_op])?;
++        if contracts.len() != 1 || !contracts.contains(&contract_id) {
++            return Err(Error::Internal { details: s!("that output also holds other assets: move the tokens to their own output first") });
++        }
++        let mut held = 0u64;
++        for (_seal, states) in runtime.contract_assignments_for(contract_id, [bdk_op])? {
++            for (_opout, state) in states {
++                match state {
++                    AllocatedState::Amount(a) => held = held.saturating_add(a.as_u64()),
++                    _ => return Err(Error::Internal { details: s!("that output holds non-fungible state") }),
++                }
++            }
++        }
++        if held != amount {
++            return Err(Error::Internal { details: format!("that output holds {held}, not {amount}: move exactly the amount to sell to its own output first") });
++        }
++
++        let prev = self
++            .bdk_wallet
++            .get_utxo(bdk_op)
++            .ok_or(Error::Internal { details: s!("the wallet doesn't have that output's details: sync and try again") })?;
++        let seller_sats = prev.txout.value.to_sat();
++        let payout_sats = price_sats.checked_add(seller_sats).ok_or(Error::Internal { details: s!("price too high") })?;
++
++        // template: the seal output pays the payout script for now; the buyer puts its own address there
++        let tx = BdkTransaction {
++            version: Version::TWO,
++            lock_time: LockTime::ZERO,
++            input: vec![TxIn { previous_output: bdk_op, script_sig: ScriptBuf::new(), sequence: Sequence::ENABLE_RBF_NO_LOCKTIME, witness: Witness::new() }],
++            output: vec![
++                TxOut { value: Amount::from_sat(payout_sats), script_pubkey: payout.clone() },
++                TxOut { value: Amount::ZERO, script_pubkey: ScriptBuf::new_op_return([]) },
++                TxOut { value: Amount::from_sat(PRESIGNED_SEAL_SATS), script_pubkey: payout.clone() },
++            ],
++        };
++        let mut psbt = Psbt::from_unsigned_tx(tx).map_err(|e| Error::Internal { details: e.to_string() })?;
++        psbt.inputs[0].witness_utxo = Some(prev.txout.clone());
++        let recipient_id = crate::utils::recipient_id_from_script_buf(payout.clone(), self.bitcoin_network());
++
++        let mut psbt = self
++            ._color_swap_psbt(psbt, &asset_id, amount, recipient_id, PRESIGNED_SEAL_VOUT, PRESIGNED_SEAL_SATS, vec![], unspents, &mut runtime, min_confirmations)
++            .await?;
++        let template_txid = psbt.unsigned_tx.compute_txid().to_string();
++        let artifacts = self.transfer_artifacts.remove(&template_txid);
++        // this transaction never goes out as it is: keep the tokens spendable here (cancelling moves them)
++        runtime.upsert_witness(RgbTxid::from_str(&template_txid).unwrap(), WitnessOrd::Archived)?;
++        let consignment = artifacts
++            .and_then(|a| a.consignment_bytes.get(&asset_id).cloned())
++            .ok_or(Error::Internal { details: s!("the listing's consignment was not made") })?;
++
++        // only the colouring may have changed the outputs: same layout, commitment in output 1
++        let outs = &psbt.unsigned_tx.output;
++        if outs.len() != 3 || outs[0].script_pubkey != payout || outs[0].value.to_sat() != payout_sats || !outs[1].script_pubkey.is_op_return() || outs[2].value.to_sat() != PRESIGNED_SEAL_SATS || psbt.unsigned_tx.input.len() != 1 {
++            return Err(Error::Internal { details: s!("the listing transaction changed while colouring") });
++        }
++
++        psbt.inputs[0].sighash_type = Some(PsbtSighashType::from(TapSighashType::SinglePlusAnyoneCanPay));
++        let sign_options = SignOptions { allow_all_sighashes: true, ..Default::default() };
++        self._sign_psbt(&mut psbt, Some(sign_options))?;
++        if psbt.inputs[0].final_script_witness.is_none() {
++            return Err(Error::Internal { details: s!("the wallet could not sign its output") });
++        }
++        self.reserved_outpoints.insert(op.clone());
++        info!(self.logger, "Pre-signed listing ready");
++        Ok(PresignedSale { psbt: psbt.to_string(), consignment, template_txid, seller_outpoint: op.to_string(), seller_sats })
++    }
++
++    /// The buyer of a pre-signed listing posts the consignment (with its final transaction, see
++    /// `rust_only::complete_presigned_consignment`) for its own invoice, so its wallet accepts the tokens like any
++    /// incoming transfer.
++    pub async fn post_own_consignment(
++        &self,
++        proxy_url: String,
++        recipient_id: String,
++        consignment: Vec<u8>,
++        txid: String,
++        vout: u32,
++    ) -> Result<(), Error> {
++        let te = TransportEndpoint::new(proxy_url)?;
++        let res = self
++            .wasm_proxy_client
++            .post_consignment(&te.endpoint, recipient_id, &consignment, txid, Some(vout))
++            .await?;
++        if let Some(err) = res.error {
++            if err.message.contains("already used") {
++                return Err(Error::RecipientIDAlreadyUsed);
++            }
++            return Err(Error::InvalidTransportEndpoint { details: format!("proxy error: {}", err.message) });
++        }
++        Ok(())
++    }
++}
++
 diff --git a/src/wallet/rust_only.rs b/src/wallet/rust_only.rs
-index 7cc1b66..83a7471 100644
+index 7cc1b66..72d66cb 100644
 --- a/src/wallet/rust_only.rs
 +++ b/src/wallet/rust_only.rs
 @@ -52,6 +52,12 @@ pub struct ValidateConsignmentResult {
@@ -473,7 +858,7 @@ index 7cc1b66..83a7471 100644
          };
          let json = serde_json::to_string(&result_invalid).unwrap();
          let deserialized: ValidateConsignmentResult = serde_json::from_str(&json).unwrap();
-@@ -761,3 +858,134 @@ mod tests {
+@@ -761,3 +858,444 @@ mod tests {
          assert_eq!(IndexerProtocol::Esplora.to_string(), "Esplora");
      }
  }
@@ -607,4 +992,314 @@ index 7cc1b66..83a7471 100644
 +    let rid = inv.beneficiary.to_string();
 +    let script = crate::utils::script_buf_from_recipient_id(rid)?.ok_or(Error::InvalidRecipientData { details: s!("a swap needs a witness (wvout) invoice") })?;
 +    Ok(script.to_hex_string())
++}
++
++
++// ---- pre-signed listings: the buyer's side (no wallet needed) ----
++
++/// What a pre-signed listing's template says, after checking the seller's signature.
++#[derive(Debug, Clone, Serialize, Deserialize)]
++#[cfg_attr(feature = "camel_case", serde(rename_all = "camelCase"))]
++pub struct PresignedInfo {
++    /// the seller's output, "txid:vout"
++    pub seller_outpoint: String,
++    /// sats on it
++    pub seller_sats: u64,
++    /// its script, hex (P2TR)
++    pub seller_script: String,
++    /// output 0: the seller's payout
++    pub payout_script: String,
++    /// sats of the payout (price + `seller_sats`)
++    pub payout_sats: u64,
++    /// output 1: the RGB commitment, hex
++    pub opret_script: String,
++    /// txid of the template transaction (what the consignment names)
++    pub template_txid: String,
++}
++
++const SEAL_VOUT: usize = 2;
++const SEAL_SATS: u64 = 330;
++
++fn bad_listing(what: &str) -> Error {
++    Error::Internal { details: format!("pre-signed listing: {what}") }
++}
++
++/// Check the seller's input 0 of `tx`: a key-path signature with SIGHASH_SINGLE|ANYONECANPAY that is valid for
++/// `prev` (the output it spends). With that sighash the signature covers only input 0 and output 0, so the same
++/// check holds for the template and for the buyer's final transaction.
++fn check_seller_signature(tx: &BdkTransaction, prev: &TxOut, witness: &bdk_wallet::bitcoin::Witness) -> Result<(), Error> {
++    use bdk_wallet::bitcoin::{key::XOnlyPublicKey, secp256k1::{Message, Secp256k1, schnorr}, sighash::{Prevouts, SighashCache, TapSighashType}};
++    if !prev.script_pubkey.is_p2tr() {
++        return Err(bad_listing("the seller's output is not a taproot output"));
++    }
++    if witness.len() != 1 {
++        return Err(bad_listing("the seller's input is not a key-path signature"));
++    }
++    let sig = witness.nth(0).unwrap_or_default();
++    if sig.len() != 65 || sig[64] != TapSighashType::SinglePlusAnyoneCanPay as u8 {
++        return Err(bad_listing("the seller's signature must be SIGHASH_SINGLE|ANYONECANPAY"));
++    }
++    let key = XOnlyPublicKey::from_slice(&prev.script_pubkey.as_bytes()[2..34]).map_err(|_| bad_listing("bad seller key"))?;
++    let hash = SighashCache::new(tx)
++        .taproot_key_spend_signature_hash(0, &Prevouts::One(0, prev), TapSighashType::SinglePlusAnyoneCanPay)
++        .map_err(|e| bad_listing(&e.to_string()))?;
++    let sig = schnorr::Signature::from_slice(&sig[..64]).map_err(|_| bad_listing("bad signature"))?;
++    let msg = Message::from_digest(hash.to_byte_array());
++    Secp256k1::verification_only()
++        .verify_schnorr(&sig, &msg, &key)
++        .map_err(|_| bad_listing("the seller's signature is not valid"))
++}
++
++/// Read and check a pre-signed listing's template PSBT: one input (the seller's, signed), outputs payout /
++/// OP_RETURN with a commitment / seal, and a valid seller signature.
++pub fn presigned_listing_info(psbt: &str) -> Result<PresignedInfo, Error> {
++    let psbt = Psbt::from_str(psbt)?;
++    let tx = &psbt.unsigned_tx;
++    if tx.input.len() != 1 || psbt.inputs.len() != 1 {
++        return Err(bad_listing("the template must have the seller's input only"));
++    }
++    if tx.output.len() != 3 {
++        return Err(bad_listing("the template must have three outputs"));
++    }
++    let o = &tx.output;
++    if !o[1].script_pubkey.is_op_return() || o[1].value.to_sat() != 0 || o[1].script_pubkey.len() != 34 {
++        return Err(bad_listing("output 1 must be the RGB commitment"));
++    }
++    if o[SEAL_VOUT].value.to_sat() != SEAL_SATS {
++        return Err(bad_listing("output 2 must be the 330-sat seal"));
++    }
++    let prev = psbt.inputs[0].witness_utxo.clone().ok_or(bad_listing("the seller's input has no amount"))?;
++    let witness = psbt.inputs[0].final_script_witness.clone().ok_or(bad_listing("the seller's input is not signed"))?;
++    check_seller_signature(tx, &prev, &witness)?;
++    if o[0].value.to_sat() <= prev.value.to_sat() {
++        return Err(bad_listing("the payout must be more than the seller's output"));
++    }
++    Ok(PresignedInfo {
++        seller_outpoint: tx.input[0].previous_output.to_string(),
++        seller_sats: prev.value.to_sat(),
++        seller_script: prev.script_pubkey.to_hex_string(),
++        payout_script: o[0].script_pubkey.to_hex_string(),
++        payout_sats: o[0].value.to_sat(),
++        opret_script: o[1].script_pubkey.to_hex_string(),
++        template_txid: tx.compute_txid().to_string(),
++    })
++}
++
++/// The buyer's PSBT for a pre-signed listing: the template's input 0 (signed) and outputs 0-1 unchanged, the seal
++/// (output 2) paid to `seal_script`, then the buyer's inputs and its change (if any). The buyer signs its inputs.
++pub fn presigned_buy_psbt(template: &str, buyer_inputs: Vec<SwapInput>, seal_script: String, change: Option<SwapOutput>) -> Result<String, Error> {
++    use bdk_wallet::bitcoin::{Amount, Sequence, TxIn, Witness};
++    presigned_listing_info(template)?;
++    if buyer_inputs.is_empty() {
++        return Err(bad_listing("the buyer pays with at least one input"));
++    }
++    let t = Psbt::from_str(template)?;
++    let mut tx = t.unsigned_tx.clone();
++    tx.output[SEAL_VOUT].script_pubkey = script_from_hex(&seal_script)?;
++    for i in &buyer_inputs {
++        let op = parse_outpoint(&i.outpoint)?;
++        if op == tx.input[0].previous_output {
++            return Err(bad_listing("the buyer can't pay with the seller's output"));
++        }
++        tx.input.push(TxIn { previous_output: op, script_sig: ScriptBuf::new(), sequence: Sequence::ENABLE_RBF_NO_LOCKTIME, witness: Witness::new() });
++    }
++    if let Some(c) = &change {
++        let script = c.script.as_deref().ok_or(bad_listing("the change needs a script"))?;
++        tx.output.push(TxOut { value: Amount::from_sat(c.sats), script_pubkey: script_from_hex(script)? });
++    }
++    let mut psbt = Psbt::from_unsigned_tx(tx).map_err(|e| Error::Internal { details: e.to_string() })?;
++    psbt.inputs[0] = t.inputs[0].clone();
++    for (k, i) in buyer_inputs.iter().enumerate() {
++        psbt.inputs[k + 1].witness_utxo = Some(TxOut { value: Amount::from_sat(i.sats), script_pubkey: script_from_hex(&i.script)? });
++        if let Some(h) = &i.tx {
++            let bytes = <Vec<u8> as bdk_wallet::bitcoin::hex::FromHex>::from_hex(h.trim()).map_err(|_| bad_listing("bad previous transaction hex"))?;
++            let prev: BdkTransaction = bdk_wallet::bitcoin::consensus::deserialize(&bytes).map_err(|_| bad_listing("bad previous transaction"))?;
++            if prev.compute_txid() != psbt.unsigned_tx.input[k + 1].previous_output.txid {
++                return Err(bad_listing("previous transaction does not match the input"));
++            }
++            psbt.inputs[k + 1].non_witness_utxo = Some(prev);
++        }
++    }
++    let ins: u64 = psbt.inputs.iter().map(|i| i.witness_utxo.as_ref().map(|o| o.value.to_sat()).unwrap_or(0)).sum();
++    let outs: u64 = psbt.unsigned_tx.output.iter().map(|o| o.value.to_sat()).sum();
++    if ins < outs {
++        return Err(bad_listing("the buyer's inputs don't cover the price"));
++    }
++    Ok(psbt.to_string())
++}
++
++/// The buyer's final check before broadcasting: `final_tx` (hex, signed) still has the template's input 0, payout
++/// and commitment, the seal at output 2 pays `seal_script`, and the seller's signature is valid for it.
++pub fn check_presigned_final(template: &str, final_tx: &str, seal_script: &str) -> Result<String, Error> {
++    let t = Psbt::from_str(template)?;
++    let bytes = <Vec<u8> as bdk_wallet::bitcoin::hex::FromHex>::from_hex(final_tx.trim()).map_err(|_| bad_listing("bad transaction hex"))?;
++    let tx: BdkTransaction = bdk_wallet::bitcoin::consensus::deserialize(&bytes).map_err(|_| bad_listing("bad transaction"))?;
++    let tt = &t.unsigned_tx;
++    if tx.version != tt.version || tx.lock_time != tt.lock_time || tx.input.is_empty() || tx.output.len() < 3 {
++        return Err(bad_listing("the transaction does not follow the template"));
++    }
++    if tx.input[0].previous_output != tt.input[0].previous_output || tx.input[0].sequence != tt.input[0].sequence {
++        return Err(bad_listing("input 0 must be the seller's output"));
++    }
++    if tx.output[0] != tt.output[0] || tx.output[1] != tt.output[1] {
++        return Err(bad_listing("the payout or the commitment changed"));
++    }
++    if tx.output[SEAL_VOUT].script_pubkey != script_from_hex(seal_script)? || tx.output[SEAL_VOUT].value.to_sat() != SEAL_SATS {
++        return Err(bad_listing("the seal does not pay the buyer"));
++    }
++    if tx.output.iter().skip(1).filter(|o| o.script_pubkey.is_op_return()).count() != 1 {
++        return Err(bad_listing("only one OP_RETURN"));
++    }
++    let prev = t.inputs[0].witness_utxo.clone().ok_or(bad_listing("the seller's input has no amount"))?;
++    check_seller_signature(&tx, &prev, &tx.input[0].witness)?;
++    Ok(tx.compute_txid().to_string())
++}
++
++/// The signed transaction of a finalized PSBT, hex (every input must be finalized).
++pub fn psbt_extract_hex(psbt: &str) -> Result<String, Error> {
++    let psbt = Psbt::from_str(psbt)?;
++    if psbt.inputs.iter().any(|i| i.final_script_witness.is_none() && i.final_script_sig.is_none()) {
++        return Err(bad_listing("an input is not signed"));
++    }
++    let tx = psbt.extract_tx_unchecked_fee_rate();
++    Ok(bdk_wallet::bitcoin::consensus::encode::serialize_hex(&tx))
++}
++
++/// The listing's consignment with the buyer's final transaction in place of the template: the transition, its
++/// anchor and the commitment are the same, only the witness transaction (and so its id) changes.
++pub fn complete_presigned_consignment(consignment_bytes: &[u8], template_txid: &str, final_tx: &str) -> Result<Vec<u8>, Error> {
++    let bytes = <Vec<u8> as bdk_wallet::bitcoin::hex::FromHex>::from_hex(final_tx.trim()).map_err(|_| bad_listing("bad transaction hex"))?;
++    let tx: BdkTransaction = bdk_wallet::bitcoin::consensus::deserialize(&bytes).map_err(|_| bad_listing("bad transaction"))?;
++    let template = RgbTxid::from_str(template_txid.trim()).map_err(|_| bad_listing("bad template txid"))?;
++    let mut consignment = RgbTransfer::load(consignment_bytes).map_err(|e| bad_listing(&format!("can't read the consignment: {e}")))?;
++    let mut bundles = consignment.bundles.clone().release();
++    let mut found = 0;
++    for wb in bundles.iter_mut() {
++        if wb.witness_id() == template {
++            wb.pub_witness = PubWitness::Tx(tx.clone());
++            found += 1;
++        }
++    }
++    if found == 0 {
++        return Err(bad_listing("the consignment has no transfer for the template"));
++    }
++    consignment.bundles = Confined::try_from(bundles).map_err(|_| bad_listing("too many bundles"))?;
++    let mut out = Vec::new();
++    consignment.save(&mut out).map_err(|e| bad_listing(&e.to_string()))?;
++    Ok(out)
++}
++
++#[cfg(test)]
++mod presigned_tests {
++    use super::*;
++    use bdk_wallet::bitcoin::{Amount, Sequence, TxIn, Witness, absolute::LockTime, transaction::Version};
++    use bdk_wallet::bitcoin::key::{Keypair, TapTweak};
++    use bdk_wallet::bitcoin::secp256k1::{Message, Secp256k1, SecretKey};
++    use bdk_wallet::bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
++
++    fn p2tr(byte: u8) -> ScriptBuf { script_from_hex(&("5120".to_string() + &format!("{byte:02x}").repeat(32))).unwrap() }
++
++    /// A template like `presign_sale` makes, signed by a test key.
++    fn template(sighash: TapSighashType) -> (String, TxOut) {
++        let secp = Secp256k1::new();
++        let kp = Keypair::from_secret_key(&secp, &SecretKey::from_slice(&[7u8; 32]).unwrap());
++        let (xonly, _) = kp.x_only_public_key();
++        let tweaked = kp.tap_tweak(&secp, None);
++        let seller = ScriptBuf::new_p2tr(&secp, xonly, None);
++        let prev = TxOut { value: Amount::from_sat(1000), script_pubkey: seller };
++        let mut commit = vec![0x6a, 0x20];
++        commit.extend([9u8; 32]);
++        let tx = BdkTransaction {
++            version: Version::TWO,
++            lock_time: LockTime::ZERO,
++            input: vec![TxIn { previous_output: parse_outpoint(&format!("{}:1", "ab".repeat(32))).unwrap(), script_sig: ScriptBuf::new(), sequence: Sequence::ENABLE_RBF_NO_LOCKTIME, witness: Witness::new() }],
++            output: vec![
++                TxOut { value: Amount::from_sat(51000), script_pubkey: p2tr(0x11) },
++                TxOut { value: Amount::ZERO, script_pubkey: ScriptBuf::from_bytes(commit) },
++                TxOut { value: Amount::from_sat(330), script_pubkey: p2tr(0x11) },
++            ],
++        };
++        let all = [prev.clone()];
++        let mut cache = SighashCache::new(&tx);
++        let hash = if sighash == TapSighashType::SinglePlusAnyoneCanPay {
++            cache.taproot_key_spend_signature_hash(0, &Prevouts::One(0, &prev), sighash).unwrap()
++        } else {
++            cache.taproot_key_spend_signature_hash(0, &Prevouts::All(&all), sighash).unwrap()
++        };
++        let sig = secp.sign_schnorr_no_aux_rand(&Message::from_digest(hash.to_byte_array()), &tweaked.to_keypair());
++        let mut s = sig.as_ref().to_vec();
++        s.push(sighash as u8);
++        let mut psbt = Psbt::from_unsigned_tx(tx).unwrap();
++        psbt.inputs[0].witness_utxo = Some(prev.clone());
++        psbt.inputs[0].final_script_witness = Some(Witness::from_slice(&[s]));
++        (psbt.to_string(), prev)
++    }
++
++    #[test]
++    fn presigned_template_and_buy() {
++        let (t, _) = template(TapSighashType::SinglePlusAnyoneCanPay);
++        let info = presigned_listing_info(&t).unwrap();
++        assert_eq!(info.payout_sats, 51000);
++        assert_eq!(info.seller_sats, 1000);
++        assert_eq!(info.template_txid.len(), 64);
++
++        // the buyer adds its coin and change, puts its seal address: the seller's signature still holds
++        let buyer = "5120".to_string() + &"22".repeat(32);
++        let seal = "5120".to_string() + &"33".repeat(32);
++        let inputs = vec![SwapInput { outpoint: format!("{}:0", "cd".repeat(32)), sats: 60000, script: buyer.clone(), tx: None }];
++        let change = Some(SwapOutput { script: Some(buyer.clone()), sats: 60000 + 1000 - 51000 - 330 - 700 });
++        let p = presigned_buy_psbt(&t, inputs.clone(), seal.clone(), change).unwrap();
++        let psbt = Psbt::from_str(&p).unwrap();
++        assert_eq!(psbt.unsigned_tx.input.len(), 2);
++        assert_eq!(psbt.unsigned_tx.output.len(), 4);
++        assert!(psbt.inputs[0].final_script_witness.is_some(), "the seller's signature is kept");
++        let mut tx = psbt.unsigned_tx.clone();
++        tx.input[0].witness = psbt.inputs[0].final_script_witness.clone().unwrap();
++        tx.input[1].witness = Witness::from_slice(&[vec![1u8; 64]]);
++        let hex = bdk_wallet::bitcoin::consensus::encode::serialize_hex(&tx);
++        let txid = check_presigned_final(&t, &hex, &seal).unwrap();
++        // from the PSBT itself, once every input is finalized
++        let mut fin = psbt.clone();
++        assert!(psbt_extract_hex(&fin.to_string()).is_err(), "the buyer's input isn't signed yet");
++        fin.inputs[1].final_script_witness = Some(Witness::from_slice(&[vec![1u8; 64]]));
++        assert_eq!(psbt_extract_hex(&fin.to_string()).unwrap(), hex);
++        assert_ne!(txid, info.template_txid);
++
++        // the seal must pay the buyer; the payout and the commitment can't change; a second OP_RETURN is refused
++        assert!(check_presigned_final(&t, &hex, &buyer).is_err());
++        let mut less = tx.clone();
++        less.output[0].value = Amount::from_sat(50000);
++        assert!(check_presigned_final(&t, &bdk_wallet::bitcoin::consensus::encode::serialize_hex(&less), &seal).is_err());
++        let mut other = tx.clone();
++        other.output[1].script_pubkey = ScriptBuf::new_op_return([1u8; 32]);
++        assert!(check_presigned_final(&t, &bdk_wallet::bitcoin::consensus::encode::serialize_hex(&other), &seal).is_err());
++        let mut two = tx.clone();
++        two.output.push(TxOut { value: Amount::ZERO, script_pubkey: ScriptBuf::new_op_return([2u8; 32]) });
++        assert!(check_presigned_final(&t, &bdk_wallet::bitcoin::consensus::encode::serialize_hex(&two), &seal).is_err());
++
++        // not enough bitcoin
++        let poor = vec![SwapInput { outpoint: format!("{}:0", "cd".repeat(32)), sats: 100, script: buyer.clone(), tx: None }];
++        assert!(presigned_buy_psbt(&t, poor, seal.clone(), None).is_err());
++        // the seller's own output can't be the buyer's coin
++        let own = vec![SwapInput { outpoint: format!("{}:1", "ab".repeat(32)), sats: 90000, script: buyer, tx: None }];
++        assert!(presigned_buy_psbt(&t, own, seal, None).is_err());
++    }
++
++    #[test]
++    fn presigned_refuses_other_sighashes_and_bad_signatures() {
++        // SIGHASH_ALL would be valid but useless (no one could add inputs): refused
++        let (t, _) = template(TapSighashType::All);
++        assert!(presigned_listing_info(&t).is_err());
++        // a signature for another payout
++        let (t, _) = template(TapSighashType::SinglePlusAnyoneCanPay);
++        let mut psbt = Psbt::from_str(&t).unwrap();
++        psbt.unsigned_tx.output[0].value = Amount::from_sat(99000);
++        assert!(presigned_listing_info(&psbt.to_string()).unwrap_err().to_string().contains("not valid"));
++        // unsigned
++        let mut psbt = Psbt::from_str(&t).unwrap();
++        psbt.inputs[0].final_script_witness = None;
++        assert!(presigned_listing_info(&psbt.to_string()).is_err());
++        // not a consignment
++        assert!(complete_presigned_consignment(&[1, 2, 3], &"ab".repeat(32), "00").is_err());
++    }
 +}

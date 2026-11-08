@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build MASKED's RGB engine: UTEXO's rgb-lib-wasm v1.0.0-beta.3 (the version MASKED ships) plus masked-swap.patch
-# (peer-to-peer swaps: swapBegin, newSwapPsbt, verifySwapPsbt, …). Output: vendor/rgb-lib-wasm/, which
+# (peer-to-peer swaps: colorSwap, newSwapPsbt, verifySwapPsbt, …; pre-signed listings: presignSale, presignedBuyPsbt, …). Output: vendor/rgb-lib-wasm/, which
 # `npm run build` uses instead of the npm package.
 #
 # Needs: git, Rust (rustup) with the wasm32 target, wasm-pack 0.14, and a C compiler that targets WebAssembly
@@ -24,12 +24,12 @@ rm -rf "$work"; mkdir -p "$(dirname "$work")"
 git clone --quiet --depth 1 --branch "$tag" https://github.com/UTEXO-Protocol/rgb-lib-wasm.git "$work"
 [[ "$(git -C "$work" rev-parse HEAD)" == "$commit" ]] || { echo "Upstream $tag is not $commit any more. Stop."; exit 1; }
 git -C "$work" apply "$here/masked-swap.patch"
-(cd "$work" && cargo test --locked --lib swap_ -q)            # the swap PSBT checks, natively
+(cd "$work" && cargo test --locked --lib swap_ -q && cargo test --locked --lib presigned -q)   # swap and listing checks, natively
 (cd "$work/bindings/wasm" && wasm-pack build --release --target web --out-dir pkg)
 
 out="$root/vendor/rgb-lib-wasm"; rm -rf "$out"; mkdir -p "$out"
 cp "$work/bindings/wasm/pkg/"rgb_lib_wasm_bindings* "$out/"
 node -e "require('fs').writeFileSync('$out/package.json', JSON.stringify({name:'@utexo/rgb-lib-wasm',version:'1.0.0-beta.3+masked-swap',type:'module',main:'rgb_lib_wasm_bindings.js',types:'rgb_lib_wasm_bindings.d.ts'},null,2))"
-grep -q newSwapPsbt "$out/rgb_lib_wasm_bindings.d.ts" || { echo "The built engine has no swap functions. Stop."; exit 1; }
+grep -q newSwapPsbt "$out/rgb_lib_wasm_bindings.d.ts" && grep -q presignSale "$out/rgb_lib_wasm_bindings.d.ts" || { echo "The built engine has no swap functions. Stop."; exit 1; }
 shasum -a 256 "$out/rgb_lib_wasm_bindings_bg.wasm"
 echo "Engine with swaps in vendor/rgb-lib-wasm. Now: npm run build"

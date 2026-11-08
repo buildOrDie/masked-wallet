@@ -63,6 +63,18 @@ export const RGB_BLIND_MIN = 2000;
  * RGB inside the wallet. It opens by itself while the wallet is open on Signet: its test keys are encrypted with a
  * key derived from the wallet's own recovery words, so there is no second password.
  */
+/** Send a signed Instant listing to its market (the seller token proves it's this seller's offer). */
+async function publishInstant(e, v) {
+  if (!e?.market || !e?.token || !v?.psbt) return false;
+  const r = await fetch(`${e.market}/api/swap/offers/${encodeURIComponent(v.offerId)}/presigned`, {
+    method: 'POST', credentials: 'omit', cache: 'no-store',
+    headers: { 'content-type': 'application/json', 'x-swap-token': e.token },
+    body: JSON.stringify({ psbt: v.psbt, consignment: v.consignment, templateTxid: v.templateTxid, sellerOutpoint: v.sellerOutpoint }),
+  });
+  // a refusal (offer cancelled or closed on the market) is final too: don't send it again
+  return r.ok || (r.status >= 400 && r.status < 500);
+}
+
 export class WalletRgb {
   constructor(app) {
     this.app = app;
@@ -419,6 +431,33 @@ export class WalletRgb {
     full ||= this.needsScan();
     this.data = await this.service.snapshot({ full }); this.saved = false;
     if (full) try { localStorage.setItem(`${this.profile.vaultKey}.scanned-v2`, '1'); } catch { /* scans again next time */ }
+    await this.instantCheck();
+  }
+  /** A listing signed here but not yet on its market: send it (and say whether that worked). */
+  async publishPending() {
+    for (const [id, e] of Object.entries(this.service?.instantStore?.().all() || {})) {
+      if (e?.role !== 'seller' || e.stage !== 'ready' || e.published) continue;
+      if (await publishInstant(e, { offerId: id, psbt: e.psbt, consignment: e.consignment, templateTxid: e.templateTxid, sellerOutpoint: e.coin }).catch(() => false)) this.service.instantStore().set(id, { ...e, published: true });
+    }
+  }
+  /** Instant listings: sign the ones whose tokens settled, notice sales and cancels; finish bought ones. */
+  async instantCheck() {
+    if (!this.service?.canPresign) return;
+    let changes = [];
+    try { changes = await this.service.instantProgress(); } catch { return; }
+    for (const c of changes) {
+      if (c.stage === 'sold') this.app.toast('Instant listing sold. The bitcoin is in your RGB wallet once the transaction confirms.');
+      if (c.stage === 'ready') {
+        // signed after the tokens moved: hand the listing to the market it was made on
+        const e = this.service.instantStore().get(c.offerId);
+        const ok = await publishInstant(e, c).catch(() => false);
+        this.app.toast(ok ? 'Instant listing is live: buyers can buy it now, even with MASKED closed.' : 'Instant listing signed. Open the market and tap Publish on it.');
+      }
+      if (c.stage === 'cancelled') this.app.toast('Listing cancelled. Your tokens moved to a new output.');
+    }
+    await this.publishPending().catch(() => {});
+    if (changes.length && this.isMain && this.cloudOn) this.cloudSave().catch(() => {});
+    if (changes.length) this.app.render?.();
   }
   async close() {
     clearInterval(this.timer); this.timer = null; clearTimeout(this.cloudTimer); this.cloudTimer = null; this.cloudAsk = false;

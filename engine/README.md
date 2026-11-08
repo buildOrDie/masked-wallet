@@ -2,7 +2,7 @@
 
 MASKED's RGB engine is UTEXO's [rgb-lib-wasm](https://github.com/UTEXO-Protocol/rgb-lib-wasm) `v1.0.0-beta.3`
 (MIT), the same version MASKED ships from npm, plus [`masked-swap.patch`](masked-swap.patch), which adds peer-to-peer
-swaps:
+swaps and pre-signed (Instant) listings:
 
 | Function | What it does |
 | --- | --- |
@@ -12,8 +12,15 @@ swaps:
 | `WasmWallet.verifySwapPsbt(psbt, inputs, outputs, feeSats)` | Refuses any change of input, output, amount or fee, before signing |
 | `WasmWallet.psbtOutpoints(psbt)`, `psbtTxid(psbt)`, `witnessSealScript(invoice)` | Read a PSBT and an invoice |
 | `validateConsignmentOffchain(bytes, txid, network, sealVout?)` | Also returns `contractId` and, with a seal output, `sealAmount` |
+| `wallet.presignSale(online, assetId, amount, outpoint, payoutScript, priceSats, minConf)` | Instant listing: colours a template (input 0 the seller's output, output 0 payout, 1 OP_RETURN, 2 the buyer's 330-sat seal) and signs input 0 with SIGHASH_SINGLE\|ANYONECANPAY. Refuses an output holding anything but exactly `amount` of this asset |
+| `wallet.setReservedOutpoints(list)`, `wallet.markOutpointSpent(outpoint)` | Outputs promised to listings are never used for sends, change or receives; a sold one leaves the balance |
+| `wallet.postOwnConsignment(proxy, recipientId, bytes, txid, vout)` | The buyer hands the completed transfer to its own invoice, so it's accepted like any incoming one |
+| `WasmWallet.presignedListingInfo(psbt)` | Checks a listing's layout and the seller's signature (valid for any completion, by the sighash) |
+| `WasmWallet.presignedBuyPsbt(template, inputs, sealScript, change)`, `checkPresignedFinal(template, txHex, sealScript)`, `psbtExtractHex(psbt)` | The buyer's transaction: template input and outputs 0-1 unchanged, its seal, inputs and change |
+| `WasmWallet.completePresignedConsignment(bytes, templateTxid, txHex)` | The listing's consignment with the final transaction as its witness (the commitment doesn't depend on it) |
 
 It also lets `sendEnd` broadcast a transaction with an input that isn't the wallet's (the other side of a swap).
+Native tests: `cargo test --lib swap_` and `cargo test --lib presigned` (real Schnorr signatures).
 The patch changes nothing else, so wallets made with the npm engine open unchanged.
 
 ## Build

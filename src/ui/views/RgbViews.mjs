@@ -365,6 +365,7 @@ export class RgbSettings {
         <button class="btn ghost wide" data-rgb="backup" ${r.busy ? 'disabled' : ''}>Save RGB backup file</button>
         <p class="muted small">${r.fileAt ? `Last file: ${ago(r.fileAt)}. ` : 'No backup file saved from this browser yet. '}${r.isMain && r.cloudOn ? (r.cloud.error || r.service?.backupRequired ? 'Changes since the last cloud backup are not saved anywhere yet.' : 'The cloud backup has every change.') : r.service?.backupRequired ? 'Changed since your last RGB backup.' : 'Backup up to date.'} Restoring needs this same MASKED wallet.</p>
         ${RgbSettings.auto(r)}
+        ${RgbSettings.instant(r)}
         <button class="btn ghost wide" data-rgb="off" ${r.busy ? 'disabled' : ''}>Turn off RGB for now</button>
         ${r.isMain ? `<button class="btn ghost wide" data-rgb="betaOff" ${r.busy ? 'disabled' : ''}>Switch off RGB beta</button>` : ''}` : `
         ${r.exists ? '' : `<button class="btn primary wide" data-rgb="on" ${r.busy ? 'disabled' : ''}>Turn on RGB</button>`}`}
@@ -380,6 +381,18 @@ export class RgbSettings {
       <p class="muted small">${r.autoOn ? 'Offers you approve for it complete by themselves when a buyer comes, while Chrome is open: MASKED keeps the RGB wallet\'s key in Chrome\'s memory (never on disk) until you close Chrome or switch this off.' : 'When on, offers you approve for it complete by themselves when a buyer comes, without asking you. Only for the exact token, amount and price you approved.'}</p>
       ${rows ? `<ul class="auto-list">${rows}</ul>` : ''}
       <button class="btn ghost wide" data-rgb="${r.autoOn ? 'autoOff' : 'autoOn'}" ${r.busy ? 'disabled' : ''}>${r.autoOn ? 'Switch off' : 'Switch on'}</button></div>`;
+  }
+  /** Settings → RGB → Instant listings: each one's state (signed listings are bought with MASKED closed). */
+  static instant(r) {
+    let list = [];
+    try { list = r.service?.instantListings?.() || []; } catch { list = []; }
+    list = list.filter((e) => e.stage !== 'cancelled' || Date.now() - (e.at || 0) < 86400_000).slice(0, 20);
+    if (!list.length) return '';
+    const label = { moving: 'moving the tokens to their own output, live after it confirms', ready: 'live: anyone can buy it', cancelling: 'cancelling: waiting for the transaction to confirm', cancelled: 'cancelled', sold: 'sold' };
+    const rows = list.map((e) => `<li><span>${esc(Number(e.amount).toLocaleString('en-US'))} <span class="mono">${esc(short(e.assetId, 6))}</span> for ${esc(Number(e.priceSats).toLocaleString('en-US'))} sats<small class="muted">${esc(label[e.stage] || e.stage)}</small></span></li>`).join('');
+    return `<div class="cloud-box"><div class="cloud-h"><b>Instant listings</b><span class="muted small">${list.filter((e) => e.stage === 'ready').length} live</span></div>
+      <p class="muted small">Signed once, bought any time, even with MASKED closed. Cancel one on the market: that moves its tokens so the signature can't be used.</p>
+      <ul class="auto-list">${rows}</ul></div>`;
   }
   /** Settings → RGB → cloud backup: status, and the switch. */
   static cloud(r) {

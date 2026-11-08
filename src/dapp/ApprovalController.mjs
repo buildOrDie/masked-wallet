@@ -10,8 +10,8 @@ import { toBase } from '../rgb/config.mjs';
 import { proxyUrl } from '../rgb/WalletRgb.mjs';
 
 /** Methods whose approve button waits for a prepared transaction. */
-export const NEEDS_PREP = ['sendBitcoin', 'inscribeTransfer', 'shareTrade', 'fundTrade', 'moveToTrade', 'returnToShielded', 'cancelShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbInvoice', 'rgbPay', 'rgbSwapAvailable', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbAutoSell'];
-const SWAP_METHODS = ['rgbSwapAvailable', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbAutoSell'];
+export const NEEDS_PREP = ['sendBitcoin', 'inscribeTransfer', 'shareTrade', 'fundTrade', 'moveToTrade', 'returnToShielded', 'cancelShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbInvoice', 'rgbPay', 'rgbSwapAvailable', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbAutoSell', 'rgbInstantList', 'rgbInstantBuy', 'rgbInstantCancel'];
+const SWAP_METHODS = ['rgbSwapAvailable', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbAutoSell', 'rgbInstantList', 'rgbInstantBuy', 'rgbInstantCancel'];
 const RGB_METHODS = ['rgbInvoice', 'rgbPay', ...SWAP_METHODS];
 const SWAP_SIZE_VB = 320;
 const hostOf = (u) => { try { return new URL(proxyUrl(u)).host; } catch { return String(u); } };
@@ -206,6 +206,21 @@ export class ApprovalController {
         const rate = P.feeRate || Number(r.fee());
         return { ...base, fee: Math.ceil(rate * SWAP_SIZE_VB), rate };
       }
+      if (m === 'rgbInstantList' || m === 'rgbInstantBuy' || m === 'rgbInstantCancel') {
+        if (!r.service.canPresign) throw new Error('This MASKED version can\'t do Instant listings yet. Update MASKED.');
+        const rate = P.feeRate || Number(r.fee());
+        const fee = Math.ceil(rate * SWAP_SIZE_VB);
+        if (m === 'rgbInstantBuy') return { ...base, fee, rate };
+        if (m === 'rgbInstantList') {
+          if (!asset) throw new Error('You don\'t hold this token in RGB.');
+          if (Number(o.amount) > r.bal(asset).spendable) throw new Error(`You can sell up to ${r.amount(asset, r.bal(asset).spendable)} ${asset.ticker}.`);
+          let host = ''; try { host = new URL(P.market).host; } catch { throw new Error('The market address is not valid.'); }
+          return { ...base, fee, rate, market: host };
+        }
+        const e = r.service.instantStore().get(P.offerId);
+        if (!e || e.role !== 'seller') throw new Error('This wallet has no Instant listing with that id.');
+        return { ...base, fee: e.stage === 'ready' ? fee : 0, rate, stage: e.stage };
+      }
       if (m === 'rgbAutoSell') {
         if (!asset) throw new Error('You don\'t hold this token in RGB.');
         if (Number(o.amount) > r.bal(asset).spendable) throw new Error(`You can sell up to ${r.amount(asset, r.bal(asset).spendable)} ${asset.ticker}.`);
@@ -392,6 +407,27 @@ export class ApprovalController {
         return out;
       });
       case 'rgbBuySign': return this.rgbBusy(async () => { prepared(''); return app.rgb.service.signBuy(a.params); });
+      case 'rgbInstantList': return this.rgbBusy(async () => {
+        prepared(''); const r = app.rgb, P = a.params, o = P.offer;
+        await this.rgbBackedUp(r);
+        const out = await r.service.instantList({ offerId: P.offerId, assetId: o.assetId, amount: o.amount, priceSats: o.priceSats, feeRate: P.feeRate || Number(r.fee()), market: P.market, token: P.token });
+        await r.refresh().catch(() => {});
+        await this.rgbBackedUp(r).catch(() => {});
+        return out;
+      });
+      case 'rgbInstantBuy': return this.rgbBusy(async () => {
+        prepared(''); const r = app.rgb, P = a.params;
+        const out = await r.service.instantBuy({ ...P, feeRate: P.feeRate || Number(r.fee()) });
+        await r.refresh().catch(() => {});
+        return out;
+      });
+      case 'rgbInstantCancel': return this.rgbBusy(async () => {
+        prepared(''); const r = app.rgb, P = a.params;
+        const out = await r.service.instantCancel({ offerId: P.offerId, feeRate: P.feeRate || Number(r.fee()) });
+        await r.refresh().catch(() => {});
+        await this.rgbBackedUp(r).catch(() => {});
+        return out;
+      });
       case 'rgbAutoSell': return this.rgbBusy(async () => {
         prepared(''); const r = app.rgb;
         if (!r.autoOn && !app.state.f.apRisk) throw new Error('Tick the box to switch on Sell automatically.');

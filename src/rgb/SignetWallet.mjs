@@ -38,6 +38,8 @@ export class SignetWallet {
       this.wallet = wallet;
       try {
         await wallet.init();
+        // outputs promised to Instant listings: before anything else can spend them
+        wallet.reserve?.(this.instantReserved());
         if (backup) {
           if (typeof payload.rgbBackup !== 'string') throw new Error('Backup does not contain RGB state.');
           await wallet.restoreFromBackupBytes(unb64(payload.rgbBackup), password);
@@ -150,6 +152,38 @@ export class SignetWallet {
       del: (id) => { const m = read(); delete m[String(id)]; write(m); },
     };
   }
+  /** Instant listings and purchases, kept until done (listings last up to 30 days). */
+  instantStore() {
+    const key = `${this.vaultKey}.swaps.instant`;
+    const read = () => { try { return JSON.parse(this.storage.getItem(key) || '{}'); } catch { return {}; } };
+    const write = (m) => this.storage.setItem(key, JSON.stringify(m));
+    const finished = (x) => ['sold', 'cancelled'].includes(x?.stage) || (x?.role === 'buyer' && x?.posted);
+    return {
+      all: read,
+      get: (id) => read()[String(id)] || null,
+      set: (id, v) => { const m = read(); m[String(id)] = v; for (const [k, x] of Object.entries(m)) if (finished(x) && Date.now() - (x?.at || 0) > 7 * 86400_000) delete m[k]; write(m); },
+      del: (id) => { const m = read(); delete m[String(id)]; write(m); },
+    };
+  }
+  /** The outputs promised to this wallet's open Instant listings. */
+  instantReserved() {
+    return Object.values(this.instantStore().all()).filter((e) => e?.role === 'seller' && ['moving', 'ready'].includes(e.stage) && e.coin).map((e) => String(e.coin));
+  }
+  get canPresign() { return !!this.wallet?.canPresign; }
+  instantList(p) { return this.mutate((w) => w.instantList(p, this.instantStore())); }
+  instantBuy(p) { return this.mutate((w) => w.instantBuy(p, this.instantStore())); }
+  instantCancel(p) { return this.mutate((w) => w.instantCancel(p, this.instantStore())); }
+  /** After a refresh: sign settled listings, notice sales and cancels, hand bought transfers to the wallet. */
+  instantProgress() {
+    return this.mutate(async (w) => {
+      if (!w.canPresign) return [];
+      const store = this.instantStore(), all = store.all();
+      for (const [id, e] of Object.entries(all)) if (e?.role === 'buyer' && !e.posted) await w.instantPost(id, store).catch(() => false);
+      return w.instantProgress(store, all);
+    });
+  }
+  /** This wallet's Instant listings: [{ offerId, stage, txid, … }]. */
+  instantListings() { return Object.entries(this.instantStore().all()).filter(([, e]) => e?.role === 'seller').map(([id, e]) => ({ offerId: id, stage: e.stage, assetId: e.assetId, amount: e.amount, priceSats: e.priceSats, txid: e.soldTxid || e.cancelTxid || e.moveTxid || null, at: e.at })); }
   get canSwap() { return !!this.wallet?.canSwap; }
   offerableAmount(p) { return this.exclusive(() => this.requireWallet().offerableAmount(p)); }
   prepareBuy(p) { return this.mutate((w) => w.prepareBuy(p, this.swapStore('bought'))); }

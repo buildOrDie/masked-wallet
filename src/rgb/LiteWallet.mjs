@@ -4,8 +4,8 @@
 // SignetWallet works with either.
 
 import * as btc from '@scure/btc-signer';
-import { hex } from '@scure/base';
-import { SEAL_SATS, SEAL_OUTPUT, SWAP_SIZE_VB, b64, buyerOutputs, outpointOf, completionBlocker, readOffer, buyerCoinFor, sellerCoinFor, offerable, payoutFor, changedTerms, unb64 } from './swap.mjs';
+import { hex, base64 } from '@scure/base';
+import { SEAL_SATS, SEAL_OUTPUT, SWAP_SIZE_VB, b64, buyerOutputs, outpointOf, completionBlocker, readOffer, buyerCoinFor, offerable, payoutFor, changedTerms, unb64, exactCoinFor, freeSellerCoinFor, INSTANT_SEAL_OUTPUT, INSTANT_SEAL_SATS } from './swap.mjs';
 
 /** rgb-lib names for our network ids. Utexo's custom Signet uses Signet rules too. */
 const NETWORKS = { mainnet: 'Mainnet', signet: 'Signet', utexo: 'Signet', testnet: 'Testnet', testnet4: 'Testnet4', regtest: 'Regtest' };
@@ -305,7 +305,7 @@ export class LiteWallet {
     const online = this.requireOnline();
     await this.wallet.sync(online);
     if ((await this.ownOutpoints()).has(buyerOutpoint)) throw new Error('The buyer\'s input is one of this wallet\'s own.');
-    const mine = sellerCoinFor(plain(this.wallet.listUnspents(false)) || [], o.assetId, o.amount);
+    const mine = freeSellerCoinFor(plain(this.wallet.listUnspents(false)) || [], o.assetId, o.amount, this.reserved);
     if (!mine) throw new Error('No settled RGB output of this wallet holds that much of the token. Wait for incoming transfers to settle.');
     const [si, bi] = await Promise.all([this.outpointInfo(mine.outpoint), this.outpointInfo(buyerOutpoint)]);
     const fee = BigInt(s.feeSats), change = BigInt(bi.sats) - o.priceSats - fee;
@@ -366,6 +366,204 @@ export class LiteWallet {
     store.set(String(offerId), { ...sale, psbt: undefined, consignment: undefined, sent: String(r?.txid || txid), at: Date.now() });
     await this.save();
     return { txid: String(r?.txid || txid) };
+  }
+
+  // ---- Instant listings: pre-signed once, bought with the seller offline (engine: presign_sale) ----
+  // Seller: the tokens go to their own output first if needed (one transaction), then MASKED signs that output with
+  // SIGHASH_SINGLE|ANYONECANPAY: valid only with output 0 paying the seller its price. The output stays reserved in
+  // the engine (never used for anything else) until it's sold or the listing is cancelled (which moves it).
+  get canPresign() { return typeof this.wallet.presignSale === 'function' && typeof this.lib.WasmWallet?.presignedBuyPsbt === 'function'; }
+  requirePresign() { if (!this.canPresign) throw new Error('This MASKED build can\'t make Instant listings yet. Update MASKED.'); }
+  /** @type {Set<string>} */
+  get reserved() { return this._reserved || new Set(); }
+  /** The outputs promised to Instant listings; the engine never spends, receives on or adds change to them. */
+  reserve(list) {
+    this._reserved = new Set((list || []).map(String));
+    if (typeof this.wallet?.setReservedOutpoints === 'function') this.wallet.setReservedOutpoints([...this._reserved]);
+  }
+  async esplora(path, init) {
+    const base = this.indexer || this.indexers()[0];
+    const r = await fetch(`${base}${path}`, init);
+    if (!r.ok) throw new Error(`Block server: ${(await r.text().catch(() => '')).slice(0, 160) || r.status}`);
+    return r;
+  }
+  /** Move the tokens of a listing onto an output of their own (or a listed output back, when cancelling). */
+  async instantMove(assetId, amount, from, feeRate) {
+    const online = this.requireOnline();
+    const fee = BigInt(Math.ceil(Math.max(1, Number(feeRate) || 1) * SWAP_SIZE_VB));
+    const coin = buyerCoinFor(await this.wallet.listUnspentsVanilla(online, 1, false), fee + BigInt(INSTANT_SEAL_SATS));
+    if (!coin) throw new Error(`Your RGB wallet needs one confirmed bitcoin output over ${(fee + BigInt(INSTANT_SEAL_SATS)).toLocaleString('en-US')} sats for the network fee. Tap Add BTC for RGB on Home.`);
+    const [si, fi] = await Promise.all([this.outpointInfo(from.outpoint), this.outpointInfo(coin.outpoint)]);
+    const r = await this.onchainReceive({ assetId, amount: Number(amount), durationSeconds: 86400, witness: true });
+    const seal = this.lib.WasmWallet.witnessSealScript(r.invoice);
+    const change = BigInt(si.sats) + BigInt(fi.sats) - BigInt(INSTANT_SEAL_SATS) - fee;
+    if (change < 546n) throw new Error('Not enough bitcoin for the network fee.');
+    const unsigned = this.lib.WasmWallet.newSwapPsbt(
+      [{ outpoint: from.outpoint, sats: si.sats, script: si.script, tx: si.tx }, { outpoint: coin.outpoint, sats: fi.sats, script: fi.script, tx: fi.tx }],
+      [{ script: seal, sats: INSTANT_SEAL_SATS }, { script: await this.ownScript(), sats: Number(change) }],
+    );
+    const psbt = await this.wallet.colorSwap(online, unsigned, assetId, BigInt(amount), r.recipientId, SEAL_OUTPUT, BigInt(INSTANT_SEAL_SATS), [this.transport], 1);
+    const sent = plain(await this.wallet.sendEnd(online, this.sign(psbt), true));
+    await this.save();
+    return String(sent?.txid || this.lib.WasmWallet.psbtTxid(psbt));
+  }
+
+  /**
+   * Seller: start an Instant listing. With an output holding exactly the amount, it's signed at once
+   * ({ stage: 'ready', psbt, consignment, templateTxid, sellerOutpoint }); otherwise the tokens move first
+   * ({ stage: 'moving', txid }) and `instantProgress` signs it once that transaction confirms.
+   */
+  async instantList({ offerId, assetId, amount, priceSats, feeRate, market = '', token = '' }, store) {
+    this.requirePresign();
+    const o = readOffer({ assetId, amount, priceSats }, offerId);
+    const prev = store.get(o.offerId);
+    if (prev && !['cancelled'].includes(prev.stage)) return this.instantView(o.offerId, prev);
+    await this.wallet.sync(this.requireOnline());
+    const unspents = plain(this.wallet.listUnspents(false)) || [];
+    // market and token: where this wallet sends the signed listing when it's signed later (after the move)
+    const base = { role: 'seller', assetId: o.assetId, amount: String(o.amount), priceSats: String(o.priceSats), market: String(market), token: String(token), at: Date.now() };
+    const exact = exactCoinFor(unspents, o.assetId, o.amount, this.reserved);
+    if (exact) return this.instantSign(o.offerId, { ...base, stage: 'moving' }, store);
+    const from = freeSellerCoinFor(unspents, o.assetId, o.amount, this.reserved);
+    if (!from) throw new Error('No settled RGB output of this wallet holds that much of the token. Wait for incoming transfers to settle.');
+    const txid = await this.instantMove(o.assetId, o.amount, from, feeRate);
+    // the new output is promised to this listing from now on: no change or receive lands on it before it's signed
+    const e = { ...base, stage: 'moving', moveTxid: txid, coin: `${txid}:${SEAL_OUTPUT}` };
+    store.set(o.offerId, e);
+    this.reserve([...this.reserved, e.coin]);
+    return this.instantView(o.offerId, e);
+  }
+  async instantSign(offerId, e, store) {
+    const online = this.requireOnline();
+    const unspents = plain(this.wallet.listUnspents(false)) || [];
+    const mine = e.coin ? unspents.filter((u) => `${String(u.utxo?.outpoint?.txid).toLowerCase()}:${u.utxo?.outpoint?.vout}` === e.coin) : unspents;
+    const coin = exactCoinFor(mine, e.assetId, e.amount, e.coin ? new Set() : this.reserved);
+    if (!coin) return this.instantView(offerId, e); // the move hasn't settled yet
+    const r = plain(await this.wallet.presignSale(online, e.assetId, BigInt(e.amount), coin.outpoint, await this.ownScript(), BigInt(e.priceSats), 1));
+    const next = { ...e, stage: 'ready', coin: String(r.sellerOutpoint), psbt: String(r.psbt), consignment: b64(Uint8Array.from(r.consignment)), templateTxid: String(r.templateTxid), sellerSats: String(r.sellerSats), at: Date.now() };
+    store.set(offerId, next);
+    this.reserve([...new Set([...this.reserved, next.coin])]);
+    await this.save();
+    return this.instantView(offerId, next);
+  }
+  instantView(offerId, e) {
+    return { offerId: String(offerId), stage: e.stage, txid: e.soldTxid || e.cancelTxid || e.moveTxid || null, ...(e.stage === 'ready' ? { psbt: e.psbt, consignment: e.consignment, templateTxid: e.templateTxid, sellerOutpoint: e.coin } : {}) };
+  }
+  /**
+   * Seller, after a refresh: sign listings whose tokens have settled on their own output, and notice listings that
+   * sold (their output spent by someone else's transaction) or whose cancel went through. Returns the changes.
+   */
+  async instantProgress(store, all) {
+    const changes = [];
+    for (const [id, e] of Object.entries(all)) {
+      if (e?.role !== 'seller') continue;
+      try {
+        if (e.stage === 'moving') {
+          const v = await this.instantSign(id, e, store);
+          if (v.stage === 'ready') changes.push(v);
+        } else if ((e.stage === 'ready' || e.stage === 'cancelling') && e.coin) {
+          const [txid, vout] = e.coin.split(':');
+          const sp = await (await this.esplora(`/tx/${txid}/outspend/${vout}`)).json();
+          if (!sp?.spent) continue;
+          const by = String(sp.txid || '');
+          if (by && by === e.cancelTxid) { store.set(id, { ...e, stage: 'cancelled', at: Date.now() }); changes.push({ offerId: id, stage: 'cancelled', txid: by }); continue; }
+          // someone completed the pre-signed transaction: the seller's payout is in it (the signature covers it)
+          this.wallet.markOutpointSpent(e.coin);
+          const left = [...this.reserved].filter((x) => x !== e.coin);
+          this.reserve(left);
+          store.set(id, { ...e, stage: 'sold', soldTxid: by, psbt: undefined, consignment: undefined, at: Date.now() });
+          await this.save();
+          changes.push({ offerId: id, stage: 'sold', txid: by });
+        }
+      } catch { /* next refresh */ }
+    }
+    return changes;
+  }
+  /** Seller: cancel an Instant listing. A signed one is moved to a new output (an on-chain transaction). */
+  async instantCancel({ offerId, feeRate }, store) {
+    const e = store.get(String(offerId));
+    if (!e || e.role !== 'seller') throw new Error('This wallet has no Instant listing with that id.');
+    if (['sold', 'cancelled', 'cancelling'].includes(e.stage)) return this.instantView(offerId, e);
+    if (e.stage === 'moving' || !e.coin) {
+      if (e.coin) this.reserve([...this.reserved].filter((x) => x !== e.coin));
+      const n = { ...e, stage: 'cancelled', at: Date.now() }; store.set(String(offerId), n); return this.instantView(offerId, n);
+    }
+    const [txid, vout] = e.coin.split(':');
+    const sp = await (await this.esplora(`/tx/${txid}/outspend/${vout}`)).json();
+    if (sp?.spent) throw new Error('This listing was just bought. Refresh to see the sale.');
+    const cancelTxid = await this.instantMove(e.assetId, e.amount, { outpoint: e.coin }, feeRate);
+    this.reserve([...this.reserved].filter((x) => x !== e.coin));
+    const n = { ...e, stage: 'cancelling', cancelTxid, psbt: undefined, consignment: undefined, at: Date.now() };
+    store.set(String(offerId), n);
+    await this.save();
+    return this.instantView(offerId, n);
+  }
+
+  /** The signed transaction of a finalized PSBT, hex. */
+  extractHex(psbt) {
+    if (typeof this.lib.WasmWallet?.psbtExtractHex === 'function') return this.lib.WasmWallet.psbtExtractHex(String(psbt));
+    const tx = btc.Transaction.fromPSBT(base64.decode(String(psbt)), { allowUnknownInputs: true, allowUnknownOutputs: true });
+    return hex.encode(tx.extract());
+  }
+  /** Buyer: check an Instant listing and buy it in one go: sign, broadcast, and hand the transfer to this wallet. */
+  async instantBuy({ offerId, network, offer, listing, feeRate }, store) {
+    this.requirePresign(); this.checkNet(network);
+    const o = readOffer(offer, offerId);
+    if (o.state && o.state !== 'OPEN') throw new Error(`The offer is ${o.state.toLowerCase()}.`);
+    const done = store.get(o.offerId);
+    if (done?.txid) return { txid: done.txid };
+    const l = listing || {};
+    let info;
+    try { info = plain(this.lib.WasmWallet.presignedListingInfo(String(l.psbt || ''))); } catch (e) { throw new Error(`The listing does not check out: ${e?.message || e}`); }
+    if (String(info.templateTxid) !== String(l.templateTxid)) throw new Error('The listing does not match its transfer.');
+    if (BigInt(String(info.payoutSats)) - BigInt(String(info.sellerSats)) !== o.priceSats) throw new Error('The signed price is not the offer\'s price.');
+    const online = this.requireOnline();
+    await this.wallet.sync(online);
+    if ((await this.ownOutpoints()).has(String(info.sellerOutpoint))) throw new Error('This is your own listing.');
+    // the seller's output is still there, and is what the signature says
+    const si = await this.outpointInfo(info.sellerOutpoint);
+    if (String(si.sats) !== String(info.sellerSats) || si.script !== info.sellerScript) throw new Error('The seller\'s output is not what the listing says.');
+    const [st, sv] = String(info.sellerOutpoint).split(':');
+    if ((await (await this.esplora(`/tx/${st}/outspend/${sv}`)).json())?.spent) throw new Error('Someone just bought this, or the seller cancelled it.');
+    // the tokens: valid history, this token, this amount on the buyer's seal
+    const check = (bytes, txid) => {
+      let v;
+      try { v = plain(this.lib.inspectSwapConsignment(bytes, txid, this.net, INSTANT_SEAL_OUTPUT)); } catch (e) { throw new Error(`The seller's token transfer does not check out: ${e?.message || e}`); }
+      if (!v?.valid) throw new Error(`The seller's token transfer does not check out: ${v?.details || v?.error || 'invalid'}`);
+      if (String(v.contractId || '') !== o.assetId) throw new Error('The transfer is for another token than the offer.');
+      if (v.sealAmount == null || BigInt(String(v.sealAmount)) !== o.amount) throw new Error(`The transfer gives you ${v.sealAmount ?? 'nothing'}, the offer says ${o.amount}.`);
+    };
+    const consignment = unb64(String(l.consignment || ''));
+    check(consignment, info.templateTxid);
+    // pay: one confirmed coin covering the price, the seal and the fee
+    const fee = BigInt(Math.ceil(Math.max(1, Number(feeRate) || 1) * SWAP_SIZE_VB));
+    const need = o.priceSats + BigInt(INSTANT_SEAL_SATS) + fee;
+    const coin = buyerCoinFor(await this.wallet.listUnspentsVanilla(online, 1, false), need);
+    if (!coin) throw new Error(`Your RGB wallet needs one confirmed bitcoin output over ${need.toLocaleString('en-US')} sats. Tap Add BTC for RGB on Home, then wait a block.`);
+    const bi = await this.outpointInfo(coin.outpoint);
+    const r = await this.onchainReceive({ assetId: null, amount: Number(o.amount), durationSeconds: 86400, witness: true });
+    const seal = this.lib.WasmWallet.witnessSealScript(r.invoice);
+    const change = BigInt(bi.sats) - need;
+    const unsigned = this.lib.WasmWallet.presignedBuyPsbt(String(l.psbt), [{ outpoint: coin.outpoint, sats: bi.sats, script: bi.script, tx: bi.tx }], seal, change >= 546n ? { script: await this.ownScript(), sats: Number(change) } : null);
+    const txHex = this.extractHex(this.sign(unsigned));
+    const txid = this.lib.WasmWallet.checkPresignedFinal(String(l.psbt), txHex, seal);
+    const completed = this.lib.WasmWallet.completePresignedConsignment(consignment, info.templateTxid, txHex);
+    check(completed, txid);
+    store.set(o.offerId, { role: 'buyer', assetId: o.assetId, amount: String(o.amount), priceSats: String(o.priceSats), recipientId: r.recipientId, txid, completed: b64(completed), posted: false, at: Date.now() });
+    await this.esplora('/tx', { method: 'POST', body: txHex });
+    await this.instantPost(o.offerId, store);
+    await this.save();
+    return { txid };
+  }
+  /** Buyer: give this wallet the transfer (through the transfer server, like any incoming one). Retried on refresh. */
+  async instantPost(offerId, store) {
+    const e = store.get(String(offerId));
+    if (!e || e.role !== 'buyer' || e.posted) return false;
+    try {
+      await this.wallet.postOwnConsignment(this.transport, e.recipientId, unb64(e.completed), e.txid, INSTANT_SEAL_OUTPUT);
+    } catch (err) { if (!/already used/i.test(String(err?.message || err))) return false; }
+    store.set(String(offerId), { ...e, posted: true, completed: undefined, at: Date.now() });
+    return true;
   }
 
   /** Check that an RGB transfer server answers and speaks a protocol this engine supports. Throws the reason. */
