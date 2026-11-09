@@ -12,6 +12,7 @@ swaps and pre-signed (Instant) listings:
 | `WasmWallet.verifySwapPsbt(psbt, inputs, outputs, feeSats)` | Refuses any change of input, output, amount or fee, before signing |
 | `WasmWallet.psbtOutpoints(psbt)`, `psbtTxid(psbt)`, `witnessSealScript(invoice)` | Read a PSBT and an invoice |
 | `validateConsignmentOffchain(bytes, txid, network, sealVout?)` | Also returns `contractId` and, with a seal output, `sealAmount` |
+| `wallet.colorSwap(…, blinding?)` | An optional 10th argument sets the recipient's witness seal blinding, and no transfer servers means the caller delivers the consignment itself: used for RGB proxy protocol 1.0 (the blinding comes from the two parties' keys). `sendEnd` skips recipients with no server |
 | `wallet.presignSale(online, assetId, amount, outpoint, payoutScript, priceSats, minConf)` | Instant listing: colours a template (input 0 a placeholder for the buyer's coin, input 1 the seller's output; output 0 OP_RETURN, 1 payout, 2 the buyer's 330-sat seal) and signs input 1 with SIGHASH_SINGLE\|ANYONECANPAY. RGB anchors to the first OP_RETURN or taproot output, so the commitment comes first Refuses an output holding anything but exactly `amount` of this asset |
 | `wallet.setReservedOutpoints(list)`, `wallet.markOutpointSpent(outpoint)` | Outputs promised to listings are never used for sends, change or receives; a sold one leaves the balance |
 | `wallet.postOwnConsignment(proxy, recipientId, bytes, txid, vout)` | The buyer hands the completed transfer to its own invoice, so it's accepted like any incoming one |

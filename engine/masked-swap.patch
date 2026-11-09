@@ -1,8 +1,8 @@
 diff --git a/bindings/wasm/src/lib.rs b/bindings/wasm/src/lib.rs
-index bf8d9d1..ecb4b0d 100644
+index bf8d9d1..d06199f 100644
 --- a/bindings/wasm/src/lib.rs
 +++ b/bindings/wasm/src/lib.rs
-@@ -482,6 +482,162 @@ impl WasmWallet {
+@@ -482,6 +482,163 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -21,6 +21,7 @@ index bf8d9d1..ecb4b0d 100644
 +        seal_amount_sat: u64,
 +        transport_endpoints_js: JsValue,
 +        min_confirmations: u8,
++        blinding: Option<u64>,
 +    ) -> Result<String, JsValue> {
 +        let online: Online = serde_wasm_bindgen::from_value(online_js)
 +            .map_err(|e| JsValue::from_str(&format!("Invalid Online object: {e}")))?;
@@ -28,7 +29,7 @@ index bf8d9d1..ecb4b0d 100644
 +            .map_err(|e| JsValue::from_str(&format!("Invalid transport endpoints: {e}")))?;
 +        let mut wallet = self.inner.borrow_mut();
 +        wallet
-+            .color_swap(online, psbt.to_string(), asset_id.to_string(), amount, recipient_id.to_string(), seal_vout, seal_amount_sat, endpoints, min_confirmations)
++            .color_swap(online, psbt.to_string(), asset_id.to_string(), amount, recipient_id.to_string(), seal_vout, seal_amount_sat, endpoints, min_confirmations, blinding)
 +            .await
 +            .map_err(|e| JsValue::from_str(&e.to_string()))
 +    }
@@ -165,7 +166,7 @@ index bf8d9d1..ecb4b0d 100644
      /// Send RGB assets (end): broadcast a signed PSBT. Returns an OperationResult JS object.
      #[wasm_bindgen(js_name = "sendEnd")]
      pub async fn send_end(
-@@ -832,7 +988,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
+@@ -832,7 +989,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
  /// Works before the witness transaction is broadcast. Takes the raw consignment
  /// bytes (strict-encoded, not base64), the witness transaction ID, and the Bitcoin network.
  ///
@@ -175,7 +176,7 @@ index bf8d9d1..ecb4b0d 100644
  #[wasm_bindgen(js_name = "validateConsignmentOffchain")]
  pub fn validate_consignment_offchain(
      consignment_bytes: &[u8],
-@@ -850,3 +1007,25 @@ pub fn validate_consignment_offchain(
+@@ -850,3 +1008,25 @@ pub fn validate_consignment_offchain(
      .map_err(|e| JsValue::from_str(&e.to_string()))?;
      to_js(&result)
  }
@@ -252,7 +253,7 @@ index 31bcf9e..5749424 100644
              received_consignments: HashMap::new(),
              idb_save_in_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
 diff --git a/src/wallet/online.rs b/src/wallet/online.rs
-index d436834..ec1c289 100644
+index d436834..fbfdf33 100644
 --- a/src/wallet/online.rs
 +++ b/src/wallet/online.rs
 @@ -1135,6 +1135,17 @@ impl Wallet {
@@ -290,7 +291,18 @@ index d436834..ec1c289 100644
              db_txo.spent = ActiveValue::Set(true);
              self.database.update_txo(db_txo)?;
          }
-@@ -3878,3 +3889,414 @@ impl Wallet {
+@@ -3197,6 +3208,10 @@ impl Wallet {
+ 
+             for recipient in &mut info_contents_asset.recipients {
+                 let recipient_id = &recipient.recipient_id;
++                // no transfer server: the caller delivered the consignment itself (RGB proxy protocol 1.0)
++                if recipient.transport_endpoints.is_empty() {
++                    continue;
++                }
+                 let mut found_valid = false;
+                 for transport_endpoint in recipient.transport_endpoints.iter_mut() {
+                     if transport_endpoint.used {
+@@ -3878,3 +3893,421 @@ impl Wallet {
          Ok(res)
      }
  }
@@ -316,6 +328,7 @@ index d436834..ec1c289 100644
 +        seal_amount_sat: u64,
 +        transport_endpoints: Vec<String>,
 +        min_confirmations: u8,
++        blinding: Option<u64>,
 +    ) -> Result<String, Error> {
 +        info!(self.logger, "Swap (begin) for {asset_id}...");
 +        if amount == 0 {
@@ -350,29 +363,34 @@ index d436834..ec1c289 100644
 +        if beneficiary.chain_network() != chainnet {
 +            return Err(Error::InvalidRecipientNetwork);
 +        }
-+        self.check_transport_endpoints(&transport_endpoints)?;
++        // with a blinding chosen by the caller (RGB proxy protocol 1.0, where it's derived from the parties' shared
++        // key) and no endpoints, the caller delivers the consignment itself: nothing goes to a 0.2 transfer server
++        let self_delivered = transport_endpoints.is_empty() && blinding.is_some();
 +        let mut endpoints: Vec<LocalTransportEndpoint> = vec![];
-+        let mut found_valid = false;
-+        for endpoint_str in &transport_endpoints {
-+            let te = TransportEndpoint::new(endpoint_str.clone())?;
-+            let mut lte = LocalTransportEndpoint {
-+                transport_type: te.transport_type,
-+                endpoint: te.endpoint.clone(),
-+                used: false,
-+                usable: false,
-+            };
-+            if crate::utils::check_proxy_async(&te.endpoint).await.is_ok() {
-+                lte.usable = true;
-+                found_valid = true;
++        if !self_delivered {
++            self.check_transport_endpoints(&transport_endpoints)?;
++            let mut found_valid = false;
++            for endpoint_str in &transport_endpoints {
++                let te = TransportEndpoint::new(endpoint_str.clone())?;
++                let mut lte = LocalTransportEndpoint {
++                    transport_type: te.transport_type,
++                    endpoint: te.endpoint.clone(),
++                    used: false,
++                    usable: false,
++                };
++                if crate::utils::check_proxy_async(&te.endpoint).await.is_ok() {
++                    lte.usable = true;
++                    found_valid = true;
++                }
++                endpoints.push(lte);
 +            }
-+            endpoints.push(lte);
-+        }
-+        if !found_valid {
-+            return Err(Error::InvalidTransportEndpoints { details: s!("no valid transport endpoints") });
++            if !found_valid {
++                return Err(Error::InvalidTransportEndpoints { details: s!("no valid transport endpoints") });
++            }
 +        }
 +
 +        let psbt = self
-+            ._color_swap_psbt(psbt, &asset_id, amount, recipient_id, seal_vout, seal_amount_sat, endpoints, unspents, &mut runtime, min_confirmations)
++            ._color_swap_psbt(psbt, &asset_id, amount, recipient_id, seal_vout, seal_amount_sat, endpoints, unspents, &mut runtime, min_confirmations, blinding)
 +            .await?;
 +        info!(self.logger, "Swap (begin) completed");
 +        Ok(psbt.to_string())
@@ -393,6 +411,7 @@ index d436834..ec1c289 100644
 +        unspents: Vec<LocalUnspent>,
 +        runtime: &mut RgbRuntime,
 +        min_confirmations: u8,
++        blinding: Option<u64>,
 +    ) -> Result<Psbt, Error> {
 +        let asset_id = asset_id.to_string();
 +        let asset = self.database.check_asset_exists(asset_id.clone())?;
@@ -403,7 +422,7 @@ index d436834..ec1c289 100644
 +            recipient_id: recipient_id.clone(),
 +            local_recipient_data: LocalRecipientData::Witness(LocalWitnessData {
 +                amount_sat: seal_amount_sat,
-+                blinding: None,
++                blinding,
 +                vout: seal_vout,
 +            }),
 +            assignment,
@@ -652,7 +671,7 @@ index d436834..ec1c289 100644
 +        let recipient_id = crate::utils::recipient_id_from_script_buf(payout.clone(), self.bitcoin_network());
 +
 +        let mut psbt = self
-+            ._color_swap_psbt(psbt, &asset_id, amount, recipient_id, PRESIGNED_SEAL_VOUT, PRESIGNED_SEAL_SATS, vec![], unspents, &mut runtime, min_confirmations)
++            ._color_swap_psbt(psbt, &asset_id, amount, recipient_id, PRESIGNED_SEAL_VOUT, PRESIGNED_SEAL_SATS, vec![], unspents, &mut runtime, min_confirmations, None)
 +            .await?;
 +        let template_txid = psbt.unsigned_tx.compute_txid().to_string();
 +        let artifacts = self.transfer_artifacts.remove(&template_txid);

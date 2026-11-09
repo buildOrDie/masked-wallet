@@ -5,6 +5,7 @@
 
 import * as btc from '@scure/btc-signer';
 import { hex, base64 } from '@scure/base';
+import { isInvoiceV1, readInvoiceV1, invoiceIdOf, pickEndpoint, newSenderKey, sharedKeys, deliverConsignment, endpointUrl, rpc, PROXY_V1 } from './proxyV1.mjs';
 import { SEAL_SATS, SEAL_OUTPUT, SWAP_SIZE_VB, b64, buyerOutputs, outpointOf, completionBlocker, readOffer, buyerCoinFor, offerable, payoutFor, changedTerms, unb64, exactCoinFor, freeSellerCoinFor, INSTANT_SEAL_OUTPUT, INSTANT_SEAL_SATS, payCoinsFor, txVbytes, OPRET_SCRIPT, P2TR_SCRIPT } from './swap.mjs';
 
 /** rgb-lib names for our network ids. Utexo's custom Signet uses Signet rules too. */
@@ -211,6 +212,7 @@ export class LiteWallet {
 
   /** Send to an invoice (blind or witness): build, sign and broadcast. */
   async onchainSend({ invoice, assetId, amount, feeRate, endpoint = '' }) {
+    if (isInvoiceV1(invoice)) return this.onchainSendV1({ invoice, assetId, amount, feeRate });
     const online = this.requireOnline();
     const d = await this.decodeRGBInvoice({ invoice });
     const recipients = {
@@ -227,6 +229,63 @@ export class LiteWallet {
     const r = plain(await this.wallet.sendEnd(online, this.sign(psbt), false));
     await this.save();
     return r;
+  }
+
+  /** This engine can pay invoices whose transfer server speaks RGB proxy protocol 1.0. */
+  // colorSwap takes the seal blinding as its 10th argument only from the engine built with protocol 1.0 support; an
+  // older one would ignore it and the recipient could never find its tokens, so it must be there
+  get canProxyV1() { return this.canSwap && (this.wallet.colorSwap?.length ?? 0) >= 10 && typeof this.wallet.pendingConsignment === 'function' && typeof this.lib.WasmWallet?.completePresignedConsignment === 'function'; }
+
+  /**
+   * Pay an invoice whose transfer server speaks RGB proxy protocol 1.0 (see proxyV1.mjs), as a donation: the
+   * recipient's witness seal gets the blinding both sides derive from their keys, the consignment carries the signed
+   * transaction and goes, encrypted, to the recipient's server, then MASKED broadcasts.
+   */
+  async onchainSendV1({ invoice, assetId, amount, feeRate }) {
+    if (!this.canProxyV1) throw new Error('This MASKED build can\'t pay this invoice: its transfer server speaks protocol 1.0. Update MASKED.');
+    const online = this.requireOnline();
+    const d = await this.decodeRGBInvoice({ invoice });
+    if (!d.witness) throw new Error('MASKED pays protocol 1.0 invoices that pay to an address (witness). Ask for that kind of invoice.');
+    const q = readInvoiceV1(invoice);
+    if (!q.expiry) throw new Error('This invoice has no expiry, which protocol 1.0 requires.');
+    if (q.expiry <= Date.now() / 1000 + 120) throw new Error('This RGB invoice has expired.');
+    const invoiceId = invoiceIdOf(q.beneficiary, q.pk);
+    const picked = await pickEndpoint(q.endpoints.length ? q.endpoints : d.transportEndpoints, invoiceId);
+    const sender = newSenderKey();
+    const { key, blinding } = sharedKeys(sender.seed, q.pk);
+    // the transaction: an RGB coin holding the tokens, bitcoin for the fee; outputs: commitment, the invoice's output,
+    // change. The engine puts any token change back on another output of this wallet.
+    await this.wallet.sync(online);
+    const from = freeSellerCoinFor(plain(this.wallet.listUnspents(false)) || [], assetId, amount, this.reserved);
+    if (!from) throw new Error('No settled RGB output of this wallet holds that much of the token in one place. Wait for incoming transfers to settle.');
+    const rate = Math.max(1, Number(feeRate) || 1);
+    const sealScript = this.lib.WasmWallet.witnessSealScript(invoice);
+    const seal = BigInt(LiteWallet.WITNESS_SATS);
+    const own = await this.ownScript();
+    const feeFor = (n) => BigInt(Math.ceil(rate * txVbytes([P2TR_SCRIPT, ...Array(n).fill(P2TR_SCRIPT)], [OPRET_SCRIPT, sealScript, own])));
+    const { all, confirmed } = await this.btcCoins();
+    const pay = payCoinsFor(confirmed, all, feeFor(1) + seal + 546n, feeFor(2) - feeFor(1));
+    if (!pay) throw new Error(`Your RGB wallet needs about ${(feeFor(1) + seal + 546n).toLocaleString('en-US')} sats in bitcoin for this. Tap Add BTC for RGB on Home.`);
+    const [si, ...fis] = await Promise.all([this.outpointInfo(from.outpoint), ...pay.coins.map((c) => this.outpointInfo(c.outpoint))]);
+    const fee = BigInt(Math.ceil(rate * txVbytes([si.script, ...fis.map((f) => f.script)], [OPRET_SCRIPT, sealScript, own])));
+    const change = BigInt(si.sats) + fis.reduce((t, f) => t + BigInt(f.sats), 0n) - seal - fee;
+    if (change < 546n) throw new Error('Not enough bitcoin for the network fee.');
+    const unsigned = this.lib.WasmWallet.newSwapPsbt(
+      [{ outpoint: from.outpoint, sats: si.sats, script: si.script, tx: si.tx }, ...pay.coins.map((c, k) => ({ outpoint: c.outpoint, sats: fis[k].sats, script: fis[k].script, tx: fis[k].tx }))],
+      [{ script: sealScript, sats: Number(seal) }, { script: own, sats: Number(change) }],
+    );
+    // no 0.2 server, and the derived blinding: MASKED delivers the consignment itself
+    const colored = await this.wallet.colorSwap(online, unsigned, assetId, BigInt(amount), d.recipientId, SEAL_OUTPUT, seal, [], 1, blinding);
+    const signed = this.sign(colored);
+    const txHex = this.extractHex(signed);
+    const txid = String(this.lib.WasmWallet.psbtTxid(colored));
+    // a donation's consignment carries the signed transaction (same txid: the signatures are witness data)
+    const consignment = this.lib.WasmWallet.completePresignedConsignment(Uint8Array.from(this.wallet.pendingConsignment(txid, assetId)), txid, txHex);
+    await deliverConsignment({ invoice: q, picked, sender, key, consignment });
+    // delivered: now broadcast (the spec: never before the upload succeeded)
+    const r = plain(await this.wallet.sendEnd(online, signed, true));
+    await this.save();
+    return { ...r, txid: String(r?.txid || txid), protocol: PROXY_V1 };
   }
 
   // ---- peer-to-peer swaps (see swap.mjs). `store` keeps each step's state across approval windows. ----
@@ -614,7 +673,14 @@ export class LiteWallet {
   }
 
   /** Check that an RGB transfer server answers and speaks a protocol this engine supports. Throws the reason. */
-  async checkProxy(url) { await this.lib.checkProxyUrl(url); }
+  async checkProxy(url) {
+    try { await this.lib.checkProxyUrl(url); } catch (e) {
+      // a protocol 1.0 server: fine when this engine can pay its invoices (onchainSendV1)
+      if (!/protocol version: 1\.0/i.test(String(e?.message || e)) || !this.canProxyV1) throw e;
+      const info = await rpc(endpointUrl(url), 'server.info');
+      if (info.result?.protocol_version !== PROXY_V1) throw e;
+    }
+  }
 
   async createBackup({ password }) { this.lastBackupBytes = this.wallet.backup(password); }
   getLastBackupBytes() { return this.lastBackupBytes; }

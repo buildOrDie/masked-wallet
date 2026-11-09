@@ -1156,4 +1156,9 @@ export const ZH_CN = {
   "An Instant listing was signed by an older MASKED and can't sell. Cancel it on the market, then list again.": "有一个即时挂单由旧版 MASKED 签署，无法出售。请在市场上取消，然后重新挂单。",
   "Comes back with the tokens": "随代币一起退回",
   "on your token output": "在你的代币输出上",
+  "MASKED pays protocol 1.0 invoices that pay to an address (witness). Ask for that kind of invoice.": "MASKED 可以支付付款到地址（见证）的 1.0 协议收款请求。请索取这种收款请求。",
+  "This invoice has no expiry, which protocol 1.0 requires.": "此收款请求没有到期时间，而 1.0 协议要求有。",
+  "This invoice was already paid.": "此收款请求已被支付。",
+  "The transfer server doesn't know this invoice (expired or never reserved). Ask for a new one.": "传输服务器不认识此收款请求（已过期或从未预留）。请索取新的收款请求。",
+  "The transfer server asks for more proof of work than MASKED computes. Try again later.": "传输服务器要求的工作量证明超过 MASKED 的计算上限。请稍后再试。",
 };
