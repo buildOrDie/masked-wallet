@@ -72,7 +72,7 @@ test('reading a 1.0 invoice: beneficiary as written, pk, enc, expiry, endpoints'
 });
 
 /** A stand-in 1.0 recipient server that applies the spec's checks to consignment.post. */
-function fakeServer({ difficulty = 0, version = '1.0', status = 'available' } = {}) {
+function fakeServer({ difficulty = 0, version = '1.0', status = 'available', draftSignature = false } = {}) {
   const posts = [];
   const fetchFn = async (url, init) => {
     if (init.body instanceof FormData) {
@@ -83,8 +83,9 @@ function fakeServer({ difficulty = 0, version = '1.0', status = 'available' } = 
       const file = new Uint8Array(await f.get('file').arrayBuffer());
       assert.equal(Number(params.file_size), file.length);
       assert.equal(params.transfer_id, transferIdOf(params.invoice_id, params.sender_pk), 'transfer ID derived from invoice ID and sender key');
-      const msg = sha256(utf8ToBytes(params.transfer_id + params.consignment_hash + sha256Hex(file) + 'consignment'));
-      assert.ok(ed25519.verify(hexToBytes(params.signature), msg, hexToBytes(params.sender_pk)), 'signature checks out');
+      // the spec signs "… consignment"; the earlier draft (UniSat's server) without the literal
+      const msg = sha256(utf8ToBytes(params.transfer_id + params.consignment_hash + sha256Hex(file) + (draftSignature ? '' : 'consignment')));
+      if (!ed25519.verify(hexToBytes(params.signature), msg, hexToBytes(params.sender_pk))) return Response.json({ id: 1, error: { code: -502, message: 'Invalid endpoint auth signature' } });
       if (difficulty && leadingZeroBits(sha256(utf8ToBytes(params.transfer_id + params.pow_timestamp + params.pow_nonce))) < difficulty) return Response.json({ id: 1, error: { code: -114, message: 'invalid proof of work', data: { difficulty } } });
       posts.push({ params, file });
       return Response.json({ id: 1, result: true });
@@ -192,4 +193,36 @@ test('wallet: pays a 1.0 invoice as a donation — blinding from the keys, no 0.
   w.w.colorSwap = async (a, b, c, d, e, f, g, h, i) => i;
   assert.equal(w.canProxyV1, false);
   await assert.rejects(w.onchainSend({ invoice, assetId: ASSET, amount: 500, feeRate: 1 }), /Update MASKED/);
+});
+
+test('a server on the earlier draft (no "consignment" in the signed message) accepts the second form', async () => {
+  const recipient = newSenderKey(new Uint8Array(32).fill(7));
+  const inv = readInvoiceV1(`rgb:~/~/3/sb:wvout:A8cJ7Ww3?expiry=1791400000&endpoints=rpcs://r.example/json-rpc&pk=${recipient.pk}`);
+  const s = fakeServer({ draftSignature: true });
+  const picked = await pickEndpoint(inv.endpoints, invoiceIdOf(inv.beneficiary, inv.pk), s.fetchFn);
+  const sender = newSenderKey();
+  const out = await deliverConsignment({ invoice: inv, picked, sender, key: sharedKeys(sender.seed, inv.pk).key, consignment: utf8ToBytes('c') }, s.fetchFn);
+  assert.equal(out.created, true);
+  assert.equal(s.posts.length, 1);
+});
+
+test('wallet: a failed upload drops the colouring and never broadcasts', async () => {
+  const { LiteWallet } = await import('../src/rgb/LiteWallet.mjs');
+  const ASSET = 'rgb:2dkSTbr-jFhznbPmo-TQ3Kdm9-SWcFsJA-bFZa5Ef-Q8Fy8oo';
+  const T = (c) => c.repeat(64);
+  const recipient = newSenderKey(new Uint8Array(32).fill(7));
+  const invoice = `rgb:${ASSET}/~/500/sb:wvout:A8cJ7Ww3?expiry=${Math.floor(Date.now() / 1000) + 3600}&endpoints=rpcs://r.example/json-rpc&pk=${recipient.pk}`;
+  const server = fakeServer();
+  globalThis.fetch = async (url, init = {}) => (init.body instanceof FormData ? Response.json({ id: 1, error: { code: -112, message: 'Invoice quota exceeded' } }) : server.fetchFn(url, init));
+  const lib = { WasmWallet: { newSwapPsbt: () => '{}', psbtTxid: () => T('5'), witnessSealScript: () => '5120' + '33'.repeat(32), completePresignedConsignment: (b) => b }, WasmInvoice: class { invoiceData() { return { recipientId: 'sb:wvout:A8cJ7Ww3', network: 'Signet', transportEndpoints: [] }; } free() {} } };
+  const w = new LiteWallet(lib, { network: 'signet', indexerUrl: 'https://esplora.test', transportEndpoint: 'https://p', mnemonic: 'x', dataDir: 'd' });
+  const log = [];
+  w.w = { sync: async () => {}, flush: async () => {}, listUnspents: () => [{ utxo: { colorable: true, outpoint: { txid: T('a'), vout: 0 }, btcAmount: 1000 }, rgbAllocations: [{ assetId: ASSET, settled: true, assignment: { Fungible: 800 } }] }],
+    listUnspentsVanilla: async () => [{ outpoint: `${T('c')}:1`, txout: { value: 5000 }, is_spent: false }],
+    colorSwap: async function (a, psbt, c, d, e, f, g, h, i, blinding) { return psbt; }, signPsbt: (p) => p, pendingConsignment: () => [1],
+    abandonColoring: (txid) => log.push(['abandon', txid]), sendEnd: async () => { log.push(['broadcast']); return {}; } };
+  w.online = {}; w.ownScript = async () => '5120' + '44'.repeat(32); w.extractHex = () => '02';
+  w.outpointInfo = async () => ({ sats: 5000, script: '5120' + '55'.repeat(32), tx: 'aa' });
+  await assert.rejects(w.onchainSend({ invoice, assetId: ASSET, amount: 500, feeRate: 1 }), /quota exceeded/);
+  assert.deepEqual(log, [['abandon', T('5')]]);
 });

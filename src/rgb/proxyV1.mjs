@@ -183,17 +183,22 @@ export async function deliverConsignment({ invoice, picked, sender, key, consign
   const file = invoice.enc === '0' ? consignment : encryptBlob(key, consignment, consignmentHash);
   const blobHash = sha256Hex(file);
   let difficulty = picked.difficulty;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  // The signed message: the current spec ends it with the literal "consignment"; servers built on the earlier
+  // draft (UniSat's, for one) sign without it. Try the spec's, then the draft's if the signature is refused (-502).
+  const forms = [[transferId, consignmentHash, blobHash, 'consignment'], [transferId, consignmentHash, blobHash]];
+  let form = 0;
+  for (let attempt = 0; attempt < 4; attempt++) {
     const powTimestamp = String(Number(picked.info?.current_time) || Math.floor(Date.now() / 1000));
     const powNonce = await proofOfWork(transferId, powTimestamp, difficulty);
     const params = {
       invoice_id: invoiceId, transfer_id: transferId, sender_transport_endpoint: picked.endpoint, sender_pk: sender.pk,
       consignment_hash: consignmentHash, batch: false, file_size: String(file.length),
-      signature: signFields(sender.seed, transferId, consignmentHash, blobHash, 'consignment'),
+      signature: signFields(sender.seed, ...forms[form]),
       pow_timestamp: powTimestamp, pow_nonce: powNonce,
     };
     const r = await postConsignment(picked.url, params, file, fetchFn);
     if (!r.error) return { transferId, consignmentHash, created: r.result !== false };
+    if (r.error.code === -502 && form === 0) { form = 1; continue; }
     // proof of work refused (difficulty rose, or the clock moved): retry with the difficulty it now asks for
     if (r.error.code === -114) { difficulty = Number(r.error.data?.difficulty ?? r.error.data?.pow_difficulty ?? difficulty + 1); picked = { ...picked, info: { ...picked.info, current_time: undefined } }; continue; }
     throw new Error(`Transfer server refused the transfer: ${r.error.message || r.error.code}`);

@@ -280,8 +280,14 @@ export class LiteWallet {
     const txHex = this.extractHex(signed);
     const txid = String(this.lib.WasmWallet.psbtTxid(colored));
     // a donation's consignment carries the signed transaction (same txid: the signatures are witness data)
-    const consignment = this.lib.WasmWallet.completePresignedConsignment(Uint8Array.from(this.wallet.pendingConsignment(txid, assetId)), txid, txHex);
-    await deliverConsignment({ invoice: q, picked, sender, key, consignment });
+    try {
+      const consignment = this.lib.WasmWallet.completePresignedConsignment(Uint8Array.from(this.wallet.pendingConsignment(txid, assetId)), txid, txHex);
+      await deliverConsignment({ invoice: q, picked, sender, key, consignment });
+    } catch (e) {
+      // not delivered, so never broadcast: drop the colouring so the tokens stay spendable
+      try { this.wallet.abandonColoring?.(txid); await this.save(); } catch { /* a reload drops it too */ }
+      throw e;
+    }
     // delivered: now broadcast (the spec: never before the upload succeeded)
     const r = plain(await this.wallet.sendEnd(online, signed, true));
     await this.save();

@@ -1,8 +1,8 @@
 diff --git a/bindings/wasm/src/lib.rs b/bindings/wasm/src/lib.rs
-index bf8d9d1..d06199f 100644
+index bf8d9d1..3327016 100644
 --- a/bindings/wasm/src/lib.rs
 +++ b/bindings/wasm/src/lib.rs
-@@ -482,6 +482,163 @@ impl WasmWallet {
+@@ -482,6 +482,169 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -118,6 +118,12 @@ index bf8d9d1..d06199f 100644
 +        to_js(&res)
 +    }
 +
++    /// Drop a colouring that will never be broadcast (its delivery failed), so its tokens stay spendable.
++    #[wasm_bindgen(js_name = "abandonColoring")]
++    pub fn abandon_coloring(&self, txid: &str) -> Result<(), JsValue> {
++        self.inner.borrow_mut().abandon_coloring(txid.to_string()).map_err(|e| JsValue::from_str(&e.to_string()))
++    }
++
 +    /// The buyer of a pre-signed listing posts the completed consignment for its own witness invoice.
 +    #[wasm_bindgen(js_name = "postOwnConsignment")]
 +    pub async fn post_own_consignment(&self, proxy_url: &str, recipient_id: &str, consignment: &[u8], txid: &str, vout: u32) -> Result<(), JsValue> {
@@ -166,7 +172,7 @@ index bf8d9d1..d06199f 100644
      /// Send RGB assets (end): broadcast a signed PSBT. Returns an OperationResult JS object.
      #[wasm_bindgen(js_name = "sendEnd")]
      pub async fn send_end(
-@@ -832,7 +989,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
+@@ -832,7 +995,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
  /// Works before the witness transaction is broadcast. Takes the raw consignment
  /// bytes (strict-encoded, not base64), the witness transaction ID, and the Bitcoin network.
  ///
@@ -176,7 +182,7 @@ index bf8d9d1..d06199f 100644
  #[wasm_bindgen(js_name = "validateConsignmentOffchain")]
  pub fn validate_consignment_offchain(
      consignment_bytes: &[u8],
-@@ -850,3 +1008,25 @@ pub fn validate_consignment_offchain(
+@@ -850,3 +1014,25 @@ pub fn validate_consignment_offchain(
      .map_err(|e| JsValue::from_str(&e.to_string()))?;
      to_js(&result)
  }
@@ -253,7 +259,7 @@ index 31bcf9e..5749424 100644
              received_consignments: HashMap::new(),
              idb_save_in_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
 diff --git a/src/wallet/online.rs b/src/wallet/online.rs
-index d436834..fbfdf33 100644
+index d436834..26655e9 100644
 --- a/src/wallet/online.rs
 +++ b/src/wallet/online.rs
 @@ -1135,6 +1135,17 @@ impl Wallet {
@@ -302,7 +308,7 @@ index d436834..fbfdf33 100644
                  let mut found_valid = false;
                  for transport_endpoint in recipient.transport_endpoints.iter_mut() {
                      if transport_endpoint.used {
-@@ -3878,3 +3893,421 @@ impl Wallet {
+@@ -3878,3 +3893,430 @@ impl Wallet {
          Ok(res)
      }
  }
@@ -696,6 +702,15 @@ index d436834..fbfdf33 100644
 +        self.reserved_outpoints.insert(op.clone());
 +        info!(self.logger, "Pre-signed listing ready");
 +        Ok(PresignedSale { psbt: psbt.to_string(), consignment, template_txid, seller_outpoint: op.to_string(), seller_sats })
++    }
++
++    /// Drop a colouring that will never be broadcast (its delivery failed): forget its artifacts and archive its
++    /// transaction in the RGB state, so the tokens it would have spent stay spendable.
++    pub fn abandon_coloring(&mut self, txid: String) -> Result<(), Error> {
++        self.transfer_artifacts.remove(&txid);
++        let id = RgbTxid::from_str(&txid).map_err(|_| Error::InvalidTxid)?;
++        self.rgb_runtime()?.upsert_witness(id, WitnessOrd::Archived)?;
++        Ok(())
 +    }
 +
 +    /// The buyer of a pre-signed listing posts the consignment (with its final transaction, see
