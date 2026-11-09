@@ -173,18 +173,19 @@ export class ApproveView extends View {
     if (m === 'rgbInstantList') {
       return `<p class="hero-bal center">${b ? esc(b.shown) : '…'}</p><div class="kv">${rowKV('Token', tok)}${b ? rowKV('You get', `<b>${sats(b.price)}</b>`) : ''}${b ? rowKV('Market', `<span class="mono">${esc(b.market)}</span>`) : ''}${rowKV('Network', esc(this.app.rgb.profile.label))}</div>
       <p class="info">MASKED signs this sale once. Anyone can then buy it at this exact price, even while your computer is off: the signature is only valid if the transaction pays you ${b ? sats(b.price) : 'the price'}.</p>
-      <p class="info">If these tokens share an output with others, MASKED first moves them to an output of their own: one transaction (network fee about ${b ? sats(b.fee) : '…'}), and the listing goes live after it confirms, about 10 minutes, the next time MASKED is open.</p>
+      <p class="info">If these tokens share an output with others, MASKED first moves them to an output of their own: one transaction (network fee about ${b ? `${sats(b.fee)}, ${esc(String(b.rate))} sat/vB × ~${b.vb} vB` : '…'}), and the listing goes live after it confirms, about 10 minutes, the next time MASKED is open.</p>
       <p class="info">Cancelling later also takes one transaction: MASKED moves the tokens so the signature can't be used.</p>
       ${this.rgbWait(a)}${this.error(a)}`;
     }
     if (m === 'rgbInstantCancel') {
-      return `<p class="hero-bal center">${b ? esc(b.shown) : '…'}</p><div class="kv">${rowKV('Token', tok)}${b && b.fee ? rowKV('Network fee', sats(b.fee)) : ''}</div>
+      return `<p class="hero-bal center">${b ? esc(b.shown) : '…'}</p><div class="kv">${rowKV('Token', tok)}${b && b.fee ? rowKV('Network fee', `${sats(b.fee)} <span class="muted small">${esc(String(b.rate))} sat/vB × ~${b.vb} vB</span>`) : ''}</div>
       <p class="info">${b && b.stage === 'ready' ? 'MASKED moves your tokens to a new output of your own, so the signed listing can no longer be used. Until that transaction confirms, a buyer may still get there first: then the sale goes through at your price.' : 'The listing was not signed yet: nothing to move.'}</p>
       ${this.rgbWait(a)}${this.error(a)}`;
     }
     const hero = b ? `<p class="hero-bal center">${esc(b.shown)}</p>` : '<p class="hero-bal center">…</p>';
     const rows = !b ? '' : buying
-      ? rowKV('You pay', `<b>${sats(b.price + (b.fee || 0))}</b>`) + rowKV('Price', sats(b.price)) + (b.fee != null ? rowKV('Network fee', sats(b.fee)) : '')
+      ? rowKV('You pay', `<b>${sats(b.price + (b.fee || 0))}</b>`) + rowKV('Price', sats(b.price)) + (b.fee != null ? rowKV('Network fee', b.vb ? `${sats(b.fee)} <span class="muted small">${esc(String(b.rate))} sat/vB × ~${b.vb} vB</span>` : sats(b.fee)) : '')
+        + (b.seal ? rowKV('Comes back with the tokens', `${sats(b.seal)} <span class="muted small">on your token output</span>`) : '')
       : rowKV('You get', `<b>${sats(b.price)}</b>`) + rowKV('Network fee', 'paid by the buyer');
     const next = {
       rgbBuyPrepare: 'MASKED holds one of your bitcoin outputs for this purchase and makes an invoice for the tokens. Nothing is paid yet: you sign once the seller has prepared the swap.',

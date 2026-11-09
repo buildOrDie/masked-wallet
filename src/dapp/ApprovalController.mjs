@@ -2,6 +2,7 @@
 // loads the request from the background, prepares what the screen shows (fees, PSBT breakdown, the
 // transactions to sign), and on approval signs, broadcasts and answers the background.
 import { friendly } from '../core/format.mjs';
+import { instantBuyVbytes, instantMoveVbytes, INSTANT_SEAL_SATS } from '../rgb/swap.mjs';
 import { UNISAT_NET } from '../bitcoin/networks.mjs';
 import { signMessageBip322, signMessageEcdsa } from '../bitcoin/messages.mjs';
 import { TRADE_SITES } from '../trade/TradeAccount.mjs';
@@ -210,17 +211,19 @@ export class ApprovalController {
       if (m === 'rgbInstantList' || m === 'rgbInstantBuy' || m === 'rgbInstantCancel') {
         if (!r.service.canPresign) throw new Error('This MASKED version can\'t do Instant listings yet. Update MASKED.');
         const rate = P.feeRate || Number(r.fee());
-        const fee = Math.ceil(rate * SWAP_SIZE_VB);
-        if (m === 'rgbInstantBuy') return { ...base, fee, rate };
+        // usual sizes (one coin of yours, taproot); the wallet works out the exact fee from the real coins
+        const vb = m === 'rgbInstantBuy' ? instantBuyVbytes(1, true) : instantMoveVbytes(1);
+        const fee = Math.ceil(rate * vb);
+        if (m === 'rgbInstantBuy') return { ...base, fee, rate, vb, seal: INSTANT_SEAL_SATS };
         if (m === 'rgbInstantList') {
           if (!asset) throw new Error('You don\'t hold this token in RGB.');
           if (Number(o.amount) > r.bal(asset).spendable) throw new Error(`You can sell up to ${r.amount(asset, r.bal(asset).spendable)} ${asset.ticker}.`);
           let host = ''; try { host = new URL(P.market).host; } catch { throw new Error('The market address is not valid.'); }
-          return { ...base, fee, rate, market: host };
+          return { ...base, fee, rate, vb, market: host };
         }
         const e = r.service.instantStore().get(P.offerId);
         if (!e || e.role !== 'seller') throw new Error('This wallet has no Instant listing with that id.');
-        return { ...base, fee: e.stage === 'ready' ? fee : 0, rate, stage: e.stage };
+        return { ...base, fee: e.stage === 'ready' ? fee : 0, rate, vb, stage: e.stage };
       }
       if (m === 'rgbAutoSell') {
         if (!asset) throw new Error('You don\'t hold this token in RGB.');

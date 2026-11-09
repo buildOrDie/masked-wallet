@@ -72,7 +72,8 @@ The build is reproducible: the same source always gives the same `extension/`. T
 | [`v2.20.0`](../../tree/v2.20.0) | **Top up ecash with BTC** (NUT-30 on-chain deposits): send from Public or Shielded to the mint, then pay any Lightning invoice. BTC → Lightning in the wallet, no swap service | GitHub |
 | [`v2.20.1`](../../tree/v2.20.1) | Ecash suggests one mint, Minibits (the most used); any other mint can be added by address, with a link to mint reviews | GitHub |
 | [`v2.20.2`](../../tree/v2.20.2) | Ecash Send: the lock note updates as you type; paywall demo hides its gate once paid | GitHub |
-| [`v2.26.4`](../../tree/v2.26.4) | Fix: the buyer's token check read the engine's answer under the wrong names and refused every RGB purchase ("another token than the offer"); nothing was paid | `main` |
+| [`v2.26.5`](../../tree/v2.26.5) | Instant trades pay for their real size (about 298 vB for a purchase, not a flat 320), Signet RGB uses 1 sat/vB, and the approval shows the rate × size and the 330 sats that come back with the tokens | `main` |
+| [`v2.26.4`](../../tree/v2.26.4) | Fix: the buyer's token check read the engine's answer under the wrong names and refused every RGB purchase ("another token than the offer"); nothing was paid | |
 | [`v2.26.3`](../../tree/v2.26.3) | RGB trades don't wait for the last trade's change to confirm: they can pay with this wallet's own unconfirmed change, and Instant buys and moves combine several coins when one isn't enough | |
 | [`v2.26.2`](../../tree/v2.26.2) | Instant listings fixed: the RGB commitment is output 0 (RGB anchors to the first OP_RETURN or taproot output), the seller signs input 1 with its payout in output 1. Listings signed by 2.26.0/2.26.1 are flagged: cancel and list again | |
 | [`v2.26.1`](../../tree/v2.26.1) | `rgb.getAssets()`: a site can show your RGB tokens to pick from (after you agree to share them), so sellers don't paste asset IDs | |

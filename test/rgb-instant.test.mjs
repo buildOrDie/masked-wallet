@@ -239,8 +239,10 @@ test('buyer: pays with two coins when one is not enough', async () => {
   b.w.lib.WasmWallet.presignedBuyPsbt = (tpl, ins, seal, change) => { built = { ins, change }; return JSON.stringify({ seal }); };
   await b.w.instantBuy({ offerId: offer.offerId, network: 'Signet', offer, listing, feeRate: 2 }, b.store);
   assert.deepEqual(built.ins.map((i) => i.outpoint), [c1, c2]);
-  // 24000 in − 20000 price − 330 seal − 640 fee − 116 for the second input
-  assert.equal(built.change.sats, 24000 - 20000 - 330 - 640 - 116);
+  // 24000 in − 20000 price − 330 seal − the fee for the real size (3 inputs, 4 outputs) at 2 sat/vB
+  const { txVbytes, OPRET_SCRIPT, P2TR_SCRIPT } = await import('../src/rgb/swap.mjs');
+  const vb = txVbytes(['5120sell', '5120buy', '5120buy'], [OPRET_SCRIPT, info.payoutScript || P2TR_SCRIPT, P2TR_SCRIPT, P2TR_SCRIPT]);
+  assert.equal(built.change.sats, 24000 - 20000 - 330 - Math.ceil(2 * vb));
 });
 
 test('the consignment check is read whichever way the engine names its fields', async () => {
@@ -248,4 +250,13 @@ test('the consignment check is read whichever way the engine names its fields', 
   assert.deepEqual(inspected({ valid: true, contract_id: ASSET, seal_amount: 500 }), { contractId: ASSET, sealAmount: 500 });
   assert.deepEqual(inspected({ valid: true, contractId: ASSET, sealAmount: 500 }), { contractId: ASSET, sealAmount: 500 });
   assert.deepEqual(inspected({ valid: true }), { contractId: '', sealAmount: null });
+});
+
+test('transaction sizes: an Instant purchase with one coin is about 298 vB, not the 320 vB budget', async () => {
+  const { instantBuyVbytes, instantMoveVbytes, txVbytes, P2TR_SCRIPT, OPRET_SCRIPT } = await import('../src/rgb/swap.mjs');
+  assert.equal(instantBuyVbytes(1, true), 298);   // 10.5 + 2 × 57.5 + 4 × 43
+  assert.equal(instantBuyVbytes(1, false), 255);  // no change output
+  assert.equal(instantBuyVbytes(2, true), 355);   // one more coin: + 57.5
+  assert.equal(instantMoveVbytes(1), 255);
+  assert.equal(txVbytes(['0014' + '00'.repeat(20)], [OPRET_SCRIPT, P2TR_SCRIPT]), Math.ceil(10.5 + 68 + 43 + 43), 'a P2WPKH input is bigger');
 });

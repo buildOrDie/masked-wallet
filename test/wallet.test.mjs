@@ -489,7 +489,7 @@ test('RGB outputs are made by themselves when a step needs them', async () => {
   let n = 0;
   const out = await app.rgb.withOutputs(async () => { if (n++ === 0) throw 'Insufficient allocations'; return 'ok'; });
   assert.equal(out, 'ok');
-  assert.deepEqual(calls, [['utxos', '2']]);
+  assert.deepEqual(calls, [['utxos', '1']]); // Signet: 1 sat/vB
   await assert.rejects(app.rgb.withOutputs(async () => { throw 'InsufficientAllocationSlots'; }), /Wait for one block/);
   app.rgb.data.btc.vanilla.settled = 0;
   await assert.rejects(app.rgb.withOutputs(async () => { throw 'InsufficientAllocationSlots'; }), /Add test BTC first/);

@@ -9,7 +9,8 @@ export const PASS_KEY = 'masked.rgb.agentPass';
 const ext = () => (typeof chrome !== 'undefined' && chrome.storage?.session ? chrome : null);
 
 /** Fee rate for RGB's own transactions on the test networks (sat/vB). */
-const RGB_FEE = '2';
+// Signet: blocks are rarely full, 1 sat/vB confirms
+const RGB_FEE = '1';
 /** Below this much test BTC (sats), Home suggests adding some: enough for a few RGB transactions. */
 export const RGB_LOW_BTC = 3000;
 /** What "Add test BTC" sends from the Public balance. */

@@ -54,6 +54,28 @@ export function buyerCoinFor(coins, need) {
 /** vB one more taproot input adds to a transaction (a little over 57.5). */
 export const EXTRA_INPUT_VB = 58;
 
+/** vB of one input spending `script` (hex): taproot key path 57.5, P2WPKH 68, else a cautious 91. */
+export const inputVb = (script = '5120') => (/^5120/.test(script) ? 57.5 : /^0014/.test(script) ? 68 : 91);
+/** vB of one output paying `script` (hex): 8 for the amount, 1 for the length, then the script. */
+export const outputVb = (script = '5120') => 9 + String(script).length / 2;
+
+/**
+ * The size of a transaction in vB, from its input and output scripts (hex): 10.5 for the version, counts, lock
+ * time and segwit marker, then each input and output. Rounded up.
+ * @param {string[]} inScripts @param {string[]} outScripts
+ */
+export function txVbytes(inScripts, outScripts) {
+  return Math.ceil(10.5 + inScripts.reduce((t, s) => t + inputVb(s), 0) + outScripts.reduce((t, s) => t + outputVb(s), 0));
+}
+/** An OP_RETURN with a 32-byte RGB commitment, and a taproot output: for sizing. */
+export const OPRET_SCRIPT = `6a20${'00'.repeat(32)}`;
+export const P2TR_SCRIPT = `5120${'00'.repeat(32)}`;
+/** An Instant purchase, sized before the coins are known: the seller's coin and `coins` of the buyer's (taproot). */
+export const instantBuyVbytes = (coins = 1, change = true, payoutScript = P2TR_SCRIPT) =>
+  txVbytes([P2TR_SCRIPT, ...Array(coins).fill(P2TR_SCRIPT)], [OPRET_SCRIPT, payoutScript, P2TR_SCRIPT, ...(change ? [P2TR_SCRIPT] : [])]);
+/** Moving a listing's tokens (to their own output, or back when cancelling): the RGB coin and `coins` fee coins. */
+export const instantMoveVbytes = (coins = 1) => txVbytes([P2TR_SCRIPT, ...Array(coins).fill(P2TR_SCRIPT)], [OPRET_SCRIPT, P2TR_SCRIPT, P2TR_SCRIPT]);
+
 /**
  * Coins to pay `need` sats from the RGB wallet's bitcoin, so a trade never waits for the last one's change to
  * confirm: one confirmed coin if one is enough, else one coin counting unconfirmed change (this wallet's own
