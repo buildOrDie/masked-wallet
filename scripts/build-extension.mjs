@@ -13,10 +13,6 @@ const common={bundle:true,minify:true,platform:'browser',format:'iife',loader:{'
 await build({...common,entryPoints:[resolve(root,'src/main.mjs')],outfile:resolve(out,'app.bundle.js')});
 await build({...common,entryPoints:[resolve(root,'src/scan/scan-worker.mjs')],outfile:resolve(out,'scan-worker.js')});
 for(const [name,source] of [['background.js','background'],['content.js','content'],['inpage.js','inpage']])await build({...common,entryPoints:[resolve(root,`src/provider/${source}.js`)],outfile:resolve(out,name)});
-// Sell automatically: the hidden page the background opens (chrome.offscreen) for one step of an approved sale.
-// It loads rgb-runtime.mjs itself, at run time, so the engine isn't bundled twice.
-await build({bundle:true,minify:true,platform:'browser',format:'esm',target:'es2022',entryPoints:[resolve(root,'src/rgb/agent.mjs')],outfile:resolve(out,'rgb-agent.js')});
-await writeFile(resolve(out,'rgb-agent.html'),'<!doctype html><meta charset="utf-8"><title>MASKED RGB</title><script type="module" src="rgb-agent.js"></script>\n');
 await writeFile(resolve(out,'manifest.json'),await readFile(resolve(root,'src/manifest.json')));
 console.log('Extension built at '+out);
 

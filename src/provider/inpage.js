@@ -34,7 +34,7 @@
 
   const provider = Object.freeze({
     isMasked: true,
-    version: '1.8.0',
+    version: '1.9.0',
     // accounts
     requestAccounts: () => request('requestAccounts'),
     getAccounts: () => request('getAccounts'),
@@ -94,10 +94,6 @@
       signBuy: (o = {}) => request('rgbBuySign', o),
       /** seller: { offerId, psbt, offer } → { txid } */
       completeSale: (o = {}) => request('rgbSaleComplete', o),
-      /** Sell automatically: { offerId, market, token, offer } → { ok }. One approval; MASKED does steps 2 and 4 itself. */
-      autoSell: (o = {}) => request('rgbAutoSell', o),
-      /** Stop selling an offer automatically: { offerId } → { ok } */
-      stopAutoSell: (o = {}) => request('rgbAutoSellStop', o),
       // Instant listings: signed once, bought with the seller offline (docs/PROVIDER.md)
       /** seller: { offerId, offer, market, token, feeRate? } → { stage: 'ready', psbt, consignment, templateTxid, sellerOutpoint } or { stage: 'moving', txid } */
       listInstant: (o = {}) => request('rgbInstantList', o),

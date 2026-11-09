@@ -5,7 +5,6 @@
 import * as btc from '@scure/btc-signer';
 import { bech32m, hex } from '@scure/base';
 import { RGB_PENDING, rgbWindowBounds } from '../app/Platform.mjs';
-import { AUTO_ON, PASS_KEY, autoEntry, createAutoSell } from './autosell.js';
 
 const NETS = {
   main: { ord: 'https://ordinals.com', api: 'https://mempool.space/api/', unisat: 'livenet', chain: 'BITCOIN_MAINNET', name: 'Bitcoin Mainnet' },
@@ -14,7 +13,7 @@ const NETS = {
 // MASKED runs on Mainnet and Signet. UniSat reports Signet as "testnet", so that name maps to Signet.
 const FROM_UNISAT = { livenet: 'main', mainnet: 'main', testnet: 'signet', signet: 'signet' };
 const FROM_CHAIN = { BITCOIN_MAINNET: 'main', BITCOIN_SIGNET: 'signet' };
-const _APPROVAL = new Set(['requestAccounts', 'signMessage', 'signPsbt', 'signPsbts', 'sendBitcoin', 'switchNetwork', 'switchChain', 'inscribeTransfer', 'getTradeAccount', 'fundTradeAccount', 'moveToTradeAccount', 'returnToShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbRequestInvoice', 'rgbPayInvoice', 'rgbSwapAvailable', 'rgbListAssets', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbAutoSell', 'rgbInstantList', 'rgbInstantBuy', 'rgbInstantCancel']);
+const _APPROVAL = new Set(['requestAccounts', 'signMessage', 'signPsbt', 'signPsbts', 'sendBitcoin', 'switchNetwork', 'switchChain', 'inscribeTransfer', 'getTradeAccount', 'fundTradeAccount', 'moveToTradeAccount', 'returnToShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbRequestInvoice', 'rgbPayInvoice', 'rgbSwapAvailable', 'rgbListAssets', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantBuy', 'rgbInstantCancel']);
 
 const TRADE_SITES = new Set(['https://maskedwallet.com', 'https://www.maskedwallet.com']);
 const err = (code, message) => Object.assign(new Error(message), { code });
@@ -337,25 +336,6 @@ async function handle(origin, method, params) {
       needConnected();
       return openApproval(origin, method, swapParams(method, params));
     }
-    // ---- sell automatically (opt-in): one approval per offer, then MASKED completes the sale while you're away ----
-    case 'rgbAutoSell': {
-      needConnected();
-      const p = { offerId: params.offerId, market: params.market, token: params.token, offer: params.offer };
-      try { autoEntry({ ...p, profile: 'x' }); } catch (e) { throw err(4000, e.message); }
-      // the approval screen shows the offer the same way as the other swap steps
-      p.offer = { offerId: String(p.offerId), assetId: String(p.offer.assetId), amount: String(p.offer.amount), priceSats: String(p.offer.priceSats), state: 'OPEN' };
-      const res = await openApproval(origin, 'rgbAutoSell', p);
-      await autoSell.add({ ...p, profile: res.profile, origin });
-      chrome.alarms?.create('masked-autosell', { periodInMinutes: 1 });
-      autoSell.tick().catch(() => {});
-      return { ok: true };
-    }
-    case 'rgbAutoSellStop': {
-      needConnected();
-      const e = (await autoSell.list()).find((x) => x.offerId === String(params.offerId || ''));
-      if (e && e.origin === origin) await autoSell.remove(e.offerId);
-      return { ok: !!e };
-    }
     // ---- ecash (Cashu) ----
     case 'cashuGetLockKey': {
       needConnected();
@@ -406,17 +386,6 @@ chrome.runtime.onConnect.addListener((port) => {
 // The wallet page (approval window) asks for its request and returns the answer here.
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id || sender.url?.startsWith('http')) return; // extension pages only
-  if (typeof msg?.type === 'string' && msg.type.startsWith('autosell:')) {
-    (async () => {
-      if (msg.type === 'autosell:due') return autoSell.due();
-      if (msg.type === 'autosell:report') return autoSell.report(msg.offerId, msg.step, msg.result);
-      if (msg.type === 'autosell:list') return autoSell.list();
-      if (msg.type === 'autosell:remove') return autoSell.remove(msg.offerId);
-      if (msg.type === 'autosell:tick') return autoSell.tick();
-      return null;
-    })().then((r) => sendResponse({ ok: true, result: r }), (e) => sendResponse({ ok: false, error: String(e?.message || e) }));
-    return true;
-  }
   if (msg?.type === 'getRequest') {
     const p = pending.get(msg.id);
     sendResponse(p ? { origin: p.origin, method: p.method, params: p.params } : null);
@@ -463,39 +432,10 @@ chrome.storage.onChanged.addListener(async (changes, area) => {
 });
 
 
-// ---- sell automatically: the hidden RGB page, the minute check, the badge ----
-const AGENT_PAGE = 'rgb-agent.html';
-async function agentPage() {
-  const open = chrome.runtime.getContexts ? (await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] })).length > 0 : false;
-  if (!open) await chrome.offscreen.createDocument({ url: AGENT_PAGE, reasons: ['LOCAL_STORAGE'], justification: 'Complete RGB sales the person set to sell automatically.' });
-}
-async function runAgent(job) {
-  if (!chrome.offscreen) throw new Error('This Chrome can\'t sell automatically (it needs Chrome 116 or newer).');
-  await agentPage();
-  try {
-    let r;
-    for (let i = 0; ; i++) { // the page's listener can take a moment to start
-      try { r = await chrome.runtime.sendMessage({ target: 'masked-rgb-agent', job }); break; } catch (e) { if (i >= 4 || !/Receiving end/.test(String(e?.message))) throw e; await new Promise((ok) => setTimeout(ok, 200)); }
-    }
-    if (!r?.ok) throw new Error(r?.error || 'The RGB helper did not answer.');
-    return r.result;
-  } finally { await chrome.offscreen.closeDocument().catch(() => {}); }
-}
-const autoSell = createAutoSell({
-  local: chrome.storage.local, session: chrome.storage.session, fetchFn: (u, i) => fetch(u, i), agent: runAgent,
-  badge: (t) => { chrome.action.setBadgeText({ text: t }).catch(() => {}); if (t) chrome.action.setBadgeBackgroundColor({ color: '#f7a21b' }).catch(() => {}); },
-});
-chrome.alarms?.onAlarm.addListener((a) => { if (a.name === 'masked-autosell') autoSell.tick().catch(() => {}); });
-const startAutoSell = async () => {
-  if ((await autoSell.list()).length && (await chrome.storage.local.get(AUTO_ON))[AUTO_ON]) chrome.alarms?.create('masked-autosell', { periodInMinutes: 1 });
-};
-chrome.runtime.onStartup?.addListener(() => { startAutoSell().catch(() => {}); });
-chrome.runtime.onInstalled?.addListener(() => { startAutoSell().catch(() => {}); });
-// switching the setting off stops everything at once and forgets the RGB key
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && changes[AUTO_ON] && !changes[AUTO_ON].newValue) {
-    chrome.storage.session.remove(PASS_KEY).catch(() => {});
-    chrome.alarms?.clear('masked-autosell');
-    chrome.action.setBadgeText({ text: '' }).catch(() => {});
-  }
+// "Sell automatically" (2.25.1-2.27.1) was removed: Instant listings sell while the seller is offline. Forget what it
+// left: its settings and offer list, and the RGB key it kept in Chrome's session memory.
+chrome.runtime.onInstalled?.addListener(() => {
+  chrome.storage.local.remove(['masked.autosell', 'masked.autosell.on']).catch(() => {});
+  chrome.storage.session?.remove('masked.rgb.agentPass').catch(() => {});
+  chrome.action.setBadgeText({ text: '' }).catch(() => {});
 });

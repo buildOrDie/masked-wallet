@@ -11,8 +11,8 @@ import { toBase } from '../rgb/config.mjs';
 import { proxyUrl } from '../rgb/WalletRgb.mjs';
 
 /** Methods whose approve button waits for a prepared transaction. */
-export const NEEDS_PREP = ['sendBitcoin', 'inscribeTransfer', 'shareTrade', 'fundTrade', 'moveToTrade', 'returnToShielded', 'cancelShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbInvoice', 'rgbPay', 'rgbSwapAvailable', 'rgbListAssets', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbAutoSell', 'rgbInstantList', 'rgbInstantBuy', 'rgbInstantCancel'];
-const SWAP_METHODS = ['rgbSwapAvailable', 'rgbListAssets', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbAutoSell', 'rgbInstantList', 'rgbInstantBuy', 'rgbInstantCancel'];
+export const NEEDS_PREP = ['sendBitcoin', 'inscribeTransfer', 'shareTrade', 'fundTrade', 'moveToTrade', 'returnToShielded', 'cancelShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbInvoice', 'rgbPay', 'rgbSwapAvailable', 'rgbListAssets', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantBuy', 'rgbInstantCancel'];
+const SWAP_METHODS = ['rgbSwapAvailable', 'rgbListAssets', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantBuy', 'rgbInstantCancel'];
 const RGB_METHODS = ['rgbInvoice', 'rgbPay', ...SWAP_METHODS];
 const SWAP_SIZE_VB = 320;
 const hostOf = (u) => { try { return new URL(proxyUrl(u)).host; } catch { return String(u); } };
@@ -225,12 +225,6 @@ export class ApprovalController {
         if (!e || e.role !== 'seller') throw new Error('This wallet has no Instant listing with that id.');
         return { ...base, fee: e.stage === 'ready' ? fee : 0, rate, vb, stage: e.stage };
       }
-      if (m === 'rgbAutoSell') {
-        if (!asset) throw new Error('You don\'t hold this token in RGB.');
-        if (Number(o.amount) > r.bal(asset).spendable) throw new Error(`You can sell up to ${r.amount(asset, r.bal(asset).spendable)} ${asset.ticker}.`);
-        let host = ''; try { host = new URL(P.market).host; } catch { throw new Error('The market address is not valid.'); }
-        return { ...base, market: host, autoOn: r.autoOn };
-      }
       if (m === 'rgbSalePrepare') {
         if (!asset) throw new Error('You don\'t hold this token in RGB.');
         if (Number(o.amount) > r.bal(asset).spendable) throw new Error(`You can sell up to ${r.amount(asset, r.bal(asset).spendable)} ${asset.ticker}.`);
@@ -432,12 +426,6 @@ export class ApprovalController {
         await r.refresh().catch(() => {});
         await this.rgbBackedUp(r).catch(() => {});
         return out;
-      });
-      case 'rgbAutoSell': return this.rgbBusy(async () => {
-        prepared(''); const r = app.rgb;
-        if (!r.autoOn && !app.state.f.apRisk) throw new Error('Tick the box to switch on Sell automatically.');
-        if (!r.autoOn) await r.setAutoSell(true); else await r.publishPass();
-        return { ok: true, profile: r.profile.id };
       });
       case 'rgbSaleComplete': return this.rgbBusy(async () => {
         prepared(''); const r = app.rgb;

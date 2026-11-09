@@ -5,8 +5,8 @@ import { NEEDS_PREP } from '../../dapp/ApprovalController.mjs';
 import { View } from '../View.mjs';
 import { I, btcLogo, rowKV } from '../html.mjs';
 
-const TITLES = { requestAccounts: 'Connect to MASKED', signMessage: 'Sign message', signPsbt: 'Sign transaction', signPsbts: 'Sign transactions', sendBitcoin: 'Send bitcoin', switchNetwork: 'Switch network', inscribeTransfer: 'Inscribe transfer', shareTrade: 'Trade from Shielded', fundTrade: 'Move BTC to trading', moveToTrade: 'Move tokens to trading', returnToShielded: 'Move back to Shielded', cancelShielded: 'Cancel listing', cashuPay: 'Pay with ecash', cashuPayRequest: 'Pay with ecash', cashuReceive: 'Receive ecash', rgbInvoice: 'Receive RGB tokens', rgbPay: 'Send RGB tokens', rgbSwapAvailable: 'Share what you can sell', rgbListAssets: 'Share your RGB tokens', rgbBuyPrepare: 'Buy RGB tokens', rgbSalePrepare: 'Sell RGB tokens', rgbBuySign: 'Confirm your purchase', rgbSaleComplete: 'Complete the sale', rgbAutoSell: 'Sell automatically', rgbInstantList: 'Make an Instant listing', rgbInstantBuy: 'Buy RGB tokens', rgbInstantCancel: 'Cancel Instant listing' };
-const VERBS = { requestAccounts: 'Connect', sendBitcoin: 'Send', inscribeTransfer: 'Inscribe', switchNetwork: 'Switch', shareTrade: 'Allow', fundTrade: 'Move', moveToTrade: 'Move', returnToShielded: 'Move back', cancelShielded: 'Cancel listing', cashuPay: 'Pay', cashuPayRequest: 'Pay', cashuReceive: 'Claim', rgbInvoice: 'Make invoice', rgbPay: 'Send', rgbSwapAvailable: 'Share', rgbListAssets: 'Share', rgbBuyPrepare: 'Buy', rgbSalePrepare: 'Sell', rgbBuySign: 'Sign and pay', rgbSaleComplete: 'Complete sale', rgbAutoSell: 'Sell automatically', rgbInstantList: 'Sign listing', rgbInstantBuy: 'Buy now', rgbInstantCancel: 'Cancel listing' };
+const TITLES = { requestAccounts: 'Connect to MASKED', signMessage: 'Sign message', signPsbt: 'Sign transaction', signPsbts: 'Sign transactions', sendBitcoin: 'Send bitcoin', switchNetwork: 'Switch network', inscribeTransfer: 'Inscribe transfer', shareTrade: 'Trade from Shielded', fundTrade: 'Move BTC to trading', moveToTrade: 'Move tokens to trading', returnToShielded: 'Move back to Shielded', cancelShielded: 'Cancel listing', cashuPay: 'Pay with ecash', cashuPayRequest: 'Pay with ecash', cashuReceive: 'Receive ecash', rgbInvoice: 'Receive RGB tokens', rgbPay: 'Send RGB tokens', rgbSwapAvailable: 'Share what you can sell', rgbListAssets: 'Share your RGB tokens', rgbBuyPrepare: 'Buy RGB tokens', rgbSalePrepare: 'Sell RGB tokens', rgbBuySign: 'Confirm your purchase', rgbSaleComplete: 'Complete the sale', rgbInstantList: 'Make an Instant listing', rgbInstantBuy: 'Buy RGB tokens', rgbInstantCancel: 'Cancel Instant listing' };
+const VERBS = { requestAccounts: 'Connect', sendBitcoin: 'Send', inscribeTransfer: 'Inscribe', switchNetwork: 'Switch', shareTrade: 'Allow', fundTrade: 'Move', moveToTrade: 'Move', returnToShielded: 'Move back', cancelShielded: 'Cancel listing', cashuPay: 'Pay', cashuPayRequest: 'Pay', cashuReceive: 'Claim', rgbInvoice: 'Make invoice', rgbPay: 'Send', rgbSwapAvailable: 'Share', rgbListAssets: 'Share', rgbBuyPrepare: 'Buy', rgbSalePrepare: 'Sell', rgbBuySign: 'Sign and pay', rgbSaleComplete: 'Complete sale', rgbInstantList: 'Sign listing', rgbInstantBuy: 'Buy now', rgbInstantCancel: 'Cancel listing' };
 const SHIELDED = `${I.shieldPlain} Shielded`;
 
 /** The approval window for a dApp request: what it asks, what it costs, Reject / Approve. */
@@ -114,7 +114,7 @@ export class ApproveView extends View {
       }
       case 'rgbInvoice': return this.rgbInvoiceBody(a, P, b);
       case 'rgbPay': return this.rgbPayBody(a, P, b);
-      case 'rgbSwapAvailable': case 'rgbListAssets': case 'rgbBuyPrepare': case 'rgbSalePrepare': case 'rgbBuySign': case 'rgbSaleComplete': case 'rgbAutoSell': case 'rgbInstantList': case 'rgbInstantBuy': case 'rgbInstantCancel': return this.swapBody(a, P, b);
+      case 'rgbSwapAvailable': case 'rgbListAssets': case 'rgbBuyPrepare': case 'rgbSalePrepare': case 'rgbBuySign': case 'rgbSaleComplete': case 'rgbInstantList': case 'rgbInstantBuy': case 'rgbInstantCancel': return this.swapBody(a, P, b);
       case 'switchNetwork':
         return `<div class="kv">${rowKV('From', esc(account.params.name))}${rowKV('To', `<b>${esc(NETWORKS[P.target]?.name || P.target)}</b>`)}</div>`;
       default: return '';
@@ -164,12 +164,6 @@ export class ApproveView extends View {
       return `<div class="kv">${rowKV('Token', tok)}</div><p class="info">The site sees how much of this token you can offer. Nothing moves.</p>${this.rgbWait(a)}${this.error(a)}`;
     }
     const m = a.method, buying = m === 'rgbBuyPrepare' || m === 'rgbBuySign' || m === 'rgbInstantBuy';
-    if (m === 'rgbAutoSell') {
-      return `<p class="hero-bal center">${b ? esc(b.shown) : '…'}</p><div class="kv">${rowKV('Token', tok)}${b ? rowKV('You get', `<b>${sats(b.price)}</b>`) : ''}${b ? rowKV('Market', `<span class="mono">${esc(b.market)}</span>`) : ''}${rowKV('Network', esc(this.app.rgb.profile.label))}</div>
-      <p class="info">When a buyer comes, MASKED prepares and completes this sale by itself, without asking you, while Chrome is open. Only this token, this amount and this price; the buyer's bitcoin comes to your RGB wallet in the same transaction as your tokens leave. Stop it any time in Settings → RGB.</p>
-      ${b && !b.autoOn ? `<label class="risk"><input type="checkbox" data-risk ${this.f.apRisk ? 'checked' : ''}><span><b>Switch on Sell automatically.</b> MASKED keeps your RGB wallet's key in Chrome's memory (never on disk) while Chrome is open, so it can sell while you're away.</span></label>` : ''}
-      ${this.rgbWait(a)}${this.error(a)}`;
-    }
     if (m === 'rgbInstantList') {
       return `<p class="hero-bal center">${b ? esc(b.shown) : '…'}</p><div class="kv">${rowKV('Token', tok)}${b ? rowKV('You get', `<b>${sats(b.price)}</b>`) : ''}${b ? rowKV('Market', `<span class="mono">${esc(b.market)}</span>`) : ''}${rowKV('Network', esc(this.app.rgb.profile.label))}</div>
       <p class="info">MASKED signs this sale once. Anyone can then buy it at this exact price, even while your computer is off: the signature is only valid if the transaction pays you ${b ? sats(b.price) : 'the price'}.</p>

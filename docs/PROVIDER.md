@@ -253,37 +253,6 @@ How it works:
   listing; then the sale goes through at the seller's price. MASKED notices sales and cancels on chain at each refresh.
 - Instant listings are MASKED-only (a different transaction layout from the four-step swaps).
 
-### Sell automatically: `rgb.autoSell({ offerId, market, token, offer })`, `rgb.stopAutoSell({ offerId })` 🔐 *(2.25.1+)*
-
-After listing, a site can ask MASKED to do the seller's steps 2 and 4 by itself. The person approves once (and, the
-first time, ticks a box to switch the setting on); from then on, when a buyer comes, MASKED prepares and completes
-that one sale without a popup, while Chrome is open.
-
-| Field | |
-|---|---|
-| `offerId` | the market's offer id (`sw` + 12 hex) |
-| `market` | the market's https address; MASKED calls `GET {market}/api/swap/offers/{offerId}` and `POST …/colored`, `…/done` with header `x-swap-token` |
-| `token` | the seller's step token from listing |
-| `offer` | `{ assetId, amount, priceSats }`: the exact terms. If the market ever shows other terms, MASKED stops and the person finishes by hand |
-
-Returns `{ ok: true, profile }`. The market must allow MASKED's extension origin
-(`chrome-extension://pojmpfcbdmacabhckemelcbkmckhaoig`) for CORS.
-
-How it works and what it keeps:
-
-- The background checks approved offers once a minute (`chrome.alarms`). When a step is due it opens a hidden
-  extension page (`chrome.offscreen`, `rgb-agent.html`) that opens the RGB wallet, runs the same checks as an approved
-  sale, does that step and closes the wallet. If RGB is open in a MASKED window, that window does the step instead.
-- To open the RGB wallet without the password, an unlocked MASKED leaves the RGB wallet's key in
-  `chrome.storage.session`: memory only, readable by MASKED's own pages and background only (not by sites or content
-  scripts), gone when Chrome closes or the setting goes off. After a Chrome restart, nothing sells until MASKED is
-  unlocked once.
-- Only the seller's steps run by themselves. The buyer always checks and signs in their own wallet, and the seller's
-  wallet still checks the buyer's signed transaction (right outputs, right payout) before it sends.
-- Approved offers expire after 30 days. Settings → RGB → Sell automatically lists them, with a Stop button each and a
-  switch for the whole setting. The toolbar icon shows `!` when an offer needs the person.
-
-
 ## Events
 
 ```js
