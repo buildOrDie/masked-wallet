@@ -291,7 +291,7 @@ export class TokenBook {
   async saveIndexer(url) {
     url = String(url || '').trim().replace(/\/+$/, '');
     if (url && !/^https?:\/\/[^/]+/.test(url)) throw new Error('Enter a URL like https://indexer.example.com');
-    if (url) await this.app.platform.requestOrigin(url);
+    if (url && !(await this.app.platform.hasOrigins([url]))) await this.app.platform.requestOrigin(url);
     this.app.tokenServer.setUrl(url);
     await this.refreshIndexer();
     if (url && this.idx?.err) throw new Error(this.idx.err);

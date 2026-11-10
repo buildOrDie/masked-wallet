@@ -94,6 +94,14 @@ export class Controller {
   async onClick(e) {
     const t = e.target.closest('button, a');
     if (!t) return;
+    // Chrome only shows a permission prompt when it is asked straight from the click, before any await:
+    // ask now for the server typed in Settings, and let the save wait for the answer.
+    this.permAsk = null;
+    const typed = { btnSrvSave: 'srvUrl', btnScanSave: 'scanUrl', btnIdxSave: 'idxUrl' }[t.id];
+    if (typed) {
+      const u = String(/** @type {HTMLInputElement|null} */ (document.getElementById(typed))?.value || '').trim();
+      if (/^https?:\/\/[^/\s]+/.test(u)) { const p = this.app.platform.requestOrigin(u); p.catch(() => {}); this.permAsk = p; }
+    }
     try {
       if (await this.onData(t, e)) return;
       await this.onButton(t);
@@ -484,22 +492,26 @@ export class Controller {
       case 'btnReveal': await app.lock.reveal(); break;
       case 'btnUnlock': await app.lock.unlock(); break;
       case 'btnIdxSave': {
-        try { await app.tokens.saveIndexer($('#idxUrl').value); state.status.idx = [app.tokenServer.url() ? `Connected · block ${app.tokens.idx?.height?.toLocaleString()}` : 'Indexer turned off.', 'ok']; }
+        try { await this.permAsk; await app.tokens.saveIndexer($('#idxUrl').value); state.status.idx = [app.tokenServer.url() ? `Connected · block ${app.tokens.idx?.height?.toLocaleString()}` : 'Indexer turned off.', 'ok']; }
         catch (err) { state.status.idx = [err.message, 'err']; }
         this.render(); break;
       }
       case 'btnIdxOff': await app.tokens.saveIndexer(''); state.status.idx = ['Indexer turned off.', 'ok']; this.render(); break;
       case 'btnSrvSave':
         state.status.srv = ['Checking…', '']; this.render();
-        await app.servers.saveCustom($('#srvUrl').value, { requestPermission: (u) => app.platform.requestOrigin(u) });
-        state.status.srv = [app.servers.custom() ? 'Saved. Your server is used first.' : 'Using public servers.', 'ok']; this.render();
-        sync.run(4); break;
+        try {
+          await app.servers.saveCustom($('#srvUrl').value, { requestPermission: () => this.permAsk });
+          state.status.srv = [app.servers.custom() ? 'Saved. Your server is used first.' : 'Using public servers.', 'ok'];
+        } catch (err) { state.status.srv = [friendly(err.message), 'err']; }
+        this.render(); sync.run(4); break;
       case 'btnSrvOff': await app.servers.saveCustom(''); state.status.srv = ['Using public servers.', 'ok']; this.render(); break;
       case 'btnScanSave':
         state.status.scansrv = ['Checking…', '']; this.render();
-        await app.scanServer.save($('#scanUrl').value, { requestPermission: (u) => app.platform.requestOrigin(u) });
-        state.status.scansrv = [app.scanServer.url() ? 'Saved. Shielded scanning now uses your scan server.' : 'Scan server off.', 'ok']; this.render();
-        break;
+        try {
+          await app.scanServer.save($('#scanUrl').value, { requestPermission: () => this.permAsk });
+          state.status.scansrv = [app.scanServer.url() ? 'Saved. Shielded scanning now uses your scan server.' : 'Scan server off.', 'ok'];
+        } catch (err) { state.status.scansrv = [friendly(err.message), 'err']; }
+        this.render(); break;
       case 'btnScanDefault':
         app.scanServer.useDefault();
         state.status.scansrv = [`Using ${EsploraPool.hostOf(app.scanServer.defaultUrl)}.`, 'ok']; this.render();
