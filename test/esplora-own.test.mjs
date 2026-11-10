@@ -8,6 +8,7 @@ let mineDown = false;
 globalThis.fetch = async (u) => {
   u = String(u); hit.push(u);
   if (mineDown && u.startsWith('https://mine.example.com/')) return new Response('bad gateway', { status: 502 });
+  if (u.startsWith('https://mine.example.com/api/v1/')) return new Response('not found', { status: 404 });
   return new Response('ok');
 };
 const { EsploraPool } = await import('../src/net/EsploraPool.mjs');
@@ -35,4 +36,13 @@ test('without your own server, block pages are still spread over the public serv
   hit.length = 0;
   for (let i = 0; i < 6; i++) await pool.request(`block/b${i}/txs/0`);
   assert.ok(new Set(hit.map((u) => new URL(u).host)).size > 1);
+});
+
+
+test('fee rates: your own electrs (no v1 endpoints) passes the question on to mempool.space', async () => {
+  const pool = new EsploraPool({ net: () => 'signet', store: { get: () => 'https://mine.example.com/api/' } });
+  hit.length = 0;
+  const r = await pool.request('v1/fees/precise');
+  assert.equal(r.status, 200);
+  assert.deepEqual(hit, ['https://mine.example.com/api/v1/fees/precise', 'https://mempool.space/signet/api/v1/fees/precise']);
 });

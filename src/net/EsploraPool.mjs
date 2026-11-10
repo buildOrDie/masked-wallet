@@ -86,6 +86,8 @@ export class EsploraPool {
           if (r.status === 429) this.limiter.onRateLimit();
           continue;
         }
+        // your own electrs has no mempool.space extras (v1/fees…): ask the next server instead of failing
+        if (r.status === 404 && /^v1\//.test(path) && !/mempool\.space/.test(base)) { last = r; continue; }
         this.strikes.delete(base);
         if (/^block\//.test(path)) this.limiter.onPage();
         this.active = base;

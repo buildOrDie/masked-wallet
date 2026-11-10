@@ -37,6 +37,8 @@ const asset = (a) => ({
   precision: num(a?.precision), issuedSupply: num(a?.issuedSupply), balance: balance(a?.balance),
 });
 
+const hostOf = (u) => { try { return new URL(String(u)).host; } catch { return 'the block server'; } };
+
 export class LiteWallet {
   /**
    * @param {object} lib  the loaded rgb-lib-wasm module ({ WasmWallet, WasmInvoice, restoreKeys })
@@ -488,7 +490,7 @@ export class LiteWallet {
     return r;
   }
   /** Move the tokens of a listing onto an output of their own (or a listed output back, when cancelling). */
-  async instantMove(assetId, amount, from, feeRate) {
+  async instantMove(assetId, amount, from, feeRate, onStep = (_t) => {}) {
     const online = this.requireOnline();
     const rate = Math.max(1, Number(feeRate) || 1);
     const feeFor = (n) => BigInt(Math.ceil(rate * txVbytes([P2TR_SCRIPT, ...Array(n).fill(P2TR_SCRIPT)], [OPRET_SCRIPT, P2TR_SCRIPT, P2TR_SCRIPT])));
@@ -514,6 +516,7 @@ export class LiteWallet {
     let txHex = '';
     try { txHex = this.extractHex(signed); } catch { /* the engine broadcasts it; checked below when we have the hex */ }
     let sent = null, sendErr = null;
+    onStep(`Sending the transaction to ${hostOf(this.indexer)}…`);
     try { sent = plain(await this.wallet.sendEnd(online, signed, true)); } catch (e) { sendErr = e; }
     await this.save();
     const id = String(sent?.txid || txid);
@@ -552,20 +555,22 @@ export class LiteWallet {
    * ({ stage: 'ready', psbt, consignment, templateTxid, sellerOutpoint }); otherwise the tokens move first
    * ({ stage: 'moving', txid }) and `instantProgress` signs it once that transaction confirms.
    */
-  async instantList({ offerId, assetId, amount, priceSats, feeRate, market = '', token = '' }, store) {
+  async instantList({ offerId, assetId, amount, priceSats, feeRate, market = '', token = '', onStep = (_t) => {} }, store) {
     this.requirePresign();
     const o = readOffer({ assetId, amount, priceSats }, offerId);
     const prev = store.get(o.offerId);
     if (prev && !['cancelled'].includes(prev.stage)) return this.instantView(o.offerId, prev);
+    onStep(`Checking your tokens on ${hostOf(this.indexer)}…`);
     await this.wallet.sync(this.requireOnline());
     const unspents = plain(this.wallet.listUnspents(false)) || [];
     // market and token: where this wallet sends the signed listing when it's signed later (after the move)
     const base = { role: 'seller', assetId: o.assetId, amount: String(o.amount), priceSats: String(o.priceSats), market: String(market), token: String(token), at: Date.now() };
     const exact = exactCoinFor(unspents, o.assetId, o.amount, this.reserved);
-    if (exact) return this.instantSign(o.offerId, { ...base, stage: 'moving' }, store);
+    if (exact) { onStep('Signing the listing…'); return this.instantSign(o.offerId, { ...base, stage: 'moving' }, store); }
     const from = freeSellerCoinFor(unspents, o.assetId, o.amount, this.reserved);
     if (!from) throw new Error('No settled RGB output of this wallet holds that much of the token. Wait for incoming transfers to settle.');
-    const { txid, txHex } = await this.instantMove(o.assetId, o.amount, from, feeRate);
+    onStep('Moving the tokens to an output of their own…');
+    const { txid, txHex } = await this.instantMove(o.assetId, o.amount, from, feeRate, onStep);
     // the new output is promised to this listing from now on: no change or receive lands on it before it's signed.
     // The signed move is kept until it confirms, so a refresh can broadcast it again if a server dropped it.
     const e = { ...base, stage: 'moving', moveTxid: txid, moveHex: txHex || undefined, coin: `${txid}:${SEAL_OUTPUT}` };
@@ -657,7 +662,7 @@ export class LiteWallet {
     return hex.encode(tx.extract());
   }
   /** Buyer: check an Instant listing and buy it in one go: sign, broadcast, and hand the transfer to this wallet. */
-  async instantBuy({ offerId, network, offer, listing, feeRate }, store) {
+  async instantBuy({ offerId, network, offer, listing, feeRate, onStep = (_t) => {} }, store) {
     this.requirePresign(); this.checkNet(network);
     const o = readOffer(offer, offerId);
     if (o.state && o.state !== 'OPEN') throw new Error(`The offer is ${o.state.toLowerCase()}.`);
@@ -669,6 +674,7 @@ export class LiteWallet {
     if (String(info.templateTxid) !== String(l.templateTxid)) throw new Error('The listing does not match its transfer.');
     if (BigInt(String(info.payoutSats)) - BigInt(String(info.sellerSats)) !== o.priceSats) throw new Error('The signed price is not the offer\'s price.');
     const online = this.requireOnline();
+    onStep(`Checking your bitcoin on ${hostOf(this.indexer)}…`);
     await this.wallet.sync(online);
     if ((await this.ownOutpoints()).has(String(info.sellerOutpoint))) throw new Error('This is your own listing.');
     // the seller's output is still there, and is what the signature says
@@ -712,7 +718,8 @@ export class LiteWallet {
     const completed = this.lib.WasmWallet.completePresignedConsignment(consignment, info.templateTxid, txHex);
     check(completed, txid);
     store.set(o.offerId, { role: 'buyer', assetId: o.assetId, amount: String(o.amount), priceSats: String(o.priceSats), recipientId: r.recipientId, txid, completed: b64(completed), posted: false, at: Date.now() });
-    await this.esplora('/tx', { method: 'POST', body: txHex });
+    onStep(`Sending the purchase to ${hostOf(this.indexer)}…`);
+    await this.ensureBroadcast(txHex, txid);
     await this.instantPost(o.offerId, store);
     await this.save();
     return { txid };

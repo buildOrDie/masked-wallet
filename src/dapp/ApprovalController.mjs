@@ -280,6 +280,10 @@ export class ApprovalController {
   /** Carry out an approved request; returns what the dApp gets back. */
   async run(a) {
     const app = this.app, { account, trade } = app;
+    // what the slow steps are doing, shown under the request while "Working…"
+    const step = (text) => { this.state.status.approve = [text, '']; app.render(); };
+    // the main MASKED window refreshes its own balances: don't keep this window open for a second sync
+    const later = (r) => setTimeout(() => r.run(() => r.refresh(), { quiet: true }), 0);
     const prepared = (what = 'the transaction') => { if (!a.prep) throw new Error(a.prepErr || `Still preparing${what ? ` ${what}` : ''}.`); return a.prep; };
     const risky = () => { throw new Error('Tick the box to confirm spending an inscription coin.'); };
     switch (a.method) {
@@ -408,18 +412,18 @@ export class ApprovalController {
         return out;
       });
       case 'rgbBuySign': return this.rgbBusy(async () => { prepared(''); return app.rgb.service.signBuy(a.params); });
-      case 'rgbInstantList': return this.rgbBusy(async () => {
+      case 'rgbInstantList': step('Waiting for RGB…'); return this.rgbBusy(async () => {
         prepared(''); const r = app.rgb, P = a.params, o = P.offer;
         await this.rgbBackedUp(r);
-        const out = await r.service.instantList({ offerId: P.offerId, assetId: o.assetId, amount: o.amount, priceSats: o.priceSats, feeRate: P.feeRate || Number(r.fee()), market: P.market, token: P.token });
-        await r.refresh().catch(() => {});
+        const out = await r.service.instantList({ offerId: P.offerId, assetId: o.assetId, amount: o.amount, priceSats: o.priceSats, feeRate: P.feeRate || Number(r.fee()), market: P.market, token: P.token, onStep: step });
         await this.rgbBackedUp(r).catch(() => {});
+        later(r);
         return out;
       });
-      case 'rgbInstantBuy': return this.rgbBusy(async () => {
+      case 'rgbInstantBuy': step('Waiting for RGB…'); return this.rgbBusy(async () => {
         prepared(''); const r = app.rgb, P = a.params;
-        const out = await r.service.instantBuy({ ...P, feeRate: P.feeRate || Number(r.fee()) });
-        await r.refresh().catch(() => {});
+        const out = await r.service.instantBuy({ ...P, feeRate: P.feeRate || Number(r.fee()), onStep: step });
+        later(r);
         return out;
       });
       case 'rgbInstantCancel': return this.rgbBusy(async () => {
