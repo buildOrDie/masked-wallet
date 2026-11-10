@@ -354,6 +354,8 @@ export class WalletRgb {
       const seed = this.isMain ? await this.mainSeed() : '';
       await service.open(password, this.isMain ? () => runtime.mnemonicFrom(seed) : runtime.newTestMnemonic, backup);
       this.ready = true;
+      // the last balances, shown at once while the refresh below checks the block server (it can take a minute)
+      if (!this.data) { this.data = this.cachedSnapshot(); if (this.data) this.app.render?.(); }
       if (keyed) this.markKeyed();
       this.startTimer();
     } catch (error) { await this.close(); throw error; }
@@ -371,10 +373,16 @@ export class WalletRgb {
   }
   /** A full address scan has not completed yet for this test wallet on this engine. */
   needsScan() { try { return localStorage.getItem(`${this.profile.vaultKey}.scanned-v2`) !== '1'; } catch { return true; } }
+  get snapshotKey() { return `${this.profile.vaultKey}.snapshot`; }
+  /** The balances of the last refresh on this browser (tokens, BTC, history): null if there are none. */
+  cachedSnapshot() {
+    try { const d = JSON.parse(localStorage.getItem(this.snapshotKey) || 'null'); return d && typeof d === 'object' && d.groups ? { ...d, cached: true } : null; } catch { return null; }
+  }
   /** @param {boolean} [full] scan addresses ahead too: the first time, and when Refresh is tapped */
   async refresh(full = false) {
     full ||= this.needsScan();
     this.data = await this.service.snapshot({ full }); this.saved = false;
+    try { localStorage.setItem(this.snapshotKey, JSON.stringify(this.data, (_, v) => typeof v === 'bigint' ? v.toString() : v)); } catch { /* shown live only */ }
     if (full) try { localStorage.setItem(`${this.profile.vaultKey}.scanned-v2`, '1'); } catch { /* scans again next time */ }
     await this.instantCheck();
   }
@@ -425,7 +433,9 @@ export class WalletRgb {
     if (this.app.platform.rgbResumeId || !this.available || this.ready || this.busy || !this.exists || this.tried === this.profile.id) return;
     // let the wallet's own sync finish first: both use the same block servers
     // (at most 30 s: a long history rescan should not keep RGB closed)
-    if (this.app.sync?.syncing && (this.waitSince ||= Date.now()) > Date.now() - 30000) {
+    // (at most 30 s, or 5 s when the last balances are saved: they show at once and the refresh runs after)
+    const wait = localStorage.getItem(this.snapshotKey) ? 5000 : 30000;
+    if (this.app.sync?.syncing && (this.waitSince ||= Date.now()) > Date.now() - wait) {
       if (!this.waiting) this.waiting = setTimeout(() => { this.waiting = null; this.ensure(); this.app.render(); }, 3000);
       return;
     }

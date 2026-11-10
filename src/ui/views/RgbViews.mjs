@@ -95,7 +95,7 @@ export class RgbHome {
         <span class="bal-txt"><b class="tk">${r.isMain ? 'RGB fees' : 'Test BTC for fees'}</b><span class="mono">${esc(short(addr, 6))} ${I.copy}</span></span>
         <span class="bal-amt"><b>${fmtBtc(settled)}</b><span>${pending ? `<span class="pend-t">+${fmtBtc(pending)} waiting for a block</span>` : r.isMain ? 'BTC' : 'tBTC'}</span></span></button>`;
     return `<section class="home-toks">
-      <div class="list-h"><b>RGB tokens${r.isMain ? ' <span class="badge">beta</span>' : ''}</b><button class="link small" data-rgb="refresh" ${r.busy ? 'disabled' : ''}>${r.busy ? 'Updating…' : 'Refresh'}</button></div>
+      <div class="list-h"><b>RGB tokens${r.isMain ? ' <span class="badge">beta</span>' : ''}</b><button class="link small" data-rgb="refresh" ${r.busy ? 'disabled' : ''}>${r.busy ? 'Updating…' : r.data.cached ? 'Last saved · Refresh' : 'Refresh'}</button></div>
       ${backupDue}${fund}
       <div class="tok-list">${feeRow}${list.map((a) => {
         const { settled: s, future: fut } = r.bal(a);
