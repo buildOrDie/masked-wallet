@@ -92,6 +92,17 @@ export class LiteWallet {
     }
     throw last || new Error('Invalid indexer: no block server answered');
   }
+  /** Settings changed the block servers (the person's own server comes first): use the new list from the next sync. */
+  setIndexers(list) { this.params = { ...this.params, indexerUrls: list }; this.retryFirstAt = 0; }
+  /**
+   * A failover isn't forever: go back to the first server (the person's own, when set) as soon as it answers again.
+   * Tried at most every 2 minutes while it is down; the server in use stays connected if it fails.
+   */
+  async preferFirst() {
+    const first = this.indexers()[0];
+    if (!this.online || !first || this.indexer === first || Date.now() < (this.retryFirstAt || 0)) return;
+    try { this.online = await this.wallet.goOnline(false, first); this.indexer = first; } catch { this.retryFirstAt = Date.now() + 120000; }
+  }
   /** The block server in use failed: move to the next one (true if there was another to try). */
   async switchIndexer() {
     const list = this.indexers();

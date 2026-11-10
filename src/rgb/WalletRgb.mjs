@@ -337,6 +337,8 @@ export class WalletRgb {
     const servers = this.app.servers?.list?.() || [p.sdk.indexerUrl];
     return { ...p, sdk: { ...p.sdk, indexerUrls: servers.map((u) => String(u).replace(/\/+$/, '')) } };
   }
+  /** Settings → Blockchain server changed: RGB uses the new order too (your own server first). */
+  serversChanged() { this.service?.useServers?.(this.withIndexers(this.profile).sdk?.indexerUrls); }
   async serviceFor() {
     if (this.service && this.service.profile.id === this.profile.id) return this.service;
     const runtime = await this.runtime();

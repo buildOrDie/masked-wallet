@@ -199,3 +199,29 @@ test('block server fallback: a server that does not answer is skipped, and a fai
   w.online = null;
   await assert.rejects(w.goOnline(), /Invalid indexer/);
 });
+
+test('your own block server: RGB switches to it from Settings, and returns to it once it answers again', async () => {
+  const f = fakeLib();
+  const down = new Set();
+  f.lib.WasmWallet.prototype.goOnline = async function (_skip, url) { if (down.has(url)) throw new Error('Invalid indexer'); return { id: 1, indexerUrl: url }; };
+  const w = new LiteWallet(f.lib, { ...RGB_PROFILES.public.sdk, indexerUrl: 'https://mempool.space/signet/api', indexerUrls: ['https://mempool.space/signet/api'], mnemonic, password: 'x' });
+  await w.init(); await w.unlock();
+  assert.equal(w.indexer, 'https://mempool.space/signet/api');
+  // Settings saves your server: the next sync moves to it, no reload
+  const mine = 'https://signet-api.example.com/api';
+  w.setIndexers([mine, 'https://mempool.space/signet/api']);
+  await w.preferFirst();
+  assert.equal(w.indexer, mine);
+  // your server goes down: failover to the public one
+  down.add(mine);
+  assert.equal(await w.switchIndexer(), true);
+  assert.equal(w.indexer, 'https://mempool.space/signet/api');
+  // still down: stay on the public one, and don't retry for 2 minutes
+  await w.preferFirst();
+  assert.equal(w.indexer, 'https://mempool.space/signet/api');
+  assert.ok(w.retryFirstAt > Date.now());
+  // back up: return to it once the wait is over
+  down.clear(); w.retryFirstAt = 0;
+  await w.preferFirst();
+  assert.equal(w.indexer, mine);
+});

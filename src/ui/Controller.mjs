@@ -501,10 +501,11 @@ export class Controller {
         state.status.srv = ['Checking…', '']; this.render();
         try {
           await app.servers.saveCustom($('#srvUrl').value, { requestPermission: () => this.permAsk });
+          app.rgb?.serversChanged?.();
           state.status.srv = [app.servers.custom() ? 'Saved. Your server is used first.' : 'Using public servers.', 'ok'];
         } catch (err) { state.status.srv = [friendly(err.message), 'err']; }
         this.render(); sync.run(4); break;
-      case 'btnSrvOff': await app.servers.saveCustom(''); state.status.srv = ['Using public servers.', 'ok']; this.render(); break;
+      case 'btnSrvOff': await app.servers.saveCustom(''); app.rgb?.serversChanged?.(); state.status.srv = ['Using public servers.', 'ok']; this.render(); break;
       case 'btnScanSave':
         state.status.scansrv = ['Checking…', '']; this.render();
         try {

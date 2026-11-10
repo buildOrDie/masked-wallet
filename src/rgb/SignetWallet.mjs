@@ -52,11 +52,18 @@ export class SignetWallet {
       } catch (e) { await this.close(); throw e; }
     });
   }
+  /** Settings → Blockchain server changed: the open wallet switches on its next sync, no reload needed. */
+  useServers(list) {
+    if (!Array.isArray(list) || !list.length) return;
+    this.profile = { ...this.profile, sdk: { ...this.profile.sdk, indexerUrls: list } };
+    this.wallet?.setIndexers?.(list);
+  }
   requireWallet() { if (!this.wallet || !this.mnemonic) throw new Error('Unlock the RGB test wallet first.'); return this.wallet; }
   /** @param {{ full?: boolean }} [o] full: also scan addresses ahead (finds coins sent to older addresses) */
   async snapshot({ full = false } = {}) {
     return this.exclusive(async () => {
       const wallet = this.requireWallet();
+      await wallet.preferFirst?.();
       // the block server in use is busy or gone: try the next one once before giving up
       try { await wallet.syncWallet({ full }); } catch (e) {
         if (!/invalid indexer|esplora|failed to fetch|network|429|too many|timed? ?out|50[234]/i.test(String(e?.message || e)) || !(await wallet.switchIndexer?.())) throw e;

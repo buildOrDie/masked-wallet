@@ -60,7 +60,8 @@ export class EsploraPool {
     }
     let order = [...list].sort((a, b) => Number(this.isResting(a)) - Number(this.isResting(b)));
     // block data is public and identical everywhere: spread it over all servers to double the speed
-    if (/^block(-height)?\//.test(path)) {
+    // (not when the person set their own server: it is used for everything while it answers)
+    if (/^block(-height)?\//.test(path) && !(this.custom() && !this.isResting(list[0]))) {
       const up = order.filter((b) => !this.isResting(b));
       if (up.length > 1) { const k = this.roundRobin++ % up.length; order = [...up.slice(k), ...up.slice(0, k), ...order.filter((b) => this.isResting(b))]; }
     }
