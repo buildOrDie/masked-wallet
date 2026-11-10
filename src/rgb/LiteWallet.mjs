@@ -509,9 +509,42 @@ export class LiteWallet {
       [{ script: seal, sats: INSTANT_SEAL_SATS }, { script: own, sats: Number(change) }],
     );
     const psbt = await this.wallet.colorSwap(online, unsigned, assetId, BigInt(amount), r.recipientId, SEAL_OUTPUT, BigInt(INSTANT_SEAL_SATS), [this.transport], 1);
-    const sent = plain(await this.wallet.sendEnd(online, this.sign(psbt), true));
+    const signed = this.sign(psbt);
+    const txid = String(this.lib.WasmWallet.psbtTxid(psbt));
+    let txHex = '';
+    try { txHex = this.extractHex(signed); } catch { /* the engine broadcasts it; checked below when we have the hex */ }
+    let sent = null, sendErr = null;
+    try { sent = plain(await this.wallet.sendEnd(online, signed, true)); } catch (e) { sendErr = e; }
     await this.save();
-    return String(sent?.txid || this.lib.WasmWallet.psbtTxid(psbt));
+    const id = String(sent?.txid || txid);
+    // the engine's broadcast can fail quietly on a busy server: make sure a block server has it
+    if (txHex) await this.ensureBroadcast(txHex, id);
+    else if (sendErr) throw sendErr;
+    return { txid: id, txHex };
+  }
+  /** Does a block server know this transaction (in the mempool or in a block)? */
+  async knowsTx(txid) {
+    try { const r = await fetch(`${this.indexer || this.indexers()[0]}/tx/${txid}/status`); return r.ok; } catch { return false; }
+  }
+  /**
+   * Broadcast `txHex` until a block server has it: the one in use first, then the others. Already known counts as done.
+   * Throws when none accepts it, with the server's reason.
+   */
+  async ensureBroadcast(txHex, txid) {
+    if (txid && await this.knowsTx(txid)) return true;
+    const list = [...new Set([this.indexer, ...this.indexers()].filter(Boolean))];
+    let why = '';
+    for (const base of list) {
+      try {
+        const r = await fetch(`${base}/tx`, { method: 'POST', body: txHex });
+        const text = await r.text().catch(() => '');
+        if (r.ok || /already (in|known)|txn-already|in block chain|already have/i.test(text)) return true;
+        why = text.slice(0, 200) || String(r.status);
+        // the transaction itself is invalid: another server won't change that
+        if (r.status === 400 && !/already/i.test(text)) break;
+      } catch (e) { why = String(e?.message || e); }
+    }
+    throw new Error(`The transaction is signed but no block server accepted it: ${why}`);
   }
 
   /**
@@ -532,9 +565,10 @@ export class LiteWallet {
     if (exact) return this.instantSign(o.offerId, { ...base, stage: 'moving' }, store);
     const from = freeSellerCoinFor(unspents, o.assetId, o.amount, this.reserved);
     if (!from) throw new Error('No settled RGB output of this wallet holds that much of the token. Wait for incoming transfers to settle.');
-    const txid = await this.instantMove(o.assetId, o.amount, from, feeRate);
-    // the new output is promised to this listing from now on: no change or receive lands on it before it's signed
-    const e = { ...base, stage: 'moving', moveTxid: txid, coin: `${txid}:${SEAL_OUTPUT}` };
+    const { txid, txHex } = await this.instantMove(o.assetId, o.amount, from, feeRate);
+    // the new output is promised to this listing from now on: no change or receive lands on it before it's signed.
+    // The signed move is kept until it confirms, so a refresh can broadcast it again if a server dropped it.
+    const e = { ...base, stage: 'moving', moveTxid: txid, moveHex: txHex || undefined, coin: `${txid}:${SEAL_OUTPUT}` };
     store.set(o.offerId, e);
     this.reserve([...this.reserved, e.coin]);
     return this.instantView(o.offerId, e);
@@ -546,7 +580,7 @@ export class LiteWallet {
     const coin = exactCoinFor(mine, e.assetId, e.amount, e.coin ? new Set() : this.reserved);
     if (!coin) return this.instantView(offerId, e); // the move hasn't settled yet
     const r = plain(await this.wallet.presignSale(online, e.assetId, BigInt(e.amount), coin.outpoint, await this.ownScript(), BigInt(e.priceSats), 1));
-    const next = { ...e, stage: 'ready', coin: String(r.sellerOutpoint), psbt: String(r.psbt), consignment: b64(Uint8Array.from(r.consignment)), templateTxid: String(r.templateTxid), sellerSats: String(r.sellerSats), at: Date.now() };
+    const next = { ...e, moveHex: undefined, stage: 'ready', coin: String(r.sellerOutpoint), psbt: String(r.psbt), consignment: b64(Uint8Array.from(r.consignment)), templateTxid: String(r.templateTxid), sellerSats: String(r.sellerSats), at: Date.now() };
     store.set(offerId, next);
     this.reserve([...new Set([...this.reserved, next.coin])]);
     await this.save();
@@ -569,6 +603,11 @@ export class LiteWallet {
         if (e.stage === 'moving') {
           const v = await this.instantSign(id, e, store);
           if (v.stage === 'ready') changes.push(v);
+          // not confirmed yet: if no block server has the move (dropped, or never sent), send it again (every 2 min)
+          else if (e.moveHex && e.moveTxid && Date.now() - (e.rebroadcastAt || 0) > 120000) {
+            store.set(id, { ...e, rebroadcastAt: Date.now() });
+            await this.ensureBroadcast(e.moveHex, e.moveTxid).catch(() => {});
+          }
         } else if (e.stage === 'ready' && e.psbt && !e.outdated && !this.validListing(e.psbt)) {
           // signed by an earlier MASKED in a layout buyers refuse: it can't sell; cancelling moves the tokens back
           store.set(id, { ...e, outdated: true });
@@ -603,7 +642,7 @@ export class LiteWallet {
     const [txid, vout] = e.coin.split(':');
     const sp = await (await this.esplora(`/tx/${txid}/outspend/${vout}`)).json();
     if (sp?.spent) throw new Error('This listing was just bought. Refresh to see the sale.');
-    const cancelTxid = await this.instantMove(e.assetId, e.amount, { outpoint: e.coin }, feeRate);
+    const { txid: cancelTxid } = await this.instantMove(e.assetId, e.amount, { outpoint: e.coin }, feeRate);
     this.reserve([...this.reserved].filter((x) => x !== e.coin));
     const n = { ...e, stage: 'cancelling', cancelTxid, psbt: undefined, consignment: undefined, at: Date.now() };
     store.set(String(offerId), n);

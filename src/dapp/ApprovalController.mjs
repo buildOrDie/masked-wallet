@@ -183,6 +183,8 @@ export class ApprovalController {
   /** One RGB step at a time: Home's minute refresh waits while this runs. */
   async rgbBusy(fn) {
     const r = this.app.rgb;
+    // a refresh is running (slow on a busy block server): wait for it instead of failing straight away
+    for (const until = Date.now() + 90000; r.busy && Date.now() < until;) await new Promise((ok) => setTimeout(ok, 250));
     if (r.busy) throw new Error('RGB is busy. Try again in a moment.');
     r.busy = true;
     try { return await fn(); } finally { r.busy = false; }

@@ -225,3 +225,25 @@ test('your own block server: RGB switches to it from Settings, and returns to it
   await w.preferFirst();
   assert.equal(w.indexer, mine);
 });
+
+test('a signed transaction a busy server dropped is sent to the next one, and "already known" counts as sent', async () => {
+  const f = fakeLib();
+  const w = new LiteWallet(f.lib, { ...RGB_PROFILES.public.sdk, indexerUrl: 'https://a.example/api', indexerUrls: ['https://a.example/api', 'https://b.example/api'], mnemonic, password: 'x' });
+  const real = globalThis.fetch, seen = [];
+  let bKnows = false;
+  globalThis.fetch = async (u, init = {}) => {
+    u = String(u); seen.push(`${init.method || 'GET'} ${u}`);
+    if (u.endsWith('/status')) return new Response('not found', { status: 404 });
+    if (u.startsWith('https://a.example')) return new Response('busy', { status: 503 });
+    return bKnows ? new Response('sendrawtransaction RPC error: {"code":-27,"message":"Transaction already in block chain"}', { status: 400 }) : new Response('txid1');
+  };
+  try {
+    assert.equal(await w.ensureBroadcast('02beef', 'txid1'), true);
+    assert.deepEqual(seen, ['GET https://a.example/api/tx/txid1/status', 'POST https://a.example/api/tx', 'POST https://b.example/api/tx']);
+    bKnows = true;
+    assert.equal(await w.ensureBroadcast('02beef', 'txid1'), true);
+    // rejected as invalid: the reason comes through
+    globalThis.fetch = async (u) => String(u).endsWith('/status') ? new Response('', { status: 404 }) : new Response('bad-txns-inputs-missingorspent', { status: 400 });
+    await assert.rejects(w.ensureBroadcast('02beef', 'txid1'), /no block server accepted it: bad-txns-inputs-missingorspent/);
+  } finally { globalThis.fetch = real; }
+});
