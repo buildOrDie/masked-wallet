@@ -537,9 +537,15 @@ export class LiteWallet {
     else if (sendErr) throw sendErr;
     return { txid: id, txHex };
   }
-  /** Does a block server know this transaction (in the mempool or in a block)? */
+  /**
+   * Does a block server know this transaction (in the mempool or in a block)? Asks for the transaction itself:
+   * electrs answers /status with {"confirmed":false} even for a transaction it has never seen.
+   */
   async knowsTx(txid) {
-    try { const r = await fetch(`${this.indexer || this.indexers()[0]}/tx/${txid}/status`); return r.ok; } catch { return false; }
+    try {
+      const r = await fetch(`${this.indexer || this.indexers()[0]}/tx/${txid}/hex`);
+      return r.ok && /^[0-9a-f]{20,}$/i.test((await r.text()).trim());
+    } catch { return false; }
   }
   /**
    * Broadcast `txHex` until a block server has it: the one in use first, then the others. Already known counts as done.

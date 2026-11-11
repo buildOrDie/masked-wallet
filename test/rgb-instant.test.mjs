@@ -72,7 +72,9 @@ function fakeChain() {
       chain.posted.push(init.body); return new Response(T('f'));
     }
     // a transaction is known once something was broadcast (enough for these tests)
-    if (/^\/tx\/[^/]+\/status$/.test(u)) return chain.posted.length ? Response.json({ confirmed: false }) : new Response('not found', { status: 404 });
+    // electrs: /status says {"confirmed":false} even for an unknown transaction; /hex is 404 until it has it
+    if (/^\/tx\/[^/]+\/status$/.test(u)) return Response.json({ confirmed: false });
+    if (/^\/tx\/[^/]+\/hex$/.test(u)) return chain.posted.length ? new Response('0200000001abcdef0123456789') : new Response('Transaction not found', { status: 404 });
     if ((q = /^\/tx\/([0-9a-f]{64})\/outspend\/(\d+)$/.exec(u))) return Response.json(chain.spends[`${q[1]}:${q[2]}`] || { spent: false });
     return new Response('not found', { status: 404 });
   };

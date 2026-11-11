@@ -233,17 +233,18 @@ test('a signed transaction a busy server dropped is sent to the next one, and "a
   let bKnows = false;
   globalThis.fetch = async (u, init = {}) => {
     u = String(u); seen.push(`${init.method || 'GET'} ${u}`);
-    if (u.endsWith('/status')) return new Response('not found', { status: 404 });
+    if (u.endsWith('/status')) return Response.json({ confirmed: false }); // electrs says this even for unknown transactions
+    if (u.endsWith('/hex')) return new Response('Transaction not found', { status: 404 });
     if (u.startsWith('https://a.example')) return new Response('busy', { status: 503 });
     return bKnows ? new Response('sendrawtransaction RPC error: {"code":-27,"message":"Transaction already in block chain"}', { status: 400 }) : new Response('txid1');
   };
   try {
     assert.equal(await w.ensureBroadcast('02beef', 'txid1'), true);
-    assert.deepEqual(seen, ['GET https://a.example/api/tx/txid1/status', 'POST https://a.example/api/tx', 'POST https://b.example/api/tx']);
+    assert.deepEqual(seen, ['GET https://a.example/api/tx/txid1/hex', 'POST https://a.example/api/tx', 'POST https://b.example/api/tx']);
     bKnows = true;
     assert.equal(await w.ensureBroadcast('02beef', 'txid1'), true);
     // rejected as invalid: the reason comes through
-    globalThis.fetch = async (u) => String(u).endsWith('/status') ? new Response('', { status: 404 }) : new Response('bad-txns-inputs-missingorspent', { status: 400 });
+    globalThis.fetch = async (u) => String(u).endsWith('/hex') ? new Response('Transaction not found', { status: 404 }) : new Response('bad-txns-inputs-missingorspent', { status: 400 });
     await assert.rejects(w.ensureBroadcast('02beef', 'txid1'), /no block server accepted it: bad-txns-inputs-missingorspent/);
   } finally { globalThis.fetch = real; }
 });
