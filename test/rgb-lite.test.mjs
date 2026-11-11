@@ -247,3 +247,17 @@ test('a signed transaction a busy server dropped is sent to the next one, and "a
     await assert.rejects(w.ensureBroadcast('02beef', 'txid1'), /no block server accepted it: bad-txns-inputs-missingorspent/);
   } finally { globalThis.fetch = real; }
 });
+
+test('an invoice for a token this wallet has never held: names no token, keeps the amount (or any amount)', async () => {
+  const { w, calls } = await open();
+  const proto = Object.getPrototypeOf(w.wallet);
+  const real = w.wallet.blindReceive;
+  w.wallet.blindReceive = function (...a) { calls.push(['blindReceive', ...a]); if (a[0]) throw new Error('Asset with id rgb:new not found'); return real.apply(this, a); };
+  await w.onchainReceive({ assetId: 'rgb:new', amount: 30700, durationSeconds: 3600 });
+  const bl = calls.filter((c) => c[0] === 'blindReceive' && c[2]?.Fungible === 30700).map((c) => c[1]);
+  assert.equal(bl[0], 'rgb:new'); assert.ok(bl.slice(1).every((x) => x === null) && bl.length > 1);
+  // other errors still come through
+  w.wallet.blindReceive = () => { throw new Error('InsufficientAllocationSlots'); };
+  await assert.rejects(w.onchainReceive({ assetId: 'rgb:new', amount: 1 }), /InsufficientAllocationSlots/);
+  assert.ok(proto);
+});

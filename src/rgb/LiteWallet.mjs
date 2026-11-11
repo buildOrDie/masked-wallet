@@ -189,6 +189,18 @@ export class LiteWallet {
     for (const id of ids) for (const t of plain(this.wallet.listTransfers(id)) || []) if (t?.recipientId) out.add(String(t.recipientId));
     return out;
   }
+  /**
+   * The engine's invoice call. The first time a token comes to this wallet the engine doesn't know it yet
+   * (AssetNotFound): the invoice then names no token (the sender's tokens make it known), keeping the amount, or
+   * any amount if the engine needs a token for that.
+   */
+  receiveCall(make, assetId, assignment, durationSeconds) {
+    const call = (id, a) => plain(this.wallet[make](id, a, durationSeconds, [this.transport], 1));
+    try { return call(assetId, assignment); } catch (e) {
+      if (!assetId || !/AssetNotFound|not found/i.test(String(e?.message || e))) throw e;
+      try { return call(null, assignment); } catch (e2) { if (assignment === 'Any') throw e2; return call(null, 'Any'); }
+    }
+  }
   async onchainReceive({ assetId = null, amount = 0, durationSeconds = null, witness = false } = {}) {
     const assignment = amount ? { Fungible: amount } : 'Any';
     const make = witness ? 'witnessReceive' : 'blindReceive';
@@ -199,7 +211,7 @@ export class LiteWallet {
     let r = null;
     for (let i = 0; i < 4; i++) {
       if (witness && typeof this.wallet.rotateAddress === 'function') this.wallet.rotateAddress(0); // 0 = receive keychain; the funding address (1) stays
-      r = plain(this.wallet[make](assetId || null, assignment, durationSeconds, [this.transport], 1));
+      r = this.receiveCall(make, assetId || null, assignment, durationSeconds);
       if (!witness || !used.has(String(r?.recipientId ?? ''))) break;
       // a reused one is cancelled at once, so it can never match a payment
       try { await this.wallet.failTransfers(this.requireOnline(), r.batchTransferIdx, false, true); } catch { /* offline: it stays open, but it is never shown */ }
