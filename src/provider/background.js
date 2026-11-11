@@ -307,7 +307,10 @@ async function handle(origin, method, params) {
       if (!Number.isSafeInteger(expiry) || expiry < 600 || expiry > 7 * 86400) throw err(4000, 'expirySeconds must be between 600 and 604800.');
       const kind = params.kind == null || params.kind === '' ? '' : String(params.kind);
       if (kind && !['blind', 'witness'].includes(kind)) throw err(4000, 'kind must be "blind" or "witness".');
-      return openApproval(origin, 'rgbInvoice', { assetId, baseUnits, expiry, kind });
+      // how the site describes a token the wallet may not hold yet (shown as the site's words, never trusted for amounts)
+      const ticker = /^[A-Za-z0-9]{1,12}$/.test(String(params.ticker || '')) ? String(params.ticker) : '';
+      const precision = Number.isInteger(params.precision) && params.precision >= 0 && params.precision <= 18 ? params.precision : null;
+      return openApproval(origin, 'rgbInvoice', { assetId, baseUnits, expiry, kind, ticker, precision });
     }
     case 'rgbPayInvoice': {
       needConnected();

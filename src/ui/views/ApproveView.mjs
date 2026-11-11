@@ -131,7 +131,7 @@ export class ApproveView extends View {
     ${rowKV('Network', esc(r.profile.label))}
     ${b ? rowKV('Invoice type', b.witness ? 'No BTC needed (the sender adds a small output)' : 'Private (uses one of your RGB outputs)') : ''}
     ${rowKV('Works for', `${Math.round((b?.expiry || P.expiry || 86400) / 3600)} hours`)}</div>
-    ${b?.newToken ? '<p class="info">You don\'t hold this token yet. It shows in RGB once it arrives.</p>' : ''}
+    ${b?.siteDescribed ? `<p class="info">You don't hold this token yet, so the amount is shown as ${esc(new URL(a.origin).host)} describes it (${P.precision} decimals: ${esc(Number(P.baseUnits).toLocaleString('en-US'))} smallest units). It shows in RGB once it arrives.</p>` : b?.newToken ? '<p class="info">You don\'t hold this token yet. It shows in RGB once it arrives.</p>' : ''}
     <p class="info">The site gets an invoice to send you tokens. It can't take anything from your wallet. Tokens arrive after one confirmation.</p>
     ${this.rgbWait(a)}${this.error(a)}`;
   }

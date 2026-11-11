@@ -77,8 +77,12 @@
     }),
     // RGB tokens (the wallet's RGB account): every invoice and send is approved in MASKED
     rgb: Object.freeze({
-      /** An invoice to receive tokens: { assetId?, baseUnits?, expirySeconds?, kind?: 'blind'|'witness' } → { invoice, recipientId, expirationTimestamp, witness } */
-      requestInvoice: (o = {}) => request('rgbRequestInvoice', { assetId: o.assetId, baseUnits: o.baseUnits != null ? String(o.baseUnits) : undefined, expirySeconds: o.expirySeconds, kind: o.kind }),
+      /**
+       * An invoice to receive tokens: { assetId?, baseUnits?, expirySeconds?, kind?: 'blind'|'witness', ticker?, precision? }
+       * → { invoice, recipientId, expirationTimestamp, witness }. ticker and precision describe a token the wallet doesn't
+       * hold yet, so the approval can show "307 MASKED" instead of "30,700 units" (shown as the site's description).
+       */
+      requestInvoice: (o = {}) => request('rgbRequestInvoice', { assetId: o.assetId, baseUnits: o.baseUnits != null ? String(o.baseUnits) : undefined, expirySeconds: o.expirySeconds, kind: o.kind, ticker: o.ticker, precision: o.precision }),
       /** Pay an RGB invoice: { assetId?, amount? (tokens as wallets show them), feeRate? } → { txid, batchTransferIdx, status: 'broadcast'|'waiting' } */
       payInvoice: (invoice, o = {}) => request('rgbPayInvoice', { invoice, assetId: o.assetId, amount: o.amount != null ? String(o.amount) : undefined, feeRate: o.feeRate }),
       // peer-to-peer swaps: tokens for BTC in one transaction, wallet to wallet (docs/PROVIDER.md)

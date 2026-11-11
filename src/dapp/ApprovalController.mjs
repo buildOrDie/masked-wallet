@@ -7,7 +7,7 @@ import { UNISAT_NET } from '../bitcoin/networks.mjs';
 import { signMessageBip322, signMessageEcdsa } from '../bitcoin/messages.mjs';
 import { TRADE_SITES } from '../trade/TradeAccount.mjs';
 import { lockKeyOf, peekToken } from '../ecash/EcashBook.mjs';
-import { toBase } from '../rgb/config.mjs';
+import { toBase, fromBase } from '../rgb/config.mjs';
 import { proxyUrl, rgbError } from '../rgb/WalletRgb.mjs';
 
 /** Methods whose approve button waits for a prepared transaction. */
@@ -145,7 +145,10 @@ export class ApprovalController {
       const witness = P.kind ? P.kind === 'witness' : r.recvType() === 'witness';
       return {
         assetId: P.assetId || '', asset, amount: base, witness, expiry: Number(P.expiry) || 86400,
-        shown: base ? (asset ? `${r.amount(asset, base)} ${asset.ticker}` : `${base.toLocaleString('en-US')} units`) : 'Any amount',
+        // a token this wallet doesn't hold yet: in the site's words (ticker, decimals) when it gave them
+        siteDescribed: !asset && base > 0 && Number.isInteger(P.precision),
+        shown: base ? (asset ? `${r.amount(asset, base)} ${asset.ticker}`
+          : Number.isInteger(P.precision) ? `${fromBase(base, P.precision)} ${P.ticker || 'tokens'}` : `${base.toLocaleString('en-US')} units`) : 'Any amount',
         newToken: !!P.assetId && !asset,
       };
     });

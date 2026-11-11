@@ -173,11 +173,13 @@ await fetch('/api/unlock', { method: 'POST', body: token }); // your server rede
 the RGB balance or its addresses. The escrow marketplace uses both: a seller pays the escrow's invoice, a buyer gives an
 invoice for the tokens they bought.
 
-### `rgb.requestInvoice({ assetId?, baseUnits?, expirySeconds?, kind? }): Promise<{ invoice, recipientId, expirationTimestamp, witness }>` 🔐
+### `rgb.requestInvoice({ assetId?, baseUnits?, expirySeconds?, kind?, ticker?, precision? }): Promise<{ invoice, recipientId, expirationTimestamp, witness }>` 🔐
 An invoice to receive tokens. `assetId` (`rgb:…`) and `baseUnits` (the amount in the token's smallest unit, as a string)
 fix what it asks for; leave them out for any token or any amount. `expirySeconds`: 600 to 604800 (default 86400).
 `kind`: `'blind'` (private, uses one of the user's RGB outputs) or `'witness'` (no BTC needed: the sender adds a small
-output); MASKED picks when left out. On mainnet the invoice is returned only once it is in a backup.
+output); MASKED picks when left out. `ticker` (1–12 letters or digits) and `precision` (0–18) describe a token the user
+doesn't hold yet, so the approval shows `307 MASKED` instead of `30,700 units`; MASKED labels it as the site's
+description. On mainnet the invoice is returned only once it is in a backup.
 
 ### `rgb.payInvoice(invoice, { assetId?, amount?, feeRate? }): Promise<{ txid, batchTransferIdx, amount, status }>` 🔐
 Sends tokens to an RGB invoice. `assetId` is needed when the invoice names no token. `amount` is in tokens as wallets
