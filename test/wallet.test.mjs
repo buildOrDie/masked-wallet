@@ -977,3 +977,17 @@ test('RGB uses the person\'s own block server first, then the public ones, and e
   assert.match(rgbError(new Error('Invalid indexer: not a valid esplora server'), p), /couldn't reach a block server[\s\S]*ad blocker[\s\S]*Settings → Blockchain server/);
   localStorage.removeItem('masked.rgb.mainnet-beta');
 });
+
+test('RGB cloud backup: mainnet keeps its keys, each test network has its own backup', async () => {
+  const cloud = await import('../src/rgb/cloud.mjs');
+  const secret = { words: 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about', passphrase: '' };
+  const { sha256 } = await import('@noble/hashes/sha256');
+  const { bytesToHex } = await import('@noble/hashes/utils');
+  // mainnet: the original path, so existing backups still open
+  assert.equal(cloud.cloudMaterial(secret), bytesToHex(sha256(new TextEncoder().encode(`MASKED/rgb-cloud/v1\n${secret.words}\n`))));
+  assert.equal(cloud.cloudMaterial(secret, 'mainnet'), cloud.cloudMaterial(secret));
+  const main = await cloud.cloudKeys(secret), sig = await cloud.cloudKeys(secret, 'public'), utexo = await cloud.cloudKeys(secret, 'utexo');
+  assert.notEqual(main.id, sig.id); assert.notEqual(sig.id, utexo.id);
+  // the same phrase finds the same Signet backup in any browser
+  assert.equal((await cloud.cloudKeys({ ...secret }, 'public')).id, sig.id);
+});

@@ -88,6 +88,11 @@ work either way.
   can't be reached, MASKED doesn't start a new RGB wallet over a backup that may exist.
 - **Switch off.** Switching off sends a signed request that deletes every stored copy. After that, save backup files
   yourself after every change.
+- **Signet too (2.27.11).** Each RGB test network has its own backup, on a path of its own
+  (`MASKED/rgb-cloud/v1/<network>`), so a Signet backup never touches the mainnet one. New Signet RGB wallets also take
+  their keys from the phrase (`MASKED/rgb-<network>-keys/v1`), like mainnet: restoring the phrase in a new browser and
+  turning on RGB brings the same wallet back. Signet wallets made before 2.27.11 keep their own keys and start backing up
+  to the cloud the next time they change.
 - Code: `src/rgb/cloud.mjs`. Endpoint: `https://scan.maskedwallet.com/rgb-vault/v1/backup/<id>`.
 
 What the server can see: when backups are saved, their rough size, and the IP address that saved them. It can't read

@@ -80,7 +80,7 @@ export class RgbHome {
     const { settled, pending } = r.btc();
     const t = r.isMain ? '' : 'test ';
     // with cloud backup on, Home only speaks up when the cloud could not save
-    const cloudFail = r.isMain && r.cloudOn && r.cloud.error && r.service?.backupRequired;
+    const cloudFail = r.cloudOn && r.cloud.error && r.service?.backupRequired;
     const backupDue = cloudFail
       ? `<button class="hint hint-cta" data-go="settings"><span class="hint-ic">${I.check}</span><span><b>RGB cloud backup didn't save</b><span>${esc(r.cloud.error)} Open Settings → RGB.</span></span><span class="chev">›</span></button>`
       : r.isMain && !r.cloudOn && r.service?.backupRequired
@@ -355,7 +355,7 @@ export class RgbSettings {
     const { settled, pending } = r.btc();
     return `<section class="card"><details class="menu-det" data-k="rgb"><summary class="menu-row"><span>${I.mint}<b>${r.isMain ? 'RGB (beta)' : 'RGB (test)'}</b></span><span class="small muted">${r.ready ? 'on' : r.exists ? 'opening' : 'off'} ›</span></summary>
       <div class="det-body">
-        ${nets ? `<div class="field"><span class="lbl">Test network</span>${nets}</div>` : `<p class="info warn">Beta on Bitcoin mainnet. RGB tokens can only be restored from an RGB backup, not from the recovery phrase alone. Keep amounts small.</p>${RgbSettings.cloud(r)}`}
+        ${nets ? `<div class="field"><span class="lbl">Test network</span>${nets}</div>${RgbSettings.cloud(r)}` : `<p class="info warn">Beta on Bitcoin mainnet. RGB tokens can only be restored from an RGB backup, not from the recovery phrase alone. Keep amounts small.</p>${RgbSettings.cloud(r)}`}
         ${r.ready ? `
         ${rowKV(r.isMain ? 'BTC for RGB fees' : 'Test BTC for fees', `${fmtBtc(settled)} ${r.isMain ? 'BTC' : 'tBTC'}${pending ? ` <span class="muted">+${fmtBtc(pending)} pending</span>` : ''}`)}
         <p class="addr mono small">${addrChunks(r.data?.address || '')}</p>
@@ -363,7 +363,7 @@ export class RgbSettings {
         <p class="muted small">${esc(r.profile.funding)}</p>
         ${Object.keys(r.data?.transfers || {}).some((id) => r.unsent(id).length) ? '<p class="info warn small">A transfer is waiting for the other wallet to accept it. Let it finish, or cancel it, before you restore this wallet anywhere else: a restored wallet can\'t finish a transfer that was already signed.</p>' : ''}
         <button class="btn ghost wide" data-rgb="backup" ${r.busy ? 'disabled' : ''}>Save RGB backup file</button>
-        <p class="muted small">${r.fileAt ? `Last file: ${ago(r.fileAt)}. ` : 'No backup file saved from this browser yet. '}${r.isMain && r.cloudOn ? (r.cloud.error || r.service?.backupRequired ? 'Changes since the last cloud backup are not saved anywhere yet.' : 'The cloud backup has every change.') : r.service?.backupRequired ? 'Changed since your last RGB backup.' : 'Backup up to date.'} Restoring needs this same MASKED wallet.</p>
+        <p class="muted small">${r.fileAt ? `Last file: ${ago(r.fileAt)}. ` : 'No backup file saved from this browser yet. '}${r.cloudOn ? (r.cloud.error || r.service?.backupRequired ? 'Changes since the last cloud backup are not saved anywhere yet.' : 'The cloud backup has every change.') : r.service?.backupRequired ? 'Changed since your last RGB backup.' : 'Backup up to date.'} Restoring needs this same MASKED wallet.</p>
         ${RgbSettings.instant(r)}
         <button class="btn ghost wide" data-rgb="off" ${r.busy ? 'disabled' : ''}>Turn off RGB for now</button>
         ${r.isMain ? `<button class="btn ghost wide" data-rgb="betaOff" ${r.busy ? 'disabled' : ''}>Switch off RGB beta</button>` : ''}` : `

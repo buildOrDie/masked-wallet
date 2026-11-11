@@ -1,4 +1,4 @@
-// Encrypted cloud backup for RGB on mainnet.
+// Encrypted cloud backup for RGB (mainnet, and the test networks on paths of their own).
 //
 // What leaves the browser is the RGB backup MASKED already makes (encrypted with a key from the recovery phrase),
 // encrypted a second time with a cloud key, padded to a fixed size and signed. The server stores opaque bytes under
@@ -26,14 +26,19 @@ const te = new TextEncoder(), td = new TextDecoder();
 const BUCKETS = [64, 256, 1024, 2048, 4096, 8192, 16384].map((k) => k * 1024);
 export const CLOUD_MAX = BUCKETS[BUCKETS.length - 1] - 4;
 
-/** The cloud key material (32 bytes, hex) from the recovery phrase. It opens only the RGB cloud backup. */
-export function cloudMaterial(secret) {
+/**
+ * The cloud key material (32 bytes, hex) from the recovery phrase. It opens only the RGB cloud backup of one network:
+ * mainnet keeps its original path; each test network has its own, so their backups never meet.
+ * @param {{ words: string, passphrase?: string }} secret @param {string} [net] RGB profile id ('mainnet', 'public', …)
+ */
+export function cloudMaterial(secret, net = 'mainnet') {
   if (!secret?.words) throw new Error('Unlock your wallet first.');
-  return bytesToHex(sha256(te.encode(`MASKED/rgb-cloud/v1\n${secret.words}\n${secret.passphrase || ''}`)));
+  const label = net === 'mainnet' ? 'MASKED/rgb-cloud/v1' : `MASKED/rgb-cloud/v1/${net}`;
+  return bytesToHex(sha256(te.encode(`${label}\n${secret.words}\n${secret.passphrase || ''}`)));
 }
 
-/** @param {{ words: string, passphrase?: string }} secret */
-export async function cloudKeys(secret) { return cloudKeysFrom(cloudMaterial(secret)); }
+/** @param {{ words: string, passphrase?: string }} secret @param {string} [net] */
+export async function cloudKeys(secret, net = 'mainnet') { return cloudKeysFrom(cloudMaterial(secret, net)); }
 
 /** The cloud keys from their material (automatic sales back up without the recovery phrase). */
 export async function cloudKeysFrom(materialHex) {
