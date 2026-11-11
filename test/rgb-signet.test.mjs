@@ -127,7 +127,8 @@ test('Public Signet profile: mempool.space, Iris proxy, its own keys and backups
   assert.equal(profileOf('nope').id, 'public');
   assert.equal(p.sdk.network, 'signet');
   assert.equal(p.sdk.indexerUrl, 'https://mempool.space/signet/api');
-  assert.equal(p.sdk.transportEndpoint, 'https://proxy.iriswallet.com/0.2/json-rpc');
+  assert.equal(p.sdk.transportEndpoint, 'https://scan.maskedwallet.com/rgb-proxy/json-rpc');
+  assert.deepEqual([...p.sdk.transportFallbacks], ['https://proxy.iriswallet.com/0.2/json-rpc']);
   assert.equal('proxyUrl' in p.sdk, false, 'no Lightning');
   assert.notEqual(p.vaultKey, RGB_PROFILES.utexo.vaultKey);
   assert.notEqual(dirtyKey(p), dirtyKey(RGB_PROFILES.utexo));

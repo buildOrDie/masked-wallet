@@ -503,7 +503,7 @@ export class WalletRgb {
   }
 
   /** The servers an RGB network talks to: its block server and its transfer server. */
-  hostsFor(p = this.profile) { return [p.sdk.indexerUrl, p.sdk.transportEndpoint]; }
+  hostsFor(p = this.profile) { return [p.sdk.indexerUrl, p.sdk.transportEndpoint, ...(p.sdk.transportFallbacks || [])]; }
 
   async missingOrigins(endpoints) {
     const urls = new Map();

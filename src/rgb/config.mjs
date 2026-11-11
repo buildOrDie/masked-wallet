@@ -1,7 +1,11 @@
 // RGB test networks. Both are separate test environments, never MASKED's mainnet account.
 // - public: public Bitcoin Signet (the same chain as MASKED's Signet), mempool.space as the indexer and
-//   Iris Wallet's public RGB proxy for transfer files. No USDT here: issue your own test asset.
+//   MASKED's own RGB transfer server for transfer files (Iris Wallet's public one as the backup in every invoice).
+//   No USDT here: issue your own test asset.
 // - utexo: Utexo's own Signet (`signetcustom`), where Utexo's faucet gives test BTC and test assets.
+/** MASKED's own RGB transfer server (rgb-proxy-server, protocol 0.2), and the public one kept as a backup. */
+export const MASKED_PROXY = 'https://scan.maskedwallet.com/rgb-proxy/json-rpc';
+export const PUBLIC_PROXY = 'https://proxy.iriswallet.com/0.2/json-rpc';
 export const RGB_PROFILES = Object.freeze({
   public: Object.freeze({
     id: 'public',
@@ -9,7 +13,8 @@ export const RGB_PROFILES = Object.freeze({
     sdk: Object.freeze({
       network: 'signet',
       indexerUrl: 'https://mempool.space/signet/api',
-      transportEndpoint: 'https://proxy.iriswallet.com/0.2/json-rpc',
+      transportEndpoint: MASKED_PROXY,
+      transportFallbacks: Object.freeze([PUBLIC_PROXY]),
       dataDir: 'masked_rgb_public_signet_v2', // v2: the on-chain engine (v1 was the Lightning SDK)
     }),
     invoiceNets: Object.freeze(['signet']),
@@ -41,7 +46,8 @@ export const RGB_MAINNET = Object.freeze({
   sdk: Object.freeze({
     network: 'mainnet',
     indexerUrl: 'https://mempool.space/api',
-    transportEndpoint: 'https://proxy.iriswallet.com/0.2/json-rpc',
+    transportEndpoint: MASKED_PROXY,
+    transportFallbacks: Object.freeze([PUBLIC_PROXY]),
     dataDir: 'masked_rgb_mainnet_v1',
   }),
   invoiceNets: Object.freeze(['mainnet', 'bitcoin', 'bc']),

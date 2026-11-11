@@ -42,13 +42,15 @@ const hostOf = (u) => { try { return new URL(String(u)).host; } catch { return '
 export class LiteWallet {
   /**
    * @param {object} lib  the loaded rgb-lib-wasm module ({ WasmWallet, WasmInvoice, restoreKeys })
-   * @param {{ network: string, indexerUrl: string, indexerUrls?: string[], transportEndpoint: string, mnemonic: string, dataDir: string }} params  indexerUrls: block servers to try in order
+   * @param {{ network: string, indexerUrl: string, indexerUrls?: string[], transportEndpoint: string, transportFallbacks?: string[], mnemonic: string, dataDir: string }} params  indexerUrls: block servers to try in order; transportFallbacks: more transfer servers listed in invoices after the main one
    */
   constructor(lib, params) {
     this.lib = lib;
     this.params = params;
     this.net = rgbNetwork(params.network);
     this.transport = rpcEndpoint(params.transportEndpoint);
+    // invoices list every transfer server: a sender uses the first one that answers
+    this.transports = [this.transport, ...(params.transportFallbacks || []).map(rpcEndpoint).filter((e) => e !== this.transport)];
     /** @type {any} */ this.w = null;
     this.online = null;
     this.lastBackupBytes = null;
@@ -195,7 +197,7 @@ export class LiteWallet {
    * any amount if the engine needs a token for that.
    */
   receiveCall(make, assetId, assignment, durationSeconds) {
-    const call = (id, a) => plain(this.wallet[make](id, a, durationSeconds, [this.transport], 1));
+    const call = (id, a) => plain(this.wallet[make](id, a, durationSeconds, this.transports, 1));
     try { return call(assetId, assignment); } catch (e) {
       if (!assetId || !/AssetNotFound|not found/i.test(String(e?.message || e))) throw e;
       try { return call(null, assignment); } catch (e2) { if (assignment === 'Any') throw e2; return call(null, 'Any'); }

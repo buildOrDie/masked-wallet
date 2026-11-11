@@ -760,7 +760,7 @@ test('RGB servers are asked for when RGB is turned on, not at install; an update
   app.platform.hasOrigins = async () => granted;
   r.betaOk = true;
   await r.action('betaYes');
-  assert.deepEqual(asked, ['https://mempool.space/api', 'https://proxy.iriswallet.com/0.2/json-rpc']);
+  assert.deepEqual(asked, ['https://mempool.space/api', 'https://scan.maskedwallet.com/rgb-proxy/json-rpc', 'https://proxy.iriswallet.com/0.2/json-rpc']);
   assert.match(r.message, /needs permission/);
   assert.equal(localStorage.getItem('masked.rgb.mainnet-beta'), null, 'declined: the beta stays off');
   // already on, permission missing after the update: RGB doesn't try to open, Home offers one tap
