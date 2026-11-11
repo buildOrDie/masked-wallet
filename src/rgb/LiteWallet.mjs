@@ -741,9 +741,18 @@ export class LiteWallet {
     const txid = this.lib.WasmWallet.checkPresignedFinal(String(l.psbt), txHex, seal);
     const completed = this.lib.WasmWallet.completePresignedConsignment(consignment, info.templateTxid, txHex);
     check(completed, txid);
-    store.set(o.offerId, { role: 'buyer', assetId: o.assetId, amount: String(o.amount), priceSats: String(o.priceSats), recipientId: r.recipientId, txid, completed: b64(completed), posted: false, at: Date.now() });
+    // kept with the purchase: if a server drops it, a refresh sends it again; the wallet only expects the tokens
+    // once a block server has the transaction
+    store.set(o.offerId, { role: 'buyer', assetId: o.assetId, amount: String(o.amount), priceSats: String(o.priceSats), recipientId: r.recipientId, txid, txHex, completed: b64(completed), posted: false, at: Date.now() });
     onStep(`Sending the purchase to ${hostOf(this.indexer)}…`);
-    await this.ensureBroadcast(txHex, txid);
+    try { await this.ensureBroadcast(txHex, txid); } catch (err) {
+      const why = String(err?.message || err);
+      if (/no block server accepted it/.test(why)) {
+        store.set(o.offerId, { ...store.get(o.offerId), failed: why, completed: undefined, txHex: undefined, at: Date.now() });
+        throw new Error(`This listing can't be bought any more: the network refused the purchase (${why.split(': ').slice(1).join(': ').slice(0, 90)}). Nothing was paid.`);
+      }
+      throw err; // a network problem: kept, and sent again on the next refresh
+    }
     await this.instantPost(o.offerId, store);
     await this.save();
     return { txid };
@@ -751,11 +760,19 @@ export class LiteWallet {
   /** Buyer: give this wallet the transfer (through the transfer server, like any incoming one). Retried on refresh. */
   async instantPost(offerId, store) {
     const e = store.get(String(offerId));
-    if (!e || e.role !== 'buyer' || e.posted) return false;
+    if (!e || e.role !== 'buyer' || e.posted || e.failed) return false;
+    // the tokens are only expected once a block server has the purchase: send it (again) first
+    if (e.txHex && !(await this.knowsTx(e.txid))) {
+      try { await this.ensureBroadcast(e.txHex, e.txid); } catch (err) {
+        const why = String(err?.message || err);
+        if (/no block server accepted it/.test(why)) store.set(String(offerId), { ...e, failed: why, completed: undefined, txHex: undefined, at: Date.now() });
+        return false;
+      }
+    }
     try {
       await this.wallet.postOwnConsignment(this.transport, e.recipientId, unb64(e.completed), e.txid, INSTANT_SEAL_OUTPUT);
     } catch (err) { if (!/already used/i.test(String(err?.message || err))) return false; }
-    store.set(String(offerId), { ...e, posted: true, completed: undefined, at: Date.now() });
+    store.set(String(offerId), { ...e, posted: true, completed: undefined, txHex: undefined, at: Date.now() });
     return true;
   }
 

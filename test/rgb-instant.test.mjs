@@ -67,7 +67,12 @@ function fakeChain() {
   globalThis.fetch = async (url, init = {}) => {
     const u = String(url).replace('https://esplora.test', '');
     let q;
-    if (init.method === 'POST' && u === '/tx') { chain.posted.push(init.body); return new Response(T('f')); }
+    if (init.method === 'POST' && u === '/tx') {
+      if (chain.reject) return new Response(chain.reject, { status: 400 });
+      chain.posted.push(init.body); return new Response(T('f'));
+    }
+    // a transaction is known once something was broadcast (enough for these tests)
+    if (/^\/tx\/[^/]+\/status$/.test(u)) return chain.posted.length ? Response.json({ confirmed: false }) : new Response('not found', { status: 404 });
     if ((q = /^\/tx\/([0-9a-f]{64})\/outspend\/(\d+)$/.exec(u))) return Response.json(chain.spends[`${q[1]}:${q[2]}`] || { spent: false });
     return new Response('not found', { status: 404 });
   };
@@ -259,4 +264,21 @@ test('transaction sizes: an Instant purchase with one coin is about 298 vB, not 
   assert.equal(instantBuyVbytes(2, true), 355);   // one more coin: + 57.5
   assert.equal(instantMoveVbytes(1), 255);
   assert.equal(txVbytes(['0014' + '00'.repeat(20)], [OPRET_SCRIPT, P2TR_SCRIPT]), Math.ceil(10.5 + 68 + 43 + 43), 'a P2WPKH input is bigger');
+});
+
+test('buyer: a purchase the network refuses is not paid and never shows as incoming tokens', async () => {
+  const chain = fakeChain();
+  chain.reject = 'sendrawtransaction RPC error: {"code":-25,"message":"bad-txns-inputs-missingorspent"}';
+  const seller = `${T('a')}:0`, coin = `${T('d')}:1`;
+  chain.outs[seller] = { sats: 1000, script: '5120sell' };
+  chain.outs[coin] = { sats: 30000, script: '5120buy', tx: 'dd' };
+  const info = { sellerOutpoint: seller, sellerSats: 1000, sellerScript: '5120sell', payoutSats: 21000, opretScript: '6a20', templateTxid: T('6') };
+  const listing = { psbt: JSON.stringify({ sig: true, info }), consignment: b64(enc({ valid: true, contractId: ASSET, sealAmount: 500 })), templateTxid: T('6') };
+  const offer = { offerId: 'sw0123456789cd', assetId: ASSET, amount: '500', priceSats: '20000', state: 'OPEN' };
+  const b = wallet({ name: 'buyer', lib: fakeLib(), chain, coins: [{ outpoint: coin, txout: { value: 30000 }, is_spent: false }] });
+  await assert.rejects(b.w.instantBuy({ offerId: offer.offerId, network: 'Signet', offer, listing, feeRate: 2 }, b.store), /can't be bought any more.*missingorspent.*Nothing was paid/);
+  assert.ok(b.mem[offer.offerId].failed);
+  // a refresh doesn't hand the wallet a transfer for it
+  assert.equal(await b.w.instantPost(offer.offerId, b.store), false);
+  assert.equal(b.log.filter((x) => x[0] === 'post').length, 0);
 });

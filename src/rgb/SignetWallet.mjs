@@ -164,7 +164,7 @@ export class SignetWallet {
     const key = `${this.vaultKey}.swaps.instant`;
     const read = () => { try { return JSON.parse(this.storage.getItem(key) || '{}'); } catch { return {}; } };
     const write = (m) => this.storage.setItem(key, JSON.stringify(m));
-    const finished = (x) => ['sold', 'cancelled'].includes(x?.stage) || (x?.role === 'buyer' && x?.posted);
+    const finished = (x) => ['sold', 'cancelled'].includes(x?.stage) || (x?.role === 'buyer' && (x?.posted || x?.failed));
     return {
       all: read,
       get: (id) => read()[String(id)] || null,
