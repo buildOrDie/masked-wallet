@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "__MSG_appName__",
   "default_locale": "en",
-  "version": "2.27.9",
+  "version": "2.27.10",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzGyPzJEarjSiLK0MEsxK4BMde4kYt82B12d7QkjdTYxqnHJ7f/kfTiRlzuJz7+gwPLJVPAcy6mEbYsm3KD6ydbipktJkqSvgjcSaoZ9v8XYqwO+RNXsMggFnInglG/H3uP58GxqpXE7ooTs/OxyMWVkb2xV8UyqsvamQsOhLywf9QLwKTUf8JsXahA3afceciX2kD0ovLDh0ejCxB9LpIAX9xI07qQADyfg003878QaT8nQnFoG9hcvZOzdWU9+6BgpOs7x5zABfFUWmVh334wFm57ExbozCt1Sy8cvos8fqKZphm1EsaF+YzExqr1nTql/YD2RvGAl8YLorNtFPnQIDAQAB",
   "description": "__MSG_appDesc__",
   "action": {

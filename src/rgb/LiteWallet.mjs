@@ -570,7 +570,19 @@ export class LiteWallet {
     const from = freeSellerCoinFor(unspents, o.assetId, o.amount, this.reserved);
     if (!from) throw new Error('No settled RGB output of this wallet holds that much of the token. Wait for incoming transfers to settle.');
     onStep('Moving the tokens to an output of their own…');
-    const { txid, txHex } = await this.instantMove(o.assetId, o.amount, from, feeRate, onStep);
+    let moved;
+    try { moved = await this.instantMove(o.assetId, o.amount, from, feeRate, onStep); } catch (err) {
+      // the rest of the tokens (the change) needs a free RGB output of this wallet, and there is none:
+      // make some now (one small transaction) so the listing works once it confirms
+      const text = String(err?.message || err);
+      if (!/insufficient ?allocation|allocation ?slots/i.test(text)) throw err;
+      onStep('Making new RGB outputs for the rest of your tokens…');
+      try { await this.createUtxos({ upTo: true, num: 4, size: 1000, feeRate }); } catch (e2) {
+        throw new Error(`No free RGB output for the rest of your tokens: ${String(e2?.message || e2).slice(0, 80)}`);
+      }
+      throw new Error('MASKED made free RGB outputs for the rest of your tokens. List again in about 10 minutes, after one block.');
+    }
+    const { txid, txHex } = moved;
     // the new output is promised to this listing from now on: no change or receive lands on it before it's signed.
     // The signed move is kept until it confirms, so a refresh can broadcast it again if a server dropped it.
     const e = { ...base, stage: 'moving', moveTxid: txid, moveHex: txHex || undefined, coin: `${txid}:${SEAL_OUTPUT}` };
