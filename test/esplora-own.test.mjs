@@ -8,7 +8,8 @@ let mineDown = false;
 globalThis.fetch = async (u) => {
   u = String(u); hit.push(u);
   if (mineDown && u.startsWith('https://mine.example.com/')) return new Response('bad gateway', { status: 502 });
-  if (u.startsWith('https://mine.example.com/api/v1/')) return new Response('not found', { status: 404 });
+  // electrs servers (yours, MASKED's own) have no mempool.space extras
+  if (/\/api\/v1\//.test(u) && !u.includes('mempool.space')) return new Response('not found', { status: 404 });
   return new Response('ok');
 };
 const { EsploraPool } = await import('../src/net/EsploraPool.mjs');
@@ -44,5 +45,11 @@ test('fee rates: your own electrs (no v1 endpoints) passes the question on to me
   hit.length = 0;
   const r = await pool.request('v1/fees/precise');
   assert.equal(r.status, 200);
-  assert.deepEqual(hit, ['https://mine.example.com/api/v1/fees/precise', 'https://mempool.space/signet/api/v1/fees/precise']);
+  assert.equal(hit[0], 'https://mine.example.com/api/v1/fees/precise');
+  assert.equal(hit.at(-1), 'https://mempool.space/signet/api/v1/fees/precise');
+});
+
+test('Signet: MASKED\'s own server is the first built-in one', async () => {
+  const pool = new EsploraPool({ net: () => 'signet', store: { get: () => '' } });
+  assert.equal(pool.list()[0], 'https://signet-api.maskedwallet.com/api/');
 });
