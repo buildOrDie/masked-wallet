@@ -73,6 +73,7 @@ export function formatRaw(raw, dec = 18) {
 
 /** Network and node errors in words people understand. */
 export function friendly(m) {
+  m = String(m ?? '');
   if (/timeout/i.test(m)) return 'The network did not answer in time. Try again.';
   if (/insufficient fee|min relay fee|mempool min fee/i.test(m)) return 'Fee too low for the network right now. Pick a faster fee.';
   if (/bad-txns-inputs-missingorspent|missing inputs/i.test(m)) return 'That coin was already spent. Tap refresh and try again.';

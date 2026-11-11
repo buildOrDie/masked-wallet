@@ -8,7 +8,7 @@ import { signMessageBip322, signMessageEcdsa } from '../bitcoin/messages.mjs';
 import { TRADE_SITES } from '../trade/TradeAccount.mjs';
 import { lockKeyOf, peekToken } from '../ecash/EcashBook.mjs';
 import { toBase } from '../rgb/config.mjs';
-import { proxyUrl } from '../rgb/WalletRgb.mjs';
+import { proxyUrl, rgbError } from '../rgb/WalletRgb.mjs';
 
 /** Methods whose approve button waits for a prepared transaction. */
 export const NEEDS_PREP = ['sendBitcoin', 'inscribeTransfer', 'shareTrade', 'fundTrade', 'moveToTrade', 'returnToShielded', 'cancelShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbInvoice', 'rgbPay', 'rgbSwapAvailable', 'rgbListAssets', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantBuy', 'rgbInstantCancel'];
@@ -55,13 +55,13 @@ export class ApprovalController {
         a.prepErr = null;
         app.builder.send({ from: 'public', to: a.params.toAddress, amount: Number(a.params.satoshis), rate: Number(a.params.options?.feeRate) || rate() })
           .then((b) => { a.prep = b; app.render(); })
-          .catch((e) => { a.prepErr = friendly(e.message); app.render(); });
+          .catch((e) => { a.prepErr = friendly(e?.message || e); app.render(); });
       }
       // private trading: built once (they read the network); rebuilt after a sync if they failed
       const once = (fn) => {
         if (a.prep || a.prepBusy || (a.prepErr && (sync.syncing || a.errGen === sync.gen))) return;
         a.prepBusy = true; a.prepErr = null;
-        fn().then((b) => { a.prep = b; }).catch((e) => { a.prepErr = friendly(e.message); a.errGen = sync.gen; }).finally(() => { a.prepBusy = false; app.render(); });
+        fn().then((b) => { a.prep = b; }).catch((e) => { a.prepErr = friendly(e?.message || e); a.errGen = sync.gen; }).finally(() => { a.prepBusy = false; app.render(); });
       };
       const P = a.params || {};
       const trading = a.method === 'inscribeTransfer' && (P.options?.account === 'trade' || P.options?.account === 'shielded');
@@ -104,7 +104,7 @@ export class ApprovalController {
       if (a.method === 'inscribeTransfer' && !trading) {
         a.prepErr = null;
         const go = () => tokenTx.transferInscribe({ tick: a.params.ticker, amt: a.params.amount, from: 'public', rate: rate() })
-          .then((b) => { a.prep = b; app.render(); }).catch((e) => { a.prepErr = friendly(e.message); app.render(); });
+          .then((b) => { a.prep = b; app.render(); }).catch((e) => { a.prepErr = friendly(e?.message || e); app.render(); });
         if (!a.idxAsked && !app.tokens.publicToken(String(a.params.ticker).toLowerCase())) { a.idxAsked = true; app.tokens.refreshPublicTokens().then(go); } else go();
       }
       if (psbt && !a.ordChecked) { a.ordChecked = true; app.ord.check(app.coins.public).then(() => this.prepare()); }
@@ -112,7 +112,7 @@ export class ApprovalController {
       if (a.method === 'signPsbts') a.prep = a.params.psbtHexs.map((h, k) => app.psbt.analyse(h, (a.params.options || [])[k] || {}));
       // the trade address and Shielded listings sign for MASKED's own website only
       if (psbt && a.prep.some((p) => p.trade) && !TRADE_SITES.has(a.origin)) { a.prep = null; throw new Error('Only maskedwallet.com can ask MASKED to sign for your trade address or Shielded listings.'); }
-    } catch (e) { a.prepErr = friendly(e.message); }
+    } catch (e) { a.prepErr = friendly(e?.message || e); }
     app.render();
   }
 
@@ -273,7 +273,10 @@ export class ApprovalController {
     try {
       this.finish({ result: await this.run(a) });
     } catch (e) {
-      state.status.approve = [friendly(e.message), 'err'];
+      // the RGB engine throws plain strings, not Error objects: show them too, never an empty line
+      const text = /^rgb/.test(a.method) ? rgbError(e, app.rgb?.profile) : String(e?.message || e || '');
+      console.error('[MASKED] approval failed', a.method, e);
+      state.status.approve = [friendly(text) || 'Something went wrong. Try again.', 'err'];
     } finally { state.busy = false; app.render(); }
   }
 
