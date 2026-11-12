@@ -167,6 +167,7 @@ export class ApproveView extends View {
     if (m === 'rgbInstantList') {
       return `<p class="hero-bal center">${b ? esc(b.shown) : '…'}</p><div class="kv">${rowKV('Token', tok)}${b ? rowKV('You get', `<b>${sats(b.price)}</b>`) : ''}${b ? rowKV('Market', `<span class="mono">${esc(b.market)}</span>`) : ''}${rowKV('Network', esc(this.app.rgb.profile.label))}</div>
       <p class="info">MASKED signs this sale once. Anyone can then buy it at this exact price, even while your computer is off: the signature is only valid if the transaction pays you ${b ? sats(b.price) : 'the price'}.</p>
+      ${b?.finishing ? '<p class="info">Your tokens were already moved to an output of their own for this listing. MASKED checks they arrived and signs it: no new transaction.</p>' : ''}
       <p class="info">If these tokens share an output with others, MASKED first moves them to an output of their own: one transaction (network fee about ${b ? `${sats(b.fee)}, ${esc(String(b.rate))} sat/vB × ~${b.vb} vB` : '…'}), and the listing goes live after it confirms, about 10 minutes, the next time MASKED is open.</p>
       <p class="info">Cancelling later also takes one transaction: MASKED moves the tokens so the signature can't be used.</p>
       ${this.rgbWait(a)}${this.error(a)}`;

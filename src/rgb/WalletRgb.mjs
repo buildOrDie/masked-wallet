@@ -61,6 +61,8 @@ export const RGB_BLIND_MIN = 2000;
  * key derived from the wallet's own recovery words, so there is no second password.
  */
 /** Send a signed Instant listing to its market (the seller token proves it's this seller's offer). */
+/** Why the market refused the last listing sent to it (shown to the seller). */
+let lastRefusal = '';
 async function publishInstant(e, v) {
   if (!e?.market || !e?.token || !v?.psbt) return false;
   const r = await fetch(`${e.market}/api/swap/offers/${encodeURIComponent(v.offerId)}/presigned`, {
@@ -68,8 +70,13 @@ async function publishInstant(e, v) {
     headers: { 'content-type': 'application/json', 'x-swap-token': e.token },
     body: JSON.stringify({ psbt: v.psbt, consignment: v.consignment, templateTxid: v.templateTxid, sellerOutpoint: v.sellerOutpoint }),
   });
-  // a refusal (offer cancelled or closed on the market) is final too: don't send it again
-  return r.ok || (r.status >= 400 && r.status < 500);
+  // a refusal (offer cancelled or closed on the market) is final too: don't send it again, but say so
+  if (!r.ok && r.status >= 400 && r.status < 500) {
+    const why = await r.json().then((j) => j?.error, () => '').catch(() => '');
+    lastRefusal = String(why || `refused (${r.status})`);
+    return 'refused';
+  }
+  return r.ok;
 }
 
 export class WalletRgb {
@@ -428,7 +435,9 @@ export class WalletRgb {
         // signed after the tokens moved: hand the listing to the market it was made on
         const e = this.service.instantStore().get(c.offerId);
         const ok = await publishInstant(e, c).catch(() => false);
-        this.app.toast(ok ? 'Instant listing is live: buyers can buy it now, even with MASKED closed.' : 'Instant listing signed. Open the market and tap Publish on it.');
+        if (ok) this.service.instantStore().set(c.offerId, { ...e, published: true });
+        this.app.toast(ok === 'refused' ? `Instant listing signed, but the market refused it: ${lastRefusal}. Cancel it on the market and list again.`
+          : ok ? 'Instant listing is live: buyers can buy it now, even with MASKED closed.' : 'Instant listing signed. Open the market and tap Finish listing on it.');
       }
       if (c.stage === 'cancelled') this.app.toast('Listing cancelled. Your tokens moved to a new output.');
       if (c.stage === 'outdated') this.app.toast('An Instant listing was signed by an older MASKED and can\'t sell. Cancel it on the market, then list again.');

@@ -612,6 +612,14 @@ export class LiteWallet {
     this.requirePresign();
     const o = readOffer({ assetId, amount, priceSats }, offerId);
     const prev = store.get(o.offerId);
+    if (prev?.stage === 'moving' && prev.coin) {
+      // asked again while the tokens move (the market's "Finish listing"): look now instead of waiting for a refresh
+      onStep('Checking whether your tokens arrived on their own output…');
+      await this.wallet.sync(this.requireOnline());
+      try { await this.wallet.refresh(this.requireOnline(), null, [], false); } catch { /* signed below if it settled anyway */ }
+      const v = await this.instantSign(o.offerId, prev, store);
+      return v.stage === 'ready' ? v : { ...v, waiting: await this.moveStatus(prev) };
+    }
     if (prev && !['cancelled'].includes(prev.stage)) return this.instantView(o.offerId, prev);
     onStep(`Checking your tokens on ${hostOf(this.indexer)}…`);
     await this.wallet.sync(this.requireOnline());
@@ -655,6 +663,25 @@ export class LiteWallet {
     this.reserve([...new Set([...this.reserved, next.coin])]);
     await this.save();
     return this.instantView(offerId, next);
+  }
+  /**
+   * Why a listing's tokens aren't on their own output yet, in words: the move not in a block yet, the token proof not
+   * taken in yet, or the output holding something else than the listing.
+   */
+  async moveStatus(e) {
+    try {
+      const [txid, vout] = String(e.coin).split(':');
+      let confirmed = null;
+      try { confirmed = !!(await (await this.esplora(`/tx/${txid}`)).json())?.status?.confirmed; } catch { confirmed = null; }
+      if (confirmed === null) return 'The move transaction isn\'t on the block server yet. MASKED sends it again on its next refresh.';
+      if (!confirmed) return 'The move transaction is waiting for its first block (about 10 minutes on Signet).';
+      const u = (plain(this.wallet.listUnspents(false)) || []).find((x) => `${String(x.utxo?.outpoint?.txid).toLowerCase()}:${x.utxo?.outpoint?.vout}` === `${txid}:${vout}`);
+      if (!u) return 'The move is in a block, but this wallet doesn\'t see the new output yet. Tap Refresh in MASKED → RGB, then Finish listing.';
+      const all = u.rgbAllocations || [];
+      if (!all.length) return 'The move is in a block, but the token proof for it hasn\'t been taken in yet. Keep MASKED open a minute, then Finish listing.';
+      if (all.some((a) => !a.settled)) return 'The tokens are on their new output and settle on the next refresh. Try Finish listing again in a minute.';
+      return `The new output holds ${all.map((a) => a.assignment?.Fungible ?? '?').join(' + ')} instead of exactly ${e.amount}: cancel this listing and list again.`;
+    } catch (err) { return `MASKED couldn't check the move: ${String(err?.message || err).slice(0, 120)}`; }
   }
   /** A listing this engine would accept as a buyer (the current layout). */
   validListing(psbt) { try { this.lib.WasmWallet.presignedListingInfo(String(psbt)); return true; } catch { return false; } }

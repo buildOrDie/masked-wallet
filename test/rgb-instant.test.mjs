@@ -284,3 +284,32 @@ test('buyer: a purchase the network refuses is not paid and never shows as incom
   assert.equal(await b.w.instantPost(offer.offerId, b.store), false);
   assert.equal(b.log.filter((x) => x[0] === 'post').length, 0);
 });
+
+test('seller: "Finish listing" while the tokens move refreshes, signs if they arrived, else says why', async () => {
+  const chain = fakeChain();
+  const from = `${T('b')}:0`, fee = `${T('c')}:2`;
+  chain.outs[from] = { sats: 1000, script: '5120rgb', tx: 'aa' };
+  chain.outs[fee] = { sats: 5000, script: '5120btc', tx: 'bb' };
+  const rgb = [unspent('b', 0, [tok(800)])];
+  const s = wallet({ name: 'seller', lib: fakeLib(), chain, rgb, coins: [{ outpoint: fee, txout: { value: 5000 }, is_spent: false }] });
+  let refreshed = 0; s.w.w.refresh = async () => { refreshed++; return {}; };
+  const args = { offerId: 'sw0123456789ab', assetId: ASSET, amount: '500', priceSats: '20000', feeRate: 2 };
+  assert.equal((await s.w.instantList(args, s.store)).stage, 'moving');
+  // asked again before a block: not ready, and it says the move waits for its block
+  const prev = globalThis.fetch;
+  let confirmed = false;
+  globalThis.fetch = async (url, init) => /\/tx\/[0-9a-f]{64}$/.test(String(url)) ? Response.json({ status: { confirmed } }) : prev(url, init);
+  let v = await s.w.instantList(args, s.store);
+  assert.equal(v.stage, 'moving'); assert.match(v.waiting, /first block/); assert.equal(refreshed, 1);
+  // in a block, proof taken in but not settled yet
+  confirmed = true;
+  rgb.splice(0, 1, unspent('5', 1, [{ ...tok(500), settled: false }]));
+  v = await s.w.instantList(args, s.store);
+  assert.match(v.waiting, /settle on the next refresh/);
+  // settled: signed now, no second move
+  rgb.splice(0, 1, unspent('5', 1, [tok(500)]));
+  v = await s.w.instantList(args, s.store);
+  assert.equal(v.stage, 'ready'); assert.equal(v.sellerOutpoint, `${T('5')}:1`);
+  assert.equal(s.log.filter((x) => x[0] === 'colorSwap').length, 1);
+  globalThis.fetch = prev;
+});

@@ -224,6 +224,12 @@ export class ApprovalController {
         if (m === 'rgbInstantBuy') return { ...base, fee, rate, vb, seal: INSTANT_SEAL_SATS };
         if (m === 'rgbInstantList') {
           if (!asset) throw new Error('You don\'t hold this token in RGB.');
+          // asked again for a listing whose tokens are moving (Finish listing): no new transaction, just the signing
+          const was = r.service.instantStore().get(P.offerId);
+          if (was?.role === 'seller' && was.stage === 'moving') {
+            let host = ''; try { host = new URL(P.market).host; } catch { throw new Error('The market address is not valid.'); }
+            return { ...base, fee: 0, rate, vb, market: host, finishing: true };
+          }
           if (Number(o.amount) > r.bal(asset).spendable) throw new Error(`You can sell up to ${r.amount(asset, r.bal(asset).spendable)} ${asset.ticker}.`);
           let host = ''; try { host = new URL(P.market).host; } catch { throw new Error('The market address is not valid.'); }
           return { ...base, fee, rate, vb, market: host };
