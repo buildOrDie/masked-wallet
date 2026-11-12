@@ -129,6 +129,24 @@ export function exactCoinFor(unspents, assetId, amount, skip = new Set()) {
   return null;
 }
 
+/**
+ * The amounts an Instant listing can sell with no move: each output holding only this asset, settled (what
+ * exactCoinFor accepts). Largest first, each amount once, at most `limit`.
+ */
+export function instantAmounts(unspents, assetId, skip = new Set(), limit = 8) {
+  const out = new Set();
+  for (const u of unspents || []) {
+    if (!u.utxo?.colorable || u.utxo.exists === false) continue;
+    const o = u.utxo.outpoint, op = `${String(o?.txid).toLowerCase()}:${o?.vout}`;
+    if (skip.has(op)) continue;
+    const all = u.rgbAllocations || [];
+    if (!all.length || all.some((a) => a.assetId !== assetId || !a.settled || a.assignment?.Fungible == null)) continue;
+    const h = heldOn(u, assetId);
+    if (h > 0n) out.add(h);
+  }
+  return [...out].sort((a, b) => (a < b ? 1 : a > b ? -1 : 0)).slice(0, limit).map(String);
+}
+
 /** sellerCoinFor without the outputs promised to Instant listings. */
 export function freeSellerCoinFor(unspents, assetId, amount, skip = new Set()) {
   const free = (unspents || []).filter((u) => { const o = u.utxo?.outpoint; return !o || !skip.has(`${String(o.txid).toLowerCase()}:${o.vout}`); });

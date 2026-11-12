@@ -313,3 +313,9 @@ test('seller: "Finish listing" while the tokens move refreshes, signs if they ar
   assert.equal(s.log.filter((x) => x[0] === 'colorSwap').length, 1);
   globalThis.fetch = prev;
 });
+
+test('instantAmounts: the amounts alone on a settled output of this asset, largest first; promised outputs left out', async () => {
+  const { instantAmounts } = await import('../src/rgb/swap.mjs');
+  const us = [unspent('a', 0, [tok(508)]), unspent('b', 0, [tok(191)]), unspent('c', 0, [tok(508)]), unspent('d', 0, [{ ...tok(40), settled: false }]), unspent('e', 0, [tok(70), { ...tok(5), assetId: 'rgb:other' }]), unspent('f', 1, [tok(900)])];
+  assert.deepEqual(instantAmounts(us, ASSET, new Set([`${T('f')}:1`])), ['508', '191']);
+});

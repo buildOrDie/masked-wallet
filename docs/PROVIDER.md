@@ -199,11 +199,13 @@ const { invoice } = await window.masked.rgb.requestInvoice({ assetId, baseUnits:
 await window.masked.rgb.payInvoice(escrowInvoice, { assetId, amount: '1500' });
 ```
 
-### `rgb.getAssets(): Promise<{ assetId, ticker, name, precision, spendable, max }[]>` 🔐 *(2.26.1+)*
+### `rgb.getAssets(): Promise<{ assetId, ticker, name, precision, spendable, max, instant }[]>` 🔐 *(2.26.1+)*
 
 The RGB tokens this wallet holds, after the person agrees to share them: `spendable` and `max` (the most one offer
 can sell, since one offer uses one output) in base units. Outputs promised to Instant listings don't count. A market
-uses it for "pick a token" instead of asking for the asset ID.
+uses it for "pick a token" instead of asking for the asset ID. `instant` *(2.28.2+)*: the amounts (base units, largest
+first) that sit alone on one output: an Instant listing of exactly one of them is live at once, any other amount
+first moves the tokens (one transaction, live after a block).
 
 ### Peer-to-peer swaps: `rgb.offerableAmount`, `prepareBuy`, `prepareSale`, `signBuy`, `completeSale` 🔐
 RGB tokens for BTC in one Bitcoin transaction, wallet to wallet: nobody holds anything in between. The site only passes
