@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { LiteWallet, rgbNetwork, rpcEndpoint } from '../src/rgb/LiteWallet.mjs';
-import { RGB_PROFILES } from '../src/rgb/config.mjs';
+import { RGB_PROFILES, RGB_MAINNET } from '../src/rgb/config.mjs';
 
 const mnemonic = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 
@@ -261,4 +261,45 @@ test('an invoice for a token this wallet has never held: names no token, keeps t
   w.wallet.blindReceive = () => { throw new Error('InsufficientAllocationSlots'); };
   await assert.rejects(w.onchainReceive({ assetId: 'rgb:new', amount: 1 }), /InsufficientAllocationSlots/);
   assert.ok(proto);
+});
+
+test('NFTs (RGB21 / UDA): only with an engine that has them; listed with their image digest; sent as NonFungible; images checked', async () => {
+  // the npm engine (no engineFeatures): the wallet never names the UDA schema (that engine would refuse to open)
+  const plainLib = await open();
+  assert.deepEqual(plainLib.calls.find((c) => c[0] === 'create')[1].supportedSchemas, ['Nia', 'Ifa']);
+  assert.equal(plainLib.w.canNft, false);
+  assert.deepEqual(await plainLib.w.nfts(), []);
+
+  const f = fakeLib();
+  const png = new Uint8Array([137, 80, 78, 71, 1, 2, 3]);
+  const digest = Buffer.from(await crypto.subtle.digest('SHA-256', png)).toString('hex');
+  f.lib.engineFeatures = () => ['swap', 'presign', 'uda'];
+  const base = f.lib.WasmWallet.prototype.listAssets;
+  f.lib.WasmWallet.prototype.listAssets = function (x) {
+    return { ...base.call(this, x), uda: [{ assetId: 'rgb:N1', ticker: 'MSKD', name: 'Masked Signet #7', details: 'test', precision: 0, balance: { settled: 1, future: 1, spendable: 1 }, media: { filePath: 'x', digest, mime: 'image/png' } }] };
+  };
+  const w = new LiteWallet(f.lib, { ...RGB_PROFILES.public.sdk, mnemonic, password: '' });
+  await w.init(); await w.unlock();
+  assert.deepEqual(f.calls.find((c) => c[0] === 'create')[1].supportedSchemas, ['Nia', 'Ifa', 'Uda']);
+  const [n] = await w.nfts();
+  assert.equal(n.name, 'Masked Signet #7'); assert.deepEqual(n.media, { digest, mime: 'image/png' });
+  assert.equal((await w.listAssets()).nia.length, 1); // tokens stay apart
+
+  // the image: the right file is shown, a swapped one is not
+  const b64 = Buffer.from(png).toString('base64');
+  const asked = [];
+  const good = async (url, o) => { asked.push([url, JSON.parse(o.body).method, JSON.parse(o.body).params]); return { json: async () => ({ result: b64 }) }; };
+  assert.equal(await w.nftImage(n.media, good), `data:image/png;base64,${b64}`);
+  assert.equal(asked[0][1], 'media.get'); assert.deepEqual(asked[0][2], { attachment_id: digest }); assert.match(asked[0][0], /^https:\/\//);
+  const bad = async () => ({ json: async () => ({ result: Buffer.from([1, 2, 3]).toString('base64') }) });
+  assert.equal(await w.nftImage(n.media, bad), null);
+  assert.equal(await w.nftImage({ digest, mime: 'text/html' }, good), null); // only pictures
+
+  // sending: the token itself, to an invoice for any asset
+  await w.onchainSend({ invoice: 'rgb:any', assetId: 'rgb:N1', amount: 1, feeRate: 2, nft: true });
+  const [, map] = f.calls.find((c) => c[0] === 'sendBegin');
+  assert.equal(map['rgb:N1'][0].assignment, 'NonFungible');
+  // mainnet: no NFTs yet, even with the engine
+  const m = new LiteWallet(f.lib, { ...RGB_MAINNET.sdk, mnemonic, password: '' });
+  assert.equal(m.canNft, false);
 });

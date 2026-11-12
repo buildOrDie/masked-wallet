@@ -200,11 +200,13 @@ export class SignetWallet {
   completeSale(p) { return this.mutate((w) => w.completeSale(p, this.swapStore('sold'))); }
   /** @param {string} url an https:// transfer server URL */
   checkProxy(url) { return this.exclusive(() => this.requireWallet().checkProxy(url)); }
+  /** An NFT's image (data: URL) from the transfer servers, checked against its digest. Doesn't touch the wallet state. */
+  nftImage(media) { return this.wallet?.nftImage ? this.wallet.nftImage(media) : null; }
   /** What an invoice asks for (no change to the wallet). */
   decode(invoice) { return this.exclusive(() => this.requireWallet().decodeRGBInvoice({ invoice })); }
-  send({ invoice, assetId, amount, fee, endpoint = '' }) {
+  send({ invoice, assetId, amount, fee, endpoint = '', nft = false }) {
     if (!invoice.startsWith('rgb:') || !assetId) throw new Error('Enter an RGB invoice and the exact asset ID.');
-    const params = { invoice, assetId, amount: baseUnits(amount), feeRate: testFee(fee) };
+    const params = { invoice, assetId, amount: baseUnits(amount), feeRate: testFee(fee), ...(nft ? { nft: true } : {}) };
     return this.mutate(async wallet => {
       const decoded = await wallet.decodeRGBInvoice({ invoice });
       // blind (utxob:) or witness (wvout:) invoices

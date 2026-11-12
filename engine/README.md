@@ -20,6 +20,19 @@ swaps and pre-signed (Instant) listings:
 | `WasmWallet.presignedBuyPsbt(template, inputs, sealScript, change)`, `checkPresignedFinal(template, txHex, sealScript)`, `psbtExtractHex(psbt)` | The buyer's transaction: its first coin in place of the placeholder, the seller's input 1 and outputs 0-1 unchanged, its seal, its other coins and change |
 | `WasmWallet.completePresignedConsignment(bytes, templateTxid, txHex)` | The listing's consignment with the final transaction as its witness (the commitment doesn't depend on it) |
 
+[`masked-uda.patch`](masked-uda.patch) puts back RGB21 (UDA) NFTs, which UTEXO's engine leaves out, from the same
+rgb-lib code and the UDA schema in `rgb-schemas`:
+
+| What | How |
+| --- | --- |
+| `AssetSchema::Uda` | Known schema (ID `…#spider-montana-fantasy`, checked against `rgb-schemas` in a test), imported like NIA and IFA |
+| Receive | Invoices for a UDA (or any asset) ask for `NonFungible`; an incoming NFT's image is downloaded from the transfer server and its hash checked, as for NIA media |
+| `listAssets` | A `uda` list: asset ID, ticker, name, details, balance and `media` (the image's digest and mime) |
+| Send | `Assignment::NonFungible` recipients move the token's own state |
+| `engineFeatures()` | `["swap", "presign", "uda"]`: the app turns NFTs on only with an engine that has them |
+
+Not in this patch: minting NFTs in the wallet, NFT swaps and listings. Native test: `cargo test --lib uda_`.
+
 It also lets `sendEnd` broadcast a transaction with an input that isn't the wallet's (the other side of a swap).
 Native tests: `cargo test --lib swap_` and `cargo test --lib presigned` (real Schnorr signatures).
 The patch changes nothing else, so wallets made with the npm engine open unchanged.

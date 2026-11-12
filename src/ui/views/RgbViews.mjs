@@ -103,8 +103,28 @@ export class RgbHome {
         <span class="bal-txt"><b class="tk">${esc(a.ticker)}</b><span>RGB${fut > s ? ' · <span class="pend-t">incoming</span>' : ''}</span></span>
         <span class="bal-amt"><b>${r.amount(a, s)}</b><span>${esc(a.name)}</span></span><span class="chev">›</span></button>`;
       }).join('') || (r.isMain ? `<p class="muted small center">No RGB tokens yet.</p><button class="btn ghost wide" data-rgb="receive">${I.recv}<span>Receive an RGB token</span></button>` : `<p class="muted small center">No RGB tokens yet.</p><button class="btn ghost wide" data-rgb="mint">${I.mint}<span>Create an RGB token</span></button>`)}</div>
+      ${nftGrid(r)}
     </section>`;
   }
+}
+
+/** An NFT's picture: the image once loaded from the transfer server (and checked), its number meanwhile. */
+export function nftPic(r, a, big = false) {
+  const url = r.nftImg(a);
+  return url ? `<img class="nft-img${big ? ' big' : ''}" src="${esc(url)}" alt="${esc(a.name)}">`
+    : `<span class="nft-img ph${big ? ' big' : ''}">${esc((a.name.match(/#\s*\d+/) || [a.ticker])[0])}</span>`;
+}
+
+/** The NFTs (RGB21 / UDA) this wallet holds, as a grid on Home. */
+export function nftGrid(r) {
+  const list = r.nfts?.() || [];
+  if (!list.length) return '';
+  return `<div class="list-h nft-h"><b>NFTs</b><span class="muted small">${list.length}</span></div>
+    <div class="nft-grid">${list.map((a) => {
+      const { settled: s, future: fut } = r.bal(a);
+      return `<button class="nft-tile" data-rgb="token" data-rgb-arg="${esc(a.assetId)}">${nftPic(r, a)}
+        <span class="nft-name">${esc(a.name)}</span>${fut > s ? '<span class="pend-t small">incoming</span>' : ''}</button>`;
+    }).join('')}</div>`;
 }
 
 /** A token page for one RGB asset, like the BRC-20 one. */
@@ -112,6 +132,7 @@ export class RgbTokenView extends View {
   render() {
     const r = this.app.rgb, a = r.find(r.asset);
     if (!r.ready || !a) { this.state.view = 'home'; return this.app.ui.view('home').render(); }
+    if (r.isNft(a)) return this.nft(a);
     const { settled: s, future: fut, spendable: sp, doubled } = r.bal(a);
     const tab = this.f.rgbTab || 'history';
     return `
@@ -144,6 +165,30 @@ export class RgbTokenView extends View {
       </section>
       <div class="tabs">${[['history', 'History'], ['details', 'Details']].map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-set="rgbTab" data-val="${k}">${l}</button>`).join('')}</div>
       ${tab === 'history' ? `<section class="hist">${this.history(a)}</section>` : this.details(a)}
+    </div>`;
+  }
+
+  /** One NFT: its picture, what it is, Send. */
+  nft(a) {
+    const r = this.app.rgb, { settled: s, future: fut, spendable: sp } = r.bal(a);
+    return `
+    <div class="tok-page">
+      <div class="view-head"><button class="icon-btn" data-go="home" aria-label="Back">${I.back}</button><span class="head-sp"></span></div>
+      <div class="tok-hero nft-hero">${nftPic(r, a, true)}<p class="tok-name">${esc(a.name)} ${rgbBadge}</p>
+        ${fut > s ? '<p class="pend-t small">On its way · waiting for a block</p>' : ''}</div>
+      <section class="card tok-box">
+        ${s && !sp && fut <= s ? '<p class="info small">It\'s held by a transfer waiting for a block, and can be sent once it confirms.</p>' : ''}
+        <div class="tok-acts"><button class="tact" data-rgb="send" data-rgb-arg="${esc(a.assetId)}" ${sp ? '' : 'disabled'}>${I.send}<span>Send</span></button></div>
+      </section>
+      <section class="card"><div class="kv">
+        ${rowKV('Collection', esc(a.ticker))}
+        ${a.details ? rowKV('Details', esc(a.details)) : ''}
+        ${rowKV('Kind', 'NFT (RGB21), one of one')}
+        ${rowKV('Network', r.isMain ? 'Bitcoin mainnet · beta' : `${esc(r.profile.label)} · test`)}
+        ${rowKV('Asset ID', `<span class="mono small">${esc(short(a.assetId, 10))}</span>`)}
+      </div><button class="btn ghost wide" data-copy="${esc(a.assetId)}">${I.copy}<span>Copy asset ID</span></button>
+      <p class="info">The picture's fingerprint is part of the NFT: MASKED shows it only if the file matches.</p></section>
+      <section class="hist">${this.history(a)}</section>
     </div>`;
   }
 
@@ -186,7 +231,7 @@ export class RgbSendView extends View {
     if (r.sent) {
       const onChain = (r.profile.id === 'public' || r.isMain) && r.sent.txid;
       return `<section class="done"><div class="done-ic">${I.check}</div><h1>Sent</h1>
-        <p>${esc(r.sent.shown)} ${esc(r.sent.ticker)} is on its way.</p><p class="muted small">It arrives once the other wallet picks it up and a block confirms it.</p>
+        <p>${esc(r.sent.shown)}${r.sent.nft ? '' : ` ${esc(r.sent.ticker)}`} is on its way.</p><p class="muted small">It arrives once the other wallet picks it up and a block confirms it.</p>
         ${onChain ? `<a class="btn ghost" href="${this.account.explorer.tx(r.sent.txid)}" target="_blank" rel="noopener">View on mempool ${I.ext}</a>` : ''}
         <button class="btn primary wide" data-rgb="token" data-rgb-arg="${esc(a.assetId)}">Done</button></section>`;
     }
@@ -195,7 +240,7 @@ export class RgbSendView extends View {
       return `<div class="view-head"><button class="icon-btn" data-rgb="cancel" aria-label="Back">${I.back}</button><h1>Confirm</h1><span class="head-sp"></span></div>
       <section class="card review">
         <p class="hero-label">You are sending</p>
-        <p class="hero-bal">${esc(p.shown)} <small>${esc(p.ticker)}</small></p>
+        <p class="hero-bal">${esc(p.shown)} <small>${p.nft ? 'NFT' : esc(p.ticker)}</small></p>
         <div class="kv">
           ${rowKV('Token', `${esc(p.ticker)} ${rgbBadge}`)}
           ${rowKV('To', `<span class="mono">${esc(short(p.invoice, 12))}</span>`)}
@@ -213,13 +258,14 @@ export class RgbSendView extends View {
         <button class="btn primary wide" data-rgb="confirm" ${r.busy || !p.check?.ok ? 'disabled' : ''}>${r.busy ? 'Working…' : 'Confirm & send'}</button>
       </section>`;
     }
-    const sp = r.bal(a).spendable;
-    return `${head(`Send ${esc(a.ticker)}`)}
+    const sp = r.bal(a).spendable, isNft = r.isNft(a);
+    return `${head(`Send ${esc(isNft ? a.name : a.ticker)}`)}
     ${this.netBanner()}
     <section class="card form">
+      ${isNft ? `<div class="nft-send">${nftPic(r, a)}<b>${esc(a.name)}</b></div>` : ''}
       ${input(r, 'sendTo', 'To', 'class="mono" placeholder="Paste their RGB invoice (rgb:…)"')}
-      <p class="info">Ask them for an invoice: Receive → RGB in MASKED, or any RGB wallet.</p>
-      ${input(r, 'sendAmt', 'Amount', 'inputmode="decimal" placeholder="0"', `Available ${r.amount(a, sp)} ${esc(a.ticker)}`)}
+      <p class="info">Ask them for an invoice: Receive → RGB in MASKED, or any RGB wallet that holds NFTs.</p>
+      ${isNft ? '' : input(r, 'sendAmt', 'Amount', 'inputmode="decimal" placeholder="0"', `Available ${r.amount(a, sp)} ${esc(a.ticker)}`)}
       ${r.isMain ? `<div><p class="lbl">Network fee <span class="lbl-r">${esc(r.fee())} sat/vB · mempool now</span></p>${this.feeChips({ rbf: false })}</div>` : ''}
       ${msg(r)}
       <button class="btn primary wide" data-rgb="review" ${r.busy ? 'disabled' : ''}>Review</button>

@@ -37,6 +37,14 @@ const asset = (a) => ({
   precision: num(a?.precision), issuedSupply: num(a?.issuedSupply), balance: balance(a?.balance),
 });
 
+/** An NFT (RGB21 / UDA): one token; its image is fetched from the transfer server by digest (see nftImage). */
+const nft = (a) => ({
+  assetId: String(a?.assetId ?? ''), ticker: String(a?.ticker ?? '').slice(0, 12), name: String(a?.name ?? a?.ticker ?? ''),
+  details: a?.details ? String(a.details) : '', balance: balance(a?.balance),
+  media: a?.media?.digest ? { digest: String(a.media.digest), mime: String(a.media.mime || '') } : null,
+});
+const IMAGE_MIME = /^image\/(png|jpeg|gif|webp)$/;
+
 const hostOf = (u) => { try { return new URL(String(u)).host; } catch { return 'the block server'; } };
 
 export class LiteWallet {
@@ -64,8 +72,9 @@ export class LiteWallet {
       dataDir, bitcoinNetwork: this.net, databaseType: 'Sqlite', maxAllocationsPerUtxo: 5,
       accountXpubVanilla: k.accountXpubVanilla, accountXpubColored: k.accountXpubColored,
       mnemonic, masterFingerprint: k.masterFingerprint, vanillaKeychain: null,
-      // mainnet: NIA (standard RGB tokens) only; this engine has no CFA/UDA, and IFA/BFA are test-network only for now
-      supportedSchemas: this.net === 'Mainnet' ? ['Nia'] : ['Nia', 'Ifa'], reuseAddresses: true, // one stable funding address
+      // mainnet: NIA (standard RGB tokens) only; IFA is test-network only for now. NFTs (UDA) need MASKED's own engine
+      // build (engine/masked-uda.patch): an engine without them refuses a wallet that names the schema
+      supportedSchemas: this.net === 'Mainnet' ? ['Nia'] : ['Nia', 'Ifa', ...(this.canNft ? ['Uda'] : [])], reuseAddresses: true, // one stable funding address
     };
     this.w = await this.lib.WasmWallet.create(JSON.stringify(data));
   }
@@ -145,7 +154,29 @@ export class LiteWallet {
   async getBtcBalance() { const b = plain(this.wallet.getBtcBalance()); return { vanilla: balance(b?.vanilla), colored: balance(b?.colored) }; }
   async listAssets() {
     const r = plain(this.wallet.listAssets([]) || {});
-    return { nia: (r.nia || []).map(asset), ifa: (r.ifa || []).map(asset) };
+    return { nia: (r.nia || []).map(asset), ifa: (r.ifa || []).map(asset), uda: (r.uda || []).map(nft) };
+  }
+  /** This engine build holds NFTs (RGB21 / UDA), and this network has them on (test networks for now). */
+  get canNft() { try { return this.net !== 'Mainnet' && typeof this.lib.engineFeatures === 'function' && [...this.lib.engineFeatures()].includes('uda'); } catch { return false; } }
+  /** NFTs held (or arriving): asset ID, name, ticker, details, balance, image digest + mime. */
+  async nfts() { return this.canNft ? (await this.listAssets()).uda.filter((a) => a.balance.future > 0 || a.balance.settled > 0) : []; }
+  /**
+   * An NFT's image: asked from the transfer servers by its digest, and kept only if its SHA-256 is that digest (the
+   * contract commits to it, so a server can't swap the picture). A data: URL, or null when no server has it.
+   */
+  async nftImage(media, fetchFn = fetch) {
+    if (!media?.digest || !/^[0-9a-f]{64}$/.test(media.digest) || !IMAGE_MIME.test(media.mime)) return null;
+    for (const e of this.transports) {
+      try {
+        const j = await rpc(endpointUrl(e), 'media.get', { attachment_id: media.digest }, fetchFn);
+        if (typeof j?.result !== 'string' || !j.result) continue;
+        const bytes = base64.decode(j.result);
+        const sum = hex.encode(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)));
+        if (sum !== media.digest) continue;
+        return `data:${media.mime};base64,${j.result}`;
+      } catch { /* next server */ }
+    }
+    return null;
   }
   async listTransfers(assetId = null) { return plain(this.wallet.listTransfers(assetId) || []); }
   /** Give up on a transfer that is still waiting for the other side (frees the RGB output an invoice reserved). */
@@ -186,7 +217,7 @@ export class LiteWallet {
   /** Every recipient ID this wallet has ever had a transfer for (all assets, and receives not tied to one). */
   usedRecipients() {
     const r = plain(this.wallet.listAssets([]) || {});
-    const ids = [null, ...[...(r.nia || []), ...(r.ifa || [])].map((a) => a?.assetId).filter(Boolean)];
+    const ids = [null, ...[...(r.nia || []), ...(r.ifa || []), ...(r.uda || [])].map((a) => a?.assetId).filter(Boolean)];
     const out = new Set();
     for (const id of ids) for (const t of plain(this.wallet.listTransfers(id)) || []) if (t?.recipientId) out.add(String(t.recipientId));
     return out;
@@ -238,8 +269,9 @@ export class LiteWallet {
   }
 
   /** Send to an invoice (blind or witness): build, sign and broadcast. */
-  async onchainSend({ invoice, assetId, amount, feeRate, endpoint = '' }) {
-    if (isInvoiceV1(invoice)) return this.onchainSendV1({ invoice, assetId, amount, feeRate });
+  async onchainSend({ invoice, assetId, amount, feeRate, endpoint = '', nft: isNft = false }) {
+    if (isNft && !this.canNft) throw new Error('This MASKED build can\'t send NFTs. Update MASKED.');
+    if (isInvoiceV1(invoice)) { if (isNft) throw new Error('MASKED can\'t send an NFT to this kind of invoice yet.'); return this.onchainSendV1({ invoice, assetId, amount, feeRate }); }
     const online = this.requireOnline();
     const d = await this.decodeRGBInvoice({ invoice });
     const recipients = {
@@ -248,10 +280,11 @@ export class LiteWallet {
         // a witness invoice: we create the receiver's output, with a few sats in it
         // rgb-lib-wasm wants amountSat as a string here (a number is refused), while the token amount is a number
         witnessData: d.witness ? { amountSat: String(LiteWallet.WITNESS_SATS), blinding: null } : null,
-        assignment: { Fungible: amount },
+        assignment: isNft ? 'NonFungible' : { Fungible: amount },
         transportEndpoints: endpoint ? [rpcEndpoint(endpoint)] : d.transportEndpoints.length ? d.transportEndpoints : [this.transport],
       }],
     };
+    if (isNft && d.assetId && d.assetId !== assetId) throw new Error('This invoice is for another asset.');
     const psbt = await this.wallet.sendBegin(online, recipients, false, BigInt(Math.round(feeRate)), 1);
     const r = plain(await this.wallet.sendEnd(online, this.sign(psbt), false));
     await this.save();

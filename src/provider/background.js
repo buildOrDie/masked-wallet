@@ -310,7 +310,11 @@ async function handle(origin, method, params) {
       // how the site describes a token the wallet may not hold yet (shown as the site's words, never trusted for amounts)
       const ticker = /^[A-Za-z0-9]{1,12}$/.test(String(params.ticker || '')) ? String(params.ticker) : '';
       const precision = Number.isInteger(params.precision) && params.precision >= 0 && params.precision <= 18 ? params.precision : null;
-      return openApproval(origin, 'rgbInvoice', { assetId, baseUnits, expiry, kind, ticker, precision });
+      // an NFT (RGB21): one unit of an asset the wallet doesn't hold yet, so the invoice names no asset or amount
+      const nft = params.nft === true;
+      if (nft && baseUnits) throw err(4000, 'An NFT invoice takes no baseUnits.');
+      const name = nft ? String(params.name || '').replace(/[^\p{L}\p{N} #'.,:-]/gu, '').slice(0, 40) : '';
+      return openApproval(origin, 'rgbInvoice', { assetId, baseUnits, expiry, kind, ticker, precision, ...(nft ? { nft, name } : {}) });
     }
     case 'rgbPayInvoice': {
       needConnected();

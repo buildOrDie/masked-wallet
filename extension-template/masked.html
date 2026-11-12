@@ -320,6 +320,17 @@ select#obBday { width: 100%; }
 .tok-list { display: grid; gap: 8px; margin-bottom: 12px; }
 .tok-line { display: grid; grid-template-columns: auto 1fr auto auto; gap: 12px; align-items: center; width: 100%; text-align: left; padding: 14px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; color: inherit; font: inherit; cursor: pointer; }
 .tok-line:hover { border-color: rgba(247,147,26,.4); }
+.nft-h { margin-top: 14px; }
+.nft-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.nft-tile { display: grid; gap: 6px; padding: 6px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; color: inherit; font: inherit; cursor: pointer; text-align: left; min-width: 0; }
+.nft-tile:hover { border-color: rgba(247,147,26,.4); }
+.nft-img { display: grid; place-items: center; width: 100%; aspect-ratio: 1; border-radius: 8px; object-fit: cover; image-rendering: auto; background: #0e0e11; }
+.nft-img.ph { color: var(--muted); font-weight: 700; font-size: 13px; }
+.nft-img.big { width: 180px; border-radius: 14px; margin: 0 auto; }
+.nft-img.ph.big { font-size: 22px; }
+.nft-name { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nft-send { display: flex; align-items: center; gap: 12px; }
+.nft-send .nft-img { width: 56px; }
 .tok-line .tk { color: var(--btc-2); letter-spacing: .02em; }
 .tok-line .chev { color: var(--muted); }
 .pend-t { color: var(--btc-2); }

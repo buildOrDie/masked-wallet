@@ -141,13 +141,15 @@ export class ApprovalController {
     if (a.method === 'rgbInvoice') once(async () => {
       const asset = P.assetId ? r.find(P.assetId) : null;
       const base = P.baseUnits ? Number(P.baseUnits) : 0;
+      if (P.nft && !r.service?.wallet?.canNft) throw new Error('This MASKED build can\'t hold NFTs yet. Update MASKED, then try again.');
       if (base && !Number.isSafeInteger(base)) throw new Error('That amount is too large.');
       const witness = P.kind ? P.kind === 'witness' : r.recvType() === 'witness';
       return {
         assetId: P.assetId || '', asset, amount: base, witness, expiry: Number(P.expiry) || 86400,
         // a token this wallet doesn't hold yet: in the site's words (ticker, decimals) when it gave them
-        siteDescribed: !asset && base > 0 && Number.isInteger(P.precision),
-        shown: base ? (asset ? `${r.amount(asset, base)} ${asset.ticker}`
+        siteDescribed: !asset && ((base > 0 && Number.isInteger(P.precision)) || !!P.nft),
+        nft: !!P.nft,
+        shown: P.nft ? `1 NFT${P.name ? ` from ${P.name}` : P.ticker ? ` (${P.ticker})` : ''}` : base ? (asset ? `${r.amount(asset, base)} ${asset.ticker}`
           : Number.isInteger(P.precision) ? `${fromBase(base, P.precision)} ${P.ticker || 'tokens'}` : `${base.toLocaleString('en-US')} units`) : 'Any amount',
         newToken: !!P.assetId && !asset,
       };

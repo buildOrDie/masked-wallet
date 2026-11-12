@@ -76,6 +76,8 @@ export class WalletRgb {
   constructor(app) {
     this.app = app;
     this.service = null;
+    /** @type {Map<string, string>} NFT images by digest: data: URL, '' while loading */
+    this.imgs = new Map();
     this.data = null;
     this.ready = false;
     this.busy = false;
@@ -252,8 +254,24 @@ export class WalletRgb {
   }
 
   // ---- what the screens read ----
-  assets() { return Object.values(this.data?.groups || {}).flat().filter((a) => a && typeof a === 'object' && a.assetId); }
-  find(id) { return this.assets().find((a) => a.assetId === id) || null; }
+  /** Fungible tokens (NIA, IFA). NFTs are listed apart: nfts(). */
+  assets() { return Object.entries(this.data?.groups || {}).filter(([k]) => k !== 'uda').flatMap(([, v]) => v || []).filter((a) => a && typeof a === 'object' && a.assetId); }
+  /** NFTs (RGB21 / UDA) held or on their way in. */
+  nfts() { return (this.data?.groups?.uda || []).filter((a) => a?.assetId && (Number(a.balance?.future) > 0 || Number(a.balance?.settled) > 0)).map((a) => ({ ...a, nft: true, precision: 0 })); }
+  isNft(a) { return !!a?.nft; }
+  find(id) { return this.assets().find((a) => a.assetId === id) || this.nfts().find((a) => a.assetId === id) || null; }
+  /**
+   * An NFT's image as a data: URL once loaded (checked against the digest in the NFT), '' while loading or when no
+   * transfer server has it. Loads in the background and re-renders.
+   */
+  nftImg(a) {
+    const d = a?.media?.digest;
+    if (!d) return '';
+    if (this.imgs.has(d)) return this.imgs.get(d) || '';
+    this.imgs.set(d, '');
+    Promise.resolve(this.service?.nftImage?.(a.media)).then((url) => { if (url) { this.imgs.set(d, url); this.app.render?.(); } else this.imgs.delete(d); }, () => this.imgs.delete(d));
+    return '';
+  }
   /**
    * Tokens an earlier beta counted twice: two of our witness invoices shared one address, so one payment settled
    * both. Same recipient, same transaction: only the first is real. Base units, 0 when nothing is doubled.
@@ -713,15 +731,16 @@ export class WalletRgb {
           if (d.assetId && d.assetId !== a.assetId) throw new Error(`This invoice asks for a different token, not ${a.ticker}.`);
           if (d.expirationTimestamp && d.expirationTimestamp <= Date.now() / 1000) throw new Error('This invoice has expired. Ask them to make a new one.');
           if (!this.profile.invoiceNets.includes(String(d.network).toLowerCase())) throw new Error(`This invoice is not for ${this.profile.label}.`);
-          // an invoice with a fixed amount fills it in
-          const amount = d.amount || toBase(this.fields.sendAmt, a.precision);
+          // an invoice with a fixed amount fills it in; an NFT is always 1
+          if (this.isNft(a)) this.fields.sendAmt = '1';
+          const amount = this.isNft(a) ? 1 : d.amount || toBase(this.fields.sendAmt, a.precision);
           if (d.amount) this.fields.sendAmt = this.amount(a, d.amount).replace(/,/g, '');
           if (amount > this.bal(a).spendable) throw new Error(`You can send up to ${this.amount(a, this.bal(a).spendable)} ${a.ticker}.`);
           const endpoints = d.transportEndpoints?.length ? d.transportEndpoints : [this.profile.sdk.transportEndpoint];
           if (endpoints.some((e) => {
             try { return !['http:', 'https:'].includes(new URL(proxyUrl(e)).protocol); } catch { return true; }
           })) throw new Error('This invoice contains an unsupported transfer server.');
-          this.pending = { assetId: a.assetId, ticker: a.ticker, invoice, amount, shown: this.amount(a, amount), witness: !!d.witness, fixed: !!d.amount, endpoints, proxies: endpoints.map(hostOf), ask: [], check: null };
+          this.pending = { assetId: a.assetId, ticker: a.ticker, invoice, amount, shown: this.isNft(a) ? a.name : this.amount(a, amount), nft: this.isNft(a), witness: !!d.witness, fixed: !!d.amount, endpoints, proxies: endpoints.map(hostOf), ask: [], check: null };
           await this.checkProxies();
         });
       }
@@ -745,8 +764,8 @@ export class WalletRgb {
             await this.checkProxies();
             throw new Error('Transfer server permission changed. Review the server and try again.');
           }
-          const r = await this.service.send({ invoice: p.invoice, assetId: p.assetId, amount: String(p.amount), fee: this.fee(), endpoint: p.check.endpoint });
-          this.sent = { txid: r?.txid || '', shown: p.shown, ticker: p.ticker };
+          const r = await this.service.send({ invoice: p.invoice, assetId: p.assetId, amount: String(p.amount), fee: this.fee(), endpoint: p.check.endpoint, nft: !!p.nft });
+          this.sent = { txid: r?.txid || '', shown: p.shown, ticker: p.ticker, nft: !!p.nft };
           this.pending = null;
           await this.refresh();
         });

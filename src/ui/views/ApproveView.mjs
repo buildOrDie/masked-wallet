@@ -127,11 +127,11 @@ export class ApproveView extends View {
   rgbInvoiceBody(a, P, b) {
     const r = this.app.rgb;
     return `<p class="hero-bal center">${b ? esc(b.shown) : '…'}</p>
-    <div class="kv">${rowKV('Token', b?.asset ? `${esc(b.asset.ticker)} <span class="mono">${esc(short(b.assetId, 8))}</span>` : P.assetId ? `<span class="mono">${esc(short(P.assetId, 8))}</span>` : 'Any token')}
+    <div class="kv">${rowKV('Token', b?.nft ? 'An NFT (RGB21): which one is picked by the site' : b?.asset ? `${esc(b.asset.ticker)} <span class="mono">${esc(short(b.assetId, 8))}</span>` : P.assetId ? `<span class="mono">${esc(short(P.assetId, 8))}</span>` : 'Any token')}
     ${rowKV('Network', esc(r.profile.label))}
     ${b ? rowKV('Invoice type', b.witness ? 'No BTC needed (the sender adds a small output)' : 'Private (uses one of your RGB outputs)') : ''}
     ${rowKV('Works for', `${Math.round((b?.expiry || P.expiry || 86400) / 3600)} hours`)}</div>
-    ${b?.siteDescribed ? `<p class="info">You don't hold this token yet, so the amount is shown as ${esc(new URL(a.origin).host)} describes it (${P.precision} decimals: ${esc(Number(P.baseUnits).toLocaleString('en-US'))} smallest units). It shows in RGB once it arrives.</p>` : b?.newToken ? '<p class="info">You don\'t hold this token yet. It shows in RGB once it arrives.</p>' : ''}
+    ${b?.nft ? `<p class="info">The NFT is described by ${esc(new URL(a.origin).host)}. It shows under RGB → NFTs once it arrives, with its picture checked against the NFT itself.</p>` : b?.siteDescribed ? `<p class="info">You don't hold this token yet, so the amount is shown as ${esc(new URL(a.origin).host)} describes it (${P.precision} decimals: ${esc(Number(P.baseUnits).toLocaleString('en-US'))} smallest units). It shows in RGB once it arrives.</p>` : b?.newToken ? '<p class="info">You don\'t hold this token yet. It shows in RGB once it arrives.</p>' : ''}
     <p class="info">The site gets an invoice to send you tokens. It can't take anything from your wallet. Tokens arrive after one confirmation.</p>
     ${this.rgbWait(a)}${this.error(a)}`;
   }
