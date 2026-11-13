@@ -40,6 +40,8 @@ export class SignetWallet {
         await wallet.init();
         // outputs promised to Instant listings: before anything else can spend them
         wallet.reserve?.(this.instantReserved());
+        // sales pay the Public address, when it's on this network
+        wallet.setPayoutScript?.(this.payoutHex || null);
         // Instant purchases whose transfer is still to arrive (protocol 1.0: matched without the derived blinding)
         wallet.expectPurchases?.(Object.values(this.instantStore().all()).filter((e) => e?.role === 'buyer' && e.recipientId).map((e) => String(e.recipientId)));
         if (backup) {
@@ -60,6 +62,8 @@ export class SignetWallet {
     this.profile = { ...this.profile, sdk: { ...this.profile.sdk, indexerUrls: list } };
     this.wallet?.setIndexers?.(list);
   }
+  /** A sale's bitcoin goes to this script (the Public address, P2TR hex); null: to the RGB wallet. */
+  setPayoutScript(hex) { this.payoutHex = hex || null; this.wallet?.setPayoutScript?.(this.payoutHex); }
   requireWallet() { if (!this.wallet || !this.mnemonic) throw new Error('Unlock the RGB test wallet first.'); return this.wallet; }
   /** @param {{ full?: boolean }} [o] full: also scan addresses ahead (finds coins sent to older addresses) */
   async snapshot({ full = false } = {}) {

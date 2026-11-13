@@ -395,6 +395,7 @@ export class WalletRgb {
       const runtime = await this.runtime();
       const service = await this.serviceFor();
       const seed = await this.mainSeed();
+      service.setPayoutScript?.(this.payoutScript());
       await service.open(password, () => runtime.mnemonicFrom(seed), backup);
       this.ready = true;
       // the last balances, shown at once while the refresh below checks the block server (it can take a minute)
@@ -408,6 +409,15 @@ export class WalletRgb {
     } catch (error) {
       this.message = `${rgbError(error, this.profile)} RGB will try again in a minute.`;
     }
+  }
+  /**
+   * The Public address's script when it's on this RGB network's chain: sales pay it, so the RGB wallet's bitcoin
+   * stays for network fees. UTEXO's test network is a chain of its own: there, sales stay in the RGB wallet.
+   */
+  payoutScript() {
+    const a = this.app?.account, n = this.profile?.sdk?.network;
+    if (!a?.pubSpk || !((n === 'signet' && a.net === 'signet') || (n === 'mainnet' && a.net === 'main'))) return null;
+    return a.pubSpk() || null;
   }
   /** Vaults opened with the wallet key say so; older ones had a password of their own. */
   markKeyed() {
@@ -468,7 +478,7 @@ export class WalletRgb {
     let changes = [];
     try { changes = await this.service.instantProgress(); } catch { return; }
     for (const c of changes) {
-      if (c.stage === 'sold') this.app.toast('Instant listing sold. The bitcoin is in your RGB wallet once the transaction confirms.');
+      if (c.stage === 'sold') this.app.toast(this.service.instantStore().get(c.offerId)?.payoutPublic ? 'Instant listing sold. The bitcoin is in your Public balance once the transaction confirms.' : 'Instant listing sold. The bitcoin is in your RGB wallet once the transaction confirms.');
       if (c.stage === 'ready') {
         // signed after the tokens moved: hand the listing to the market it was made on
         const e = this.service.instantStore().get(c.offerId);

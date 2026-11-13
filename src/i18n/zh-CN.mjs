@@ -1137,6 +1137,7 @@ export const ZH_CN = {
   "cancelling: waiting for the transaction to confirm": "取消中：等待交易确认",
   "cancelled": "已取消",
   "Instant listing sold. The bitcoin is in your RGB wallet once the transaction confirms.": "即时挂单已售出。交易确认后，比特币将进入你的 RGB 钱包。",
+  "Instant listing sold. The bitcoin is in your Public balance once the transaction confirms.": "即时挂单已售出。交易确认后，比特币将进入你的公开余额。",
   "Instant listing is live: buyers can buy it now, even with MASKED closed.": "即时挂单已上线：买家现在就可以购买，即使 MASKED 已关闭。",
   "Instant listing signed. Open the market and tap Publish on it.": "即时挂单已签署。请打开市场并点击发布。",
   "Listing cancelled. Your tokens moved to a new output.": "挂单已取消。你的代币已移到新的输出。",

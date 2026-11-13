@@ -49,7 +49,7 @@ function wallet({ name, rgb = [], coins = [], lib, chain }) {
     colorSwap: async (online, psbt, assetId, amount, rid, vout) => { log.push(['colorSwap', JSON.parse(psbt).ins, String(amount), vout]); return psbt; },
     signPsbt: (p) => p,
     sendEnd: async () => { log.push(['sendEnd']); return { txid: T('5') }; },
-    presignSale: async (online, assetId, amount, outpoint, payout, price) => { log.push(['presign', outpoint, String(amount), String(price)]); return { psbt: `signed:${outpoint}`, consignment: [1, 2, 3], templateTxid: T('6'), sellerOutpoint: outpoint, sellerSats: 1000 }; },
+    presignSale: async (online, assetId, amount, outpoint, payout, price) => { log.push(['presign', outpoint, String(amount), String(price)]); log.push(['payout', payout]); return { psbt: `signed:${outpoint}`, consignment: [1, 2, 3], templateTxid: T('6'), sellerOutpoint: outpoint, sellerSats: 1000 }; },
     setReservedOutpoints: (l) => { log.push(['reserve', [...l].sort()]); },
     markOutpointSpent: (op) => { log.push(['spent', op]); return true; },
     postOwnConsignment: async (url, rid, bytes, txid, vout) => { log.push(['post', rid, txid, vout, JSON.parse(new TextDecoder().decode(bytes)).final]); },
@@ -352,4 +352,19 @@ test('a listing whose transfer is in the old RGB format (signed before 2.29): th
   const s = wallet({ name: 'seller', lib, chain });
   s.store.set('sw0123456789ab', { role: 'seller', stage: 'ready', psbt: listing.psbt, consignment: listing.consignment, templateTxid: T('6'), coin: seller, assetId: ASSET, amount: '500', priceSats: '20000' });
   assert.deepEqual(await s.w.instantProgress(s.store, s.store.all()), [{ offerId: 'sw0123456789ab', stage: 'outdated' }]);
+});
+
+test('a sale pays the Public address when it is set; without it, the RGB wallet (its bitcoin is for fees)', async () => {
+  const pub = '5120' + 'ab'.repeat(32);
+  const s = wallet({ name: 'seller', lib: fakeLib(), chain: fakeChain(), rgb: [unspent('a', 0, [tok(500)])] });
+  s.w.setPayoutScript(pub);
+  await s.w.instantList({ offerId: 'sw0123456789ab', assetId: ASSET, amount: '500', priceSats: '20000', feeRate: 2 }, s.store);
+  assert.deepEqual(s.log.findLast((x) => x[0] === 'payout'), ['payout', pub]);
+  assert.equal(s.store.get('sw0123456789ab').payoutPublic, true);
+  // not a taproot script: ignored, the RGB wallet's own address is used
+  const t = wallet({ name: 'seller', lib: fakeLib(), chain: fakeChain(), rgb: [unspent('a', 0, [tok(500)])] });
+  t.w.setPayoutScript('0014' + 'cd'.repeat(20));
+  await t.w.instantList({ offerId: 'sw0123456789ab', assetId: ASSET, amount: '500', priceSats: '20000', feeRate: 2 }, t.store);
+  assert.notEqual(t.log.findLast((x) => x[0] === 'payout')[1], '0014' + 'cd'.repeat(20));
+  assert.equal(t.store.get('sw0123456789ab').payoutPublic, false);
 });

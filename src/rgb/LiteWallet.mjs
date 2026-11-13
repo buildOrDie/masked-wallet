@@ -447,6 +447,12 @@ export class LiteWallet {
   get canSwap() { return typeof this.lib.WasmWallet?.newSwapPsbt === 'function' && typeof this.wallet.colorSwap === 'function'; }
   requireSwaps() { if (!this.canSwap) throw new Error('This MASKED build has no swap engine yet. Update MASKED.'); }
   /** The output script of this wallet's bitcoin address, hex. */
+  /**
+   * Where a sale's bitcoin goes: the person's Public address (a P2TR script, hex) when set; this RGB wallet otherwise.
+   * The RGB wallet's own bitcoin is only for network fees.
+   */
+  setPayoutScript(hex) { this.payoutHex = /^5120[0-9a-f]{64}$/i.test(String(hex || '')) ? String(hex).toLowerCase() : null; }
+  async payoutScript() { return this.payoutHex || this.ownScript(); }
   async ownScript() {
     const net = this.net === 'Mainnet' ? btc.NETWORK : btc.TEST_NETWORK;
     return hex.encode(btc.OutScript.encode(btc.Address(net).decode(await this.wallet.getAddress())));
@@ -553,7 +559,7 @@ export class LiteWallet {
     const payout = payoutFor(o.priceSats, si.sats);
     const unsigned = this.lib.WasmWallet.newSwapPsbt(
       [{ outpoint: mine.outpoint, sats: si.sats, script: si.script, tx: si.tx }, { outpoint: buyerOutpoint, sats: bi.sats, script: bi.script, tx: bi.tx }],
-      [{ script: seal, sats: SEAL_SATS }, { script: await this.ownScript(), sats: Number(payout) }, { script: String(s.buyerChangeScript), sats: Number(change) }],
+      [{ script: seal, sats: SEAL_SATS }, { script: await this.payoutScript(), sats: Number(payout) }, { script: String(s.buyerChangeScript), sats: Number(change) }],
     );
     const endpoints = (d.transportEndpoints || []).length ? d.transportEndpoints : [this.transport];
     const psbt = this.engineV1
@@ -752,8 +758,9 @@ export class LiteWallet {
     const mine = e.coin ? unspents.filter((u) => `${String(u.utxo?.outpoint?.txid).toLowerCase()}:${u.utxo?.outpoint?.vout}` === e.coin) : unspents;
     const coin = exactCoinFor(mine, e.assetId, e.amount, e.coin ? new Set() : this.reserved);
     if (!coin) return this.instantView(offerId, e); // the move hasn't settled yet
-    const r = plain(await this.wallet.presignSale(online, e.assetId, BigInt(e.amount), coin.outpoint, await this.ownScript(), BigInt(e.priceSats), 1));
-    const next = { ...e, moveHex: undefined, stage: 'ready', coin: String(r.sellerOutpoint), psbt: String(r.psbt), consignment: b64(Uint8Array.from(r.consignment)), templateTxid: String(r.templateTxid), sellerSats: String(r.sellerSats), at: Date.now() };
+    const payout = await this.payoutScript();
+    const r = plain(await this.wallet.presignSale(online, e.assetId, BigInt(e.amount), coin.outpoint, payout, BigInt(e.priceSats), 1));
+    const next = { ...e, moveHex: undefined, stage: 'ready', payoutPublic: payout === this.payoutHex, coin: String(r.sellerOutpoint), psbt: String(r.psbt), consignment: b64(Uint8Array.from(r.consignment)), templateTxid: String(r.templateTxid), sellerSats: String(r.sellerSats), at: Date.now() };
     store.set(offerId, next);
     this.reserve([...new Set([...this.reserved, next.coin])]);
     await this.save();
