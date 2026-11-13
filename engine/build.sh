@@ -32,6 +32,8 @@ git -C "$work" apply "$here/masked-b4.patch"
 
 out="$root/vendor/rgb-lib-wasm"; rm -rf "$out"; mkdir -p "$out"
 cp "$work/bindings/wasm/pkg/"rgb_lib_wasm_bindings* "$out/"
+# the bindings import small JS helpers from snippets/ (beta.4: a no-store fetch)
+[[ -d "$work/bindings/wasm/pkg/snippets" ]] && cp -R "$work/bindings/wasm/pkg/snippets" "$out/"
 node -e "require('fs').writeFileSync('$out/package.json', JSON.stringify({name:'@utexo/rgb-lib-wasm',version:'1.0.0-beta.4+masked',type:'module',main:'rgb_lib_wasm_bindings.js',types:'rgb_lib_wasm_bindings.d.ts'},null,2))"
 for f in newSwapPsbt presignSale migrateLegacyWallet setPresignedReceives; do
   grep -q "$f" "$out/rgb_lib_wasm_bindings.d.ts" || { echo "The built engine has no $f. Stop."; exit 1; }
