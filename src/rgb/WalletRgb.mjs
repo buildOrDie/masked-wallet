@@ -11,6 +11,9 @@ const RGB_FEE = '1';
 export const RGB_LOW_BTC = 3000;
 /** What "Add test BTC" sends from the Public balance. */
 export const RGB_FUND_BTC = '0.0003';
+/** Signet: below this much test BTC (sats) in RGB, MASKED tops it up from Public by itself (RGB_FUND_SATS). */
+export const RGB_AUTO_FUND_BELOW = 10_000;
+export const RGB_FUND_SATS = 30_000;
 
 /**
  * A readable message for an RGB failure. The engine often throws plain strings, not Error objects.
@@ -425,6 +428,31 @@ export class WalletRgb {
     try { localStorage.setItem(this.snapshotKey, JSON.stringify(this.data, (_, v) => typeof v === 'bigint' ? v.toString() : v)); } catch { /* shown live only */ }
     if (full) try { localStorage.setItem(`${this.profile.vaultKey}.scanned-v2`, '1'); } catch { /* scans again next time */ }
     await this.instantCheck();
+    this.autoFund().catch(() => {});
+  }
+  /**
+   * Test networks only: keep the RGB wallet's test BTC for network fees topped up from the Public balance, so sends,
+   * listings and new RGB outputs don't stop on "needs bitcoin". At most once in 20 minutes (the top-up needs its
+   * block), and only when Public can pay it. Mainnet never moves BTC by itself: Home's Add BTC for RGB asks.
+   * @returns {Promise<boolean>} whether a top-up was sent
+   */
+  async autoFund() {
+    if (this.isMain || !this.data?.address) return false;
+    const { settled, pending } = this.btc();
+    if (settled + pending >= RGB_AUTO_FUND_BELOW) return false;
+    const now = Date.now();
+    if (now - (this.fundedAt || 0) < 20 * 60_000) return false;
+    const app = this.app;
+    if (typeof app.builder?.send !== 'function' || typeof app.broadcast !== 'function') return false;
+    this.fundedAt = now;
+    try {
+      // a Public wallet on another network refuses the RGB address here, so nothing is sent across networks
+      const b = await app.builder.send({ from: 'public', to: this.data.address, amount: RGB_FUND_SATS, rate: app.feeRate() });
+      await app.broadcast(b.hex);
+      await app.afterBroadcast?.(b.spent, [b.txid]);
+      app.toast?.(`Added ${RGB_FUND_SATS.toLocaleString('en-US')} test sats to RGB from your Public balance, for network fees. Ready after one block.`, 6000);
+      return true;
+    } catch { return false; } // locked, empty Public, other network: Home's Add test BTC is still there
   }
   /** A listing signed here but not yet on its market: send it (and say whether that worked). */
   async publishPending() {
@@ -526,8 +554,17 @@ export class WalletRgb {
   async withOutputs(fn, { retry = true } = {}) {
     try { return await fn(); } catch (e) {
       const text = typeof e === 'string' ? e : e?.message || '';
+      // short of bitcoin for the fee (MASKED's own check): on a test network, top up from Public first
+      if (/Tap Add BTC for RGB/.test(text) && !this.isMain) {
+        this.fundedAt = 0; // asked for now, not on the 20-minute timer
+        if (await this.autoFund()) throw new Error('MASKED added test BTC to RGB from your Public balance, for the network fee. Wait for one block (about 10 minutes), then tap again.');
+        throw e;
+      }
       if (!NEEDS_OUTPUTS.test(text)) throw e;
-      if (this.btc().settled < 1500) throw new Error(this.isMain ? 'Add BTC for RGB first: tap Add BTC for RGB on Home, then wait for a block.' : 'Add test BTC first: tap Add test BTC on Home, then wait for a block.');
+      if (this.btc().settled < 1500) {
+        if (!this.isMain && await this.autoFund()) throw new Error('MASKED added test BTC to RGB from your Public balance. Wait for one block (about 10 minutes), then tap again.');
+        throw new Error(this.isMain ? 'Add BTC for RGB first: tap Add BTC for RGB on Home, then wait for a block.' : 'Add test BTC first: tap Add test BTC on Home, then wait for a block.');
+      }
       this.message = 'Setting up RGB…'; this.app.render();
       await this.service.createUtxos(this.fee());
       await this.refresh();

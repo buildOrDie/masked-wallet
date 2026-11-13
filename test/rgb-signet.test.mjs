@@ -227,3 +227,28 @@ test('snapshot names sends the engine can no longer broadcast (signed transactio
   const snap = await f.service.snapshot();
   assert.deepEqual(snap.stranded, [12]);
 });
+test('test networks: RGB tops its fee bitcoin up from Public by itself; mainnet never does', async () => {
+  const { WalletRgb, RGB_FUND_SATS } = await import('../src/rgb/WalletRgb.mjs');
+  const sent = [], toasts = [];
+  const app = {
+    feeRate: () => 1, toast: (t) => toasts.push(t), afterBroadcast: async () => {},
+    builder: { send: async (o) => { sent.push(o); return { hex: 'aa', txid: 't1', spent: ['c:0'] }; } },
+    broadcast: async () => 't1',
+  };
+  const w = Object.create(WalletRgb.prototype);
+  w.app = app;
+  let id = 'signet';
+  Object.defineProperty(w, 'profile', { get: () => ({ id }) });
+  w.data = { address: 'tb1prgb', btc: { vanilla: { settled: 2000, future: 2000 }, colored: { settled: 0, future: 0 } } };
+  assert.equal(await w.autoFund(), true);
+  assert.deepEqual(sent, [{ from: 'public', to: 'tb1prgb', amount: RGB_FUND_SATS, rate: 1 }]);
+  assert.match(toasts[0], /from your Public balance/);
+  assert.equal(await w.autoFund(), false, 'once in 20 minutes: the top-up needs its block');
+  w.fundedAt = 0; w.data.btc.vanilla = { settled: 50_000, future: 50_000 };
+  assert.equal(await w.autoFund(), false, 'enough already');
+  w.data.btc.vanilla = { settled: 0, future: 0 }; id = 'mainnet';
+  assert.equal(await w.autoFund(), false, 'mainnet asks instead');
+  id = 'signet'; app.builder.send = async () => { throw new Error('Your Public balance is empty.'); };
+  assert.equal(await w.autoFund(), false, 'nothing in Public: Home\'s button stays');
+  assert.equal(sent.length, 1);
+});

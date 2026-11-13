@@ -285,7 +285,12 @@ export class ApprovalController {
       this.finish({ result: await this.run(a) });
     } catch (e) {
       // the RGB engine throws plain strings, not Error objects: show them too, never an empty line
-      const text = /^rgb/.test(a.method) ? rgbError(e, app.rgb?.profile) : String(e?.message || e || '');
+      let text = /^rgb/.test(a.method) ? rgbError(e, app.rgb?.profile) : String(e?.message || e || '');
+      // short of bitcoin for RGB's fee on a test network: top up from Public now, so the next try works
+      if (/^rgb/.test(a.method) && /Tap Add BTC for RGB/.test(text) && app.rgb && !app.rgb.isMain) {
+        app.rgb.fundedAt = 0;
+        if (await app.rgb.autoFund().catch(() => false)) text = 'MASKED added test BTC to RGB from your Public balance, for the network fee. Wait for one block (about 10 minutes), then try again.';
+      }
       console.error('[MASKED] approval failed', a.method, e);
       state.status.approve = [friendly(text) || 'Something went wrong. Try again.', 'err'];
     } finally { state.busy = false; app.render(); }
