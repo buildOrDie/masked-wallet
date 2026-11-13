@@ -417,3 +417,16 @@ test('buyer: a sent purchase is kept until it confirms; dropped, it is sent agai
   assert.equal(b.store.get(offer.offerId).txHex, undefined);
   assert.equal(await b.w.purchaseProgress(offer.offerId, b.store.get(offer.offerId), b.store), null, 'said once');
 });
+
+test('buyer: buying again after a purchase that never reached the network makes a new one (not the old txid)', async () => {
+  const { chain, b, offer, listing } = buySetup();
+  b.w.postOwnV1 = async () => {};
+  // an earlier attempt: delivered to MASKED, its transaction gone and not kept (as MASKED before 2.29.9 left it)
+  b.store.set(offer.offerId, { role: 'buyer', txid: 'e'.repeat(64), posted: true, at: 1 });
+  const r = await b.w.instantBuy({ offerId: offer.offerId, network: 'Signet', offer, listing, feeRate: 2 }, b.store);
+  assert.notEqual(r.txid, 'e'.repeat(64), 'a new purchase');
+  assert.equal(chain.posted.length, 1, 'and it was broadcast');
+  // asked again while that one is on the network: the same purchase, nothing new
+  const again = await b.w.instantBuy({ offerId: offer.offerId, network: 'Signet', offer, listing, feeRate: 2 }, b.store);
+  assert.equal(again.txid, r.txid); assert.equal(chain.posted.length, 1);
+});

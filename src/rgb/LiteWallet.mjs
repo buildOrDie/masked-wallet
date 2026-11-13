@@ -58,6 +58,8 @@ export class LiteWallet {
     this.lib = lib;
     this.params = params;
     this.net = rgbNetwork(params.network);
+    /** How long a broadcast check waits before asking the block servers again (ms). */
+    this.recheckMs = 2000;
     // the RGB 0.11.2 engine speaks only transfer server protocol 1.0: its own servers (the 0.2 ones can't be used)
     const v1 = this.engineV1;
     this.transport = rpcEndpoint(v1 ? (params.transportEndpointV1 || params.transportEndpoint) : params.transportEndpoint);
@@ -728,7 +730,7 @@ export class LiteWallet {
       for (const base of list) {
         try { const r = await fetch(`${base}/tx/${txid}/hex`); if (r.ok && /^[0-9a-f]{20,}$/i.test((await r.text()).trim())) return true; } catch { /* the next one */ }
       }
-      await new Promise((res) => setTimeout(res, this.recheckMs ?? 2000));
+      await new Promise((res) => setTimeout(res, this.recheckMs));
     }
     throw new Error('The transaction is signed but no block server accepted it: a server took it, then none kept it (it may conflict with another transaction of this wallet).');
   }
@@ -928,8 +930,16 @@ export class LiteWallet {
     this.requirePresign(); this.checkNet(network);
     const o = readOffer(offer, offerId);
     if (o.state && o.state !== 'OPEN') throw new Error(`The offer is ${o.state.toLowerCase()}.`);
+    // bought before from this wallet: the same purchase, if the network has it (or takes it again); otherwise it never
+    // went through, and this is a new purchase
     const done = store.get(o.offerId);
-    if (done?.txid) return { txid: done.txid };
+    if (done?.txid && !done.failed) {
+      if (await this.knowsTx(done.txid)) return { txid: done.txid };
+      if (done.txHex) {
+        try { await this.broadcastAll(done.txHex, done.txid); return { txid: done.txid }; } catch { /* refused now: buy anew */ }
+      }
+      store.del?.(o.offerId);
+    }
     const l = listing || {};
     let info;
     try { info = plain(this.lib.WasmWallet.presignedListingInfo(String(l.psbt || ''))); } catch (e) { throw new Error(`The listing does not check out: ${e?.message || e}`); }
