@@ -6,6 +6,8 @@
 /** MASKED's own RGB transfer server (rgb-proxy-server, protocol 0.2), and the public one kept as a backup. */
 export const MASKED_PROXY = 'https://scan.maskedwallet.com/rgb-proxy/json-rpc';
 export const PUBLIC_PROXY = 'https://proxy.iriswallet.com/0.2/json-rpc';
+/** MASKED's transfer server for protocol 1.0 (rgb-proxy-server 0.4), used by the RGB 0.11.2 engine. */
+export const MASKED_PROXY_V1 = 'https://scan.maskedwallet.com/rgb-proxy-v1/json-rpc';
 export const RGB_PROFILES = Object.freeze({
   public: Object.freeze({
     id: 'public',
@@ -15,6 +17,7 @@ export const RGB_PROFILES = Object.freeze({
       indexerUrl: 'https://mempool.space/signet/api',
       transportEndpoint: MASKED_PROXY,
       transportFallbacks: Object.freeze([PUBLIC_PROXY]),
+      transportEndpointV1: MASKED_PROXY_V1,
       dataDir: 'masked_rgb_public_signet_v2', // v2: the on-chain engine (v1 was the Lightning SDK)
     }),
     invoiceNets: Object.freeze(['signet']),
@@ -48,6 +51,7 @@ export const RGB_MAINNET = Object.freeze({
     indexerUrl: 'https://mempool.space/api',
     transportEndpoint: MASKED_PROXY,
     transportFallbacks: Object.freeze([PUBLIC_PROXY]),
+    transportEndpointV1: MASKED_PROXY_V1,
     dataDir: 'masked_rgb_mainnet_v1',
   }),
   invoiceNets: Object.freeze(['mainnet', 'bitcoin', 'bc']),

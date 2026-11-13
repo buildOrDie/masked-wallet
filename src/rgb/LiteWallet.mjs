@@ -50,20 +50,28 @@ const hostOf = (u) => { try { return new URL(String(u)).host; } catch { return '
 export class LiteWallet {
   /**
    * @param {object} lib  the loaded rgb-lib-wasm module ({ WasmWallet, WasmInvoice, restoreKeys })
-   * @param {{ network: string, indexerUrl: string, indexerUrls?: string[], transportEndpoint: string, transportFallbacks?: string[], mnemonic: string, dataDir: string }} params  indexerUrls: block servers to try in order; transportFallbacks: more transfer servers listed in invoices after the main one
+   * @param {{ network: string, indexerUrl: string, indexerUrls?: string[], transportEndpoint: string, transportFallbacks?: string[], transportEndpointV1?: string, transportFallbacksV1?: string[], mnemonic: string, dataDir: string }} params  indexerUrls: block servers to try in order; transportFallbacks: more transfer servers listed in invoices after the main one
    */
   constructor(lib, params) {
     this.lib = lib;
     this.params = params;
     this.net = rgbNetwork(params.network);
-    this.transport = rpcEndpoint(params.transportEndpoint);
+    // the RGB 0.11.2 engine speaks only transfer server protocol 1.0: its own servers (the 0.2 ones can't be used)
+    const v1 = this.engineV1;
+    this.transport = rpcEndpoint(v1 ? (params.transportEndpointV1 || params.transportEndpoint) : params.transportEndpoint);
+    const more = v1 ? (params.transportFallbacksV1 || []) : (params.transportFallbacks || []);
     // invoices list every transfer server: a sender uses the first one that answers
-    this.transports = [this.transport, ...(params.transportFallbacks || []).map(rpcEndpoint).filter((e) => e !== this.transport)];
+    this.transports = [this.transport, ...more.map(rpcEndpoint).filter((e) => e !== this.transport)];
     /** @type {any} */ this.w = null;
     this.online = null;
     this.lastBackupBytes = null;
   }
 
+  /**
+   * The engine is UTEXO rgb-lib-wasm 1.0.0-beta.4 or later (RGB 0.11.2, transfer server protocol 1.0): its calls
+   * take an Online object for receiving and options for going online. Older ones (beta.3, RGB 0.11.1) don't.
+   */
+  get engineV1() { return (this.lib.WasmWallet?.prototype?.goOnline?.length ?? 2) === 1; }
   /** Create the wallet, restoring its saved state from IndexedDB. */
   async init() {
     const { mnemonic, dataDir } = this.params;
@@ -76,6 +84,13 @@ export class LiteWallet {
       // build (engine/masked-uda.patch): an engine without them refuses a wallet that names the schema
       supportedSchemas: this.net === 'Mainnet' ? ['Nia'] : ['Nia', 'Ifa', ...(this.canNft ? ['Uda'] : [])], reuseAddresses: true, // one stable funding address
     };
+    // a wallet the previous engine (RGB 0.11.1) saved is upgraded in place first: same keys, tokens and history;
+    // the old copy is kept. Old history that names a transaction only by its id gets it from the block server
+    if (this.engineV1) {
+      // never open the new engine without the upgrade: it would start an empty wallet next to the saved one
+      if (typeof this.lib.migrateLegacyWallet !== 'function') throw new Error('This MASKED build has the new RGB engine without its wallet upgrade. Build it with engine/build.sh.');
+      this.migration = String(await this.lib.migrateLegacyWallet(JSON.stringify(data), this.indexers()[0] || null));
+    }
     this.w = await this.lib.WasmWallet.create(JSON.stringify(data));
   }
   get wallet() { if (!this.w) throw new Error('RGB wallet is not open.'); return this.w; }
@@ -101,9 +116,15 @@ export class LiteWallet {
     for (let i = 0; i < list.length; i++) {
       const u = list[(start + i) % list.length];
       if (skip && u === skip && list.length > 1) continue;
-      try { this.online = await this.wallet.goOnline(false, u); this.indexer = u; return u; } catch (e) { last = e; }
+      try { this.online = await this.connect(u); this.indexer = u; return u; } catch (e) { last = e; }
     }
     throw last || new Error('Invalid indexer: no block server answered');
+  }
+  /** The engine's go-online call for one block server. */
+  connect(url) {
+    return this.engineV1
+      ? this.wallet.goOnline({ indexerConfig: { Esplora: { url } }, skipConsistencyCheck: true, proxyAuthKeys: {} })
+      : this.wallet.goOnline(false, url);
   }
   /** Settings changed the block servers (the person's own server comes first): use the new list from the next sync. */
   setIndexers(list) { this.params = { ...this.params, indexerUrls: list }; this.retryFirstAt = 0; }
@@ -114,7 +135,7 @@ export class LiteWallet {
   async preferFirst() {
     const first = this.indexers()[0];
     if (!this.online || !first || this.indexer === first || Date.now() < (this.retryFirstAt || 0)) return;
-    try { this.online = await this.wallet.goOnline(false, first); this.indexer = first; } catch { this.retryFirstAt = Date.now() + 120000; }
+    try { this.online = await this.connect(first); this.indexer = first; } catch { this.retryFirstAt = Date.now() + 120000; }
   }
   /** The block server in use failed: move to the next one (true if there was another to try). */
   async switchIndexer() {
@@ -178,7 +199,11 @@ export class LiteWallet {
     }
     return null;
   }
-  async listTransfers(assetId = null) { return plain(this.wallet.listTransfers(assetId) || []); }
+  /** Transfers of one asset, or (null) the ones tied to no asset yet. */
+  async listTransfers(assetId = null) { return plain(this.engineTransfers(assetId) || []); }
+  engineTransfers(assetId) {
+    return this.engineV1 ? this.wallet.listTransfers(assetId ? { id: assetId } : 'noAsset', null) : this.wallet.listTransfers(assetId);
+  }
   /** Give up on a transfer that is still waiting for the other side (frees the RGB output an invoice reserved). */
   async failTransfer(batchTransferIdx) {
     const r = await this.wallet.failTransfers(this.requireOnline(), batchTransferIdx, false, false);
@@ -226,7 +251,7 @@ export class LiteWallet {
     const r = plain(this.wallet.listAssets([]) || {});
     const ids = [null, ...[...(r.nia || []), ...(r.ifa || []), ...(r.uda || [])].map((a) => a?.assetId).filter(Boolean)];
     const out = new Set();
-    for (const id of ids) for (const t of plain(this.wallet.listTransfers(id)) || []) if (t?.recipientId) out.add(String(t.recipientId));
+    for (const id of ids) for (const t of plain(this.engineTransfers(id)) || []) if (t?.recipientId) out.add(String(t.recipientId));
     return out;
   }
   /**
@@ -234,11 +259,15 @@ export class LiteWallet {
    * (AssetNotFound): the invoice then names no token (the sender's tokens make it known), keeping the amount, or
    * any amount if the engine needs a token for that.
    */
-  receiveCall(make, assetId, assignment, durationSeconds) {
-    const call = (id, a) => plain(this.wallet[make](id, a, durationSeconds, this.transports, 1));
-    try { return call(assetId, assignment); } catch (e) {
+  async receiveCall(make, assetId, assignment, durationSeconds) {
+    // protocol 1.0: the invoice is reserved on the transfer servers (so the engine goes online) and has an expiry
+    const expires = Math.floor(Date.now() / 1000) + (Number(durationSeconds) > 0 ? Number(durationSeconds) : 86400);
+    const call = async (id, a) => plain(this.engineV1
+      ? await this.wallet[make](this.requireOnline(), id, a, expires, this.transports, 1, null)
+      : this.wallet[make](id, a, durationSeconds, this.transports, 1));
+    try { return await call(assetId, assignment); } catch (e) {
       if (!assetId || !/AssetNotFound|not found/i.test(String(e?.message || e))) throw e;
-      try { return call(null, assignment); } catch (e2) { if (assignment === 'Any') throw e2; return call(null, 'Any'); }
+      try { return await call(null, assignment); } catch (e2) { if (assignment === 'Any') throw e2; return call(null, 'Any'); }
     }
   }
   async onchainReceive({ assetId = null, amount = 0, durationSeconds = null, witness = false } = {}) {
@@ -251,7 +280,7 @@ export class LiteWallet {
     let r = null;
     for (let i = 0; i < 4; i++) {
       if (witness && typeof this.wallet.rotateAddress === 'function') this.wallet.rotateAddress(0); // 0 = receive keychain; the funding address (1) stays
-      r = this.receiveCall(make, assetId || null, assignment, durationSeconds);
+      r = await this.receiveCall(make, assetId || null, assignment, durationSeconds);
       if (!witness || !used.has(String(r?.recipientId ?? ''))) break;
       // a reused one is cancelled at once, so it can never match a payment
       try { await this.wallet.failTransfers(this.requireOnline(), r.batchTransferIdx, false, true); } catch { /* offline: it stays open, but it is never shown */ }
@@ -271,6 +300,8 @@ export class LiteWallet {
         network: String(d?.network ?? '').toLowerCase(), expirationTimestamp: d?.expirationTimestamp ?? null,
         amount: Number(d?.assignment?.Fungible || 0), witness: String(d?.recipientId ?? '').includes('wvout:'),
         transportEndpoints: (d?.transportEndpoints || []).map(String),
+        // protocol 1.0 invoices: the recipient's key and encryption preference
+        publicKey: d?.publicKey ? String(d.publicKey) : null, encryption: d?.encryption ?? null,
       };
     } finally { inv.free(); }
   }
@@ -278,6 +309,7 @@ export class LiteWallet {
   /** Send to an invoice (blind or witness): build, sign and broadcast. */
   async onchainSend({ invoice, assetId, amount, feeRate, endpoint = '', nft: isNft = false }) {
     if (isNft && !this.canNft) throw new Error('This MASKED build can\'t send NFTs. Update MASKED.');
+    if (this.engineV1) return this.onchainSendNative({ invoice, assetId, amount, feeRate, isNft });
     if (isInvoiceV1(invoice)) { if (isNft) throw new Error('MASKED can\'t send an NFT to this kind of invoice yet.'); return this.onchainSendV1({ invoice, assetId, amount, feeRate }); }
     const online = this.requireOnline();
     const d = await this.decodeRGBInvoice({ invoice });
@@ -298,10 +330,38 @@ export class LiteWallet {
     return r;
   }
 
+  /**
+   * Send with the RGB 0.11.2 engine (protocol 1.0, built in): the recipient's key, encryption and expiry come from the
+   * invoice; the recipient acknowledges on MASKED's own transfer server, and the engine broadcasts once it has.
+   */
+  async onchainSendNative({ invoice, assetId, amount, feeRate, isNft = false }) {
+    const online = this.requireOnline();
+    const d = await this.decodeRGBInvoice({ invoice });
+    if (!d.transportEndpoints.length || !d.publicKey) {
+      throw new Error('This invoice uses the old transfer server protocol (0.2). Ask the recipient for a new invoice from an up-to-date wallet (MASKED 2.29 or later, UniSat 1.8 or later).');
+    }
+    const now = Math.floor(Date.now() / 1000);
+    const expires = Math.max(now + 600, Number(d.expirationTimestamp) || now + 86400);
+    const recipients = {
+      [assetId]: [{
+        recipientId: d.recipientId,
+        witnessData: d.witness ? { amountSat: String(LiteWallet.WITNESS_SATS), blinding: null } : null,
+        assignment: isNft ? 'NonFungible' : { Fungible: amount },
+        transportEndpoints: d.transportEndpoints,
+        publicKey: d.publicKey, encryption: d.encryption, expirationTimestamp: Number(d.expirationTimestamp) || expires,
+      }],
+    };
+    const begin = await this.wallet.sendBegin(online, recipients, false, BigInt(Math.round(feeRate)), 1, expires, this.transport, null, false);
+    const psbt = typeof begin === 'string' ? begin : begin?.psbt;
+    const r = plain(await this.wallet.sendEnd(online, this.sign(psbt), false));
+    await this.save();
+    return r;
+  }
+
   /** This engine can pay invoices whose transfer server speaks RGB proxy protocol 1.0. */
   // colorSwap takes the seal blinding as its 10th argument only from the engine built with protocol 1.0 support; an
   // older one would ignore it and the recipient could never find its tokens, so it must be there
-  get canProxyV1() { return this.canSwap && (this.wallet.colorSwap?.length ?? 0) >= 10 && typeof this.wallet.pendingConsignment === 'function' && typeof this.lib.WasmWallet?.completePresignedConsignment === 'function'; }
+  get canProxyV1() { return !this.engineV1 && this.canSwap && (this.wallet.colorSwap?.length ?? 0) >= 10 && typeof this.wallet.pendingConsignment === 'function' && typeof this.lib.WasmWallet?.completePresignedConsignment === 'function'; }
 
   /**
    * Pay an invoice whose transfer server speaks RGB proxy protocol 1.0 (see proxyV1.mjs), as a donation: the
@@ -488,7 +548,9 @@ export class LiteWallet {
       [{ script: seal, sats: SEAL_SATS }, { script: await this.ownScript(), sats: Number(payout) }, { script: String(s.buyerChangeScript), sats: Number(change) }],
     );
     const endpoints = (d.transportEndpoints || []).length ? d.transportEndpoints : [this.transport];
-    const psbt = await this.wallet.colorSwap(online, unsigned, o.assetId, o.amount, String(d.recipientId), SEAL_OUTPUT, BigInt(SEAL_SATS), endpoints, 1);
+    const psbt = this.engineV1
+      ? await this.wallet.colorSwap(online, unsigned, o.assetId, BigInt(o.amount), String(s.buyerInvoice), SEAL_OUTPUT, BigInt(SEAL_SATS), 1, this.transport, null)
+      : await this.wallet.colorSwap(online, unsigned, o.assetId, o.amount, String(d.recipientId), SEAL_OUTPUT, BigInt(SEAL_SATS), endpoints, 1);
     await this.save();
     const txid = this.lib.WasmWallet.psbtTxid(psbt);
     const consignment = b64(this.wallet.pendingConsignment(txid, o.assetId));
@@ -580,7 +642,9 @@ export class LiteWallet {
       [{ outpoint: from.outpoint, sats: si.sats, script: si.script, tx: si.tx }, ...pay.coins.map((c, k) => ({ outpoint: c.outpoint, sats: fis[k].sats, script: fis[k].script, tx: fis[k].tx }))],
       [{ script: seal, sats: INSTANT_SEAL_SATS }, { script: own, sats: Number(change) }],
     );
-    const psbt = await this.wallet.colorSwap(online, unsigned, assetId, BigInt(amount), r.recipientId, SEAL_OUTPUT, BigInt(INSTANT_SEAL_SATS), [this.transport], 1);
+    const psbt = this.engineV1
+      ? await this.wallet.colorSwap(online, unsigned, assetId, BigInt(amount), r.invoice, SEAL_OUTPUT, BigInt(INSTANT_SEAL_SATS), 1, this.transport, null)
+      : await this.wallet.colorSwap(online, unsigned, assetId, BigInt(amount), r.recipientId, SEAL_OUTPUT, BigInt(INSTANT_SEAL_SATS), [this.transport], 1);
     const signed = this.sign(psbt);
     const txid = String(this.lib.WasmWallet.psbtTxid(psbt));
     let txHex = '';
@@ -834,7 +898,8 @@ export class LiteWallet {
     check(completed, txid);
     // kept with the purchase: if a server drops it, a refresh sends it again; the wallet only expects the tokens
     // once a block server has the transaction
-    store.set(o.offerId, { role: 'buyer', assetId: o.assetId, amount: String(o.amount), priceSats: String(o.priceSats), recipientId: r.recipientId, txid, txHex, completed: b64(completed), posted: false, at: Date.now() });
+    store.set(o.offerId, { role: 'buyer', assetId: o.assetId, amount: String(o.amount), priceSats: String(o.priceSats), recipientId: r.recipientId, invoice: r.invoice, txid, txHex, completed: b64(completed), posted: false, at: Date.now() });
+    this.expectPurchases([...this.purchases, r.recipientId]);
     onStep(`Sending the purchase to ${hostOf(this.indexer)}…`);
     try { await this.ensureBroadcast(txHex, txid); } catch (err) {
       const why = String(err?.message || err);
@@ -861,10 +926,36 @@ export class LiteWallet {
       }
     }
     try {
-      await this.wallet.postOwnConsignment(this.transport, e.recipientId, unb64(e.completed), e.txid, INSTANT_SEAL_OUTPUT);
-    } catch (err) { if (!/already used/i.test(String(err?.message || err))) return false; }
+      if (this.engineV1) await this.postOwnV1(e);
+      else await this.wallet.postOwnConsignment(this.transport, e.recipientId, unb64(e.completed), e.txid, INSTANT_SEAL_OUTPUT);
+    } catch (err) { if (!/already used|already paid|quota/i.test(String(err?.message || err))) return false; }
     store.set(String(offerId), { ...e, posted: true, completed: undefined, txHex: undefined, at: Date.now() });
     return true;
+  }
+
+  /**
+   * Protocol 1.0: post a bought listing's transfer to this wallet's own invoice, as its sender would (encrypted for
+   * the invoice key, signed with a one-off key). The engine then takes it like any incoming transfer; the seal was
+   * made by the seller before the buyer was known, so the wallet matches it without the derived blinding
+   * (expectPurchases).
+   */
+  async postOwnV1(e) {
+    if (!e.invoice) throw new Error('This purchase has no invoice to post to.');
+    this.expectPurchases([...this.purchases, e.recipientId]);
+    const q = readInvoiceV1(e.invoice);
+    const d = await this.decodeRGBInvoice({ invoice: e.invoice });
+    const invoiceId = invoiceIdOf(q.beneficiary, q.pk);
+    const picked = await pickEndpoint(q.endpoints.length ? q.endpoints : d.transportEndpoints, invoiceId);
+    const sender = newSenderKey();
+    const { key } = sharedKeys(sender.seed, q.pk);
+    await deliverConsignment({ invoice: q, picked, sender, key, consignment: unb64(e.completed) });
+  }
+  /** @type {Set<string>} */
+  get purchases() { return this._purchases || new Set(); }
+  /** The invoices of this wallet's Instant purchases (see postOwnV1). */
+  expectPurchases(list) {
+    this._purchases = new Set((list || []).map(String));
+    if (typeof this.wallet?.setPresignedReceives === 'function') this.wallet.setPresignedReceives([...this._purchases]);
   }
 
   /** Check that an RGB transfer server answers and speaks a protocol this engine supports. Throws the reason. */

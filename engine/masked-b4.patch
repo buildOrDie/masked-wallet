@@ -1,9 +1,21 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 884d686..e2896b5 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -89,6 +89,7 @@ rgb-psbt-utils = { version = "=0.11.2-rc.1", default-features = false }
+ rgb-schemas = { version = "=0.11.2-rc.1", default-features = false }
+ rgb-ops = { version = "=0.11.2-rc.1", default-features = false, features = [
+     "serde",
++    "legacy",
+ ] }
+ rgb-strict-encoding = { version = "=1.0.5", default-features = false, features = [
+     "bitcoin",
 diff --git a/bindings/wasm/src/lib.rs b/bindings/wasm/src/lib.rs
-index bf8d9d1..3327016 100644
+index 51b6efd..156f6e0 100644
 --- a/bindings/wasm/src/lib.rs
 +++ b/bindings/wasm/src/lib.rs
-@@ -482,6 +482,169 @@ impl WasmWallet {
-             .map_err(|e| JsValue::from_str(&e.to_string()))
+@@ -635,6 +635,166 @@ impl WasmWallet {
+         to_js(&result)
      }
  
 +    /// The seller's half of a peer-to-peer swap (MASKED): colour a PSBT built with `buildSwapPsbt` and return it
@@ -16,20 +28,18 @@ index bf8d9d1..3327016 100644
 +        psbt: &str,
 +        asset_id: &str,
 +        amount: u64,
-+        recipient_id: &str,
++        invoice: &str,
 +        seal_vout: u32,
 +        seal_amount_sat: u64,
-+        transport_endpoints_js: JsValue,
 +        min_confirmations: u8,
++        sender_transport_endpoint: Option<String>,
 +        blinding: Option<u64>,
 +    ) -> Result<String, JsValue> {
 +        let online: Online = serde_wasm_bindgen::from_value(online_js)
 +            .map_err(|e| JsValue::from_str(&format!("Invalid Online object: {e}")))?;
-+        let endpoints: Vec<String> = serde_wasm_bindgen::from_value(transport_endpoints_js)
-+            .map_err(|e| JsValue::from_str(&format!("Invalid transport endpoints: {e}")))?;
 +        let mut wallet = self.inner.borrow_mut();
 +        wallet
-+            .color_swap(online, psbt.to_string(), asset_id.to_string(), amount, recipient_id.to_string(), seal_vout, seal_amount_sat, endpoints, min_confirmations, blinding)
++            .color_swap(online, psbt.to_string(), asset_id.to_string(), amount, invoice.to_string(), seal_vout, seal_amount_sat, min_confirmations, sender_transport_endpoint, blinding)
 +            .await
 +            .map_err(|e| JsValue::from_str(&e.to_string()))
 +    }
@@ -89,6 +99,15 @@ index bf8d9d1..3327016 100644
 +        self.inner.borrow_mut().set_reserved_outpoints(list).map_err(|e| JsValue::from_str(&e.to_string()))
 +    }
 +
++    /// The witness invoices this wallet bought pre-signed listings to (`["recipientId"]`): their seal was made by
++    /// the seller before the buyer was known, so it is matched without the derived blinding.
++    #[wasm_bindgen(js_name = "setPresignedReceives")]
++    pub fn set_presigned_receives(&self, ids_js: JsValue) -> Result<(), JsValue> {
++        let list: Vec<String> = serde_wasm_bindgen::from_value(ids_js).map_err(|e| JsValue::from_str(&format!("Invalid recipient IDs: {e}")))?;
++        self.inner.borrow_mut().set_presigned_receives(list);
++        Ok(())
++    }
++
 +    /// A pre-signed listing was bought: mark its output spent (the caller checked it on chain).
 +    #[wasm_bindgen(js_name = "markOutpointSpent")]
 +    pub fn mark_outpoint_spent(&self, outpoint: &str) -> Result<bool, JsValue> {
@@ -122,16 +141,6 @@ index bf8d9d1..3327016 100644
 +    #[wasm_bindgen(js_name = "abandonColoring")]
 +    pub fn abandon_coloring(&self, txid: &str) -> Result<(), JsValue> {
 +        self.inner.borrow_mut().abandon_coloring(txid.to_string()).map_err(|e| JsValue::from_str(&e.to_string()))
-+    }
-+
-+    /// The buyer of a pre-signed listing posts the completed consignment for its own witness invoice.
-+    #[wasm_bindgen(js_name = "postOwnConsignment")]
-+    pub async fn post_own_consignment(&self, proxy_url: &str, recipient_id: &str, consignment: &[u8], txid: &str, vout: u32) -> Result<(), JsValue> {
-+        let wallet = self.inner.borrow();
-+        wallet
-+            .post_own_consignment(proxy_url.to_string(), recipient_id.to_string(), consignment.to_vec(), txid.to_string(), vout)
-+            .await
-+            .map_err(|e| JsValue::from_str(&e.to_string()))
 +    }
 +
 +    /// Read and check a pre-signed listing (the seller's signature included):
@@ -172,7 +181,7 @@ index bf8d9d1..3327016 100644
      /// Send RGB assets (end): broadcast a signed PSBT. Returns an OperationResult JS object.
      #[wasm_bindgen(js_name = "sendEnd")]
      pub async fn send_end(
-@@ -832,7 +995,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
+@@ -1217,7 +1377,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
  /// Works before the witness transaction is broadcast. Takes the raw consignment
  /// bytes (strict-encoded, not base64), the witness transaction ID, and the Bitcoin network.
  ///
@@ -182,13 +191,31 @@ index bf8d9d1..3327016 100644
  #[wasm_bindgen(js_name = "validateConsignmentOffchain")]
  pub fn validate_consignment_offchain(
      consignment_bytes: &[u8],
-@@ -850,3 +1014,25 @@ pub fn validate_consignment_offchain(
+@@ -1235,3 +1396,43 @@ pub fn validate_consignment_offchain(
      .map_err(|e| JsValue::from_str(&e.to_string()))?;
      to_js(&result)
  }
 +
 +/// MASKED swaps: check a consignment before the witness transaction exists (offchain, as above) and return what the
 +/// transaction assigns to output `seal_vout`: `{ valid, warnings?, error?, details?, contractId?, sealAmount? }`.
++/// MASKED: upgrade an RGB wallet saved by the previous engine (RGB 0.11.1) before `WasmWallet.create` opens it.
++/// Same wallet data JSON as `create`; `indexerUrl`: an Esplora server for old witnesses that name only a txid.
++/// Resolves to "none", "current" or "migrated". The old saved wallet is kept as it is.
++#[wasm_bindgen(js_name = "migrateLegacyWallet")]
++pub async fn migrate_legacy_wallet(wallet_data_json: String, indexer_url: Option<String>) -> Result<String, JsValue> {
++    let wallet_data: rgb_lib_wasm::wallet::WalletData = serde_json::from_str(&wallet_data_json)
++        .map_err(|e| JsValue::from_str(&format!("Invalid wallet data: {e}")))?;
++    rgb_lib_wasm::wallet::Wallet::migrate_legacy(wallet_data, indexer_url)
++        .await
++        .map_err(|e| JsValue::from_str(&e.to_string()))
++}
++
++/// MASKED: the features of this engine build.
++#[wasm_bindgen(js_name = "engineFeatures")]
++pub fn engine_features() -> Vec<String> {
++    vec!["swap".into(), "presign".into(), "proxy-v1".into(), "legacy-migration".into(), "legacy-consignments".into()]
++}
++
 +#[wasm_bindgen(js_name = "inspectSwapConsignment")]
 +pub fn inspect_swap_consignment(
 +    consignment_bytes: &[u8],
@@ -208,28 +235,622 @@ index bf8d9d1..3327016 100644
 +    .map_err(|e| JsValue::from_str(&e.to_string()))?;
 +    to_js(&result)
 +}
+diff --git a/src/wallet/idb_store.rs b/src/wallet/idb_store.rs
+index 03ebcc5..171059a 100644
+--- a/src/wallet/idb_store.rs
++++ b/src/wallet/idb_store.rs
+@@ -212,6 +212,23 @@ pub(crate) fn deserialize_stock(store_b64: &str) -> Result<MemStock, String> {
+     Ok(Stock::with(MemRgbStore::from_bytes(&bytes)?))
+ }
+ 
++/// The raw JSON stored under `key`, whatever version wrote it (MASKED: legacy migration).
++pub(crate) async fn load_raw(key: &str) -> Result<Option<String>, String> {
++    let db = open_db().await?;
++    let tx = db
++        .transaction(&[STORE_NAME], idb::TransactionMode::ReadOnly)
++        .map_err(|e| format!("IndexedDB transaction error: {e:?}"))?;
++    let store = tx
++        .object_store(STORE_NAME)
++        .map_err(|e| format!("IndexedDB store error: {e:?}"))?;
++    let result = store
++        .get(JsValue::from_str(key))
++        .map_err(|e| format!("IndexedDB get error: {e:?}"))?
++        .await
++        .map_err(|e| format!("IndexedDB get error: {e:?}"))?;
++    Ok(result.and_then(|v| v.as_string()))
++}
++
+ /// Load a wallet snapshot from IndexedDB for the given key.
+ pub async fn load_snapshot(key: &str) -> Result<Option<WalletSnapshot>, String> {
+     let db = open_db().await?;
+diff --git a/src/wallet/legacy_migration.rs b/src/wallet/legacy_migration.rs
+new file mode 100644
+index 0000000..0bc354a
+--- /dev/null
++++ b/src/wallet/legacy_migration.rs
+@@ -0,0 +1,460 @@
++//! MASKED: upgrade of a wallet saved by rgb-lib-wasm 1.0.0-beta.3 (RGB 0.11.1) to this version.
++//!
++//! The older version saved its IndexedDB snapshot under the wallet directory (this one adds the
++//! network to the key), with the RGB stock as three strict-encoded V0 blobs (stash, state, index)
++//! and a database without the protocol 1.0 columns. Opening the wallet with no snapshot under the new
++//! key looks for one under the old key and converts it:
++//!
++//! - the RGB stock goes into the new store like rgb-lib's own legacy migration does for its files
++//!   (`migrate_rgb_fs_to_db`): geneses, bundles, witnesses, seals, witness orders, invalid operations,
++//!   global state, allocations and the indexes; the schema definitions are imported again;
++//! - the database gets its new columns with their defaults. Transfers still waiting for the other side
++//!   used the 0.2 transfer protocol, which this version can't finish: they become Failed, which frees
++//!   what they held. Settled and confirming transfers stay as they are;
++//! - the BTC wallet state is kept when it still reads, otherwise the next full scan rebuilds it;
++//! - received consignments stay as they were (they are converted to V1 when next read).
++//!
++//! The old snapshot is never changed or removed: it stays under its key as a backup. A legacy witness
++//! that names its transaction only by txid needs that transaction: `migrate` is given the ones the
++//! caller fetched (see `legacy_unresolved_witnesses`); without them the conversion stops with an error
++//! rather than open a wallet with part of its history missing.
++
++use std::collections::{BTreeSet, HashMap};
++
++use base64::{Engine as _, engine::general_purpose};
++use rgbstd::{
++    ChainNet, ContractId, OpId, Operation as _,
++    contract::{KnownState, OpWitness, OutputAssignment},
++    persistence::{
++        AllocKind, AllocSeal, AllocationWrite, GlobalStateWrite, MemIndexV0, MemStashV0,
++        MemStateV0, RgbStore, encode,
++    },
++    rgbcore::{
++        bitcoin::{OutPoint, Transaction, Txid},
++        commit_verify::Conceal,
++        validation::{ResolveWitness, WitnessResolverError, WitnessStatus},
++        vm::WitnessOrd,
++    },
++};
++use serde_json::{Value, json};
++use strict_encoding::{StrictDeserialize, StrictEncode};
++
++use crate::database::enums::AssetSchema;
++use crate::database::rgb_store::MemRgbStore;
++use crate::utils::MemStock;
++use crate::wallet::idb_store::{WalletSnapshot, serialize_stock};
++
++/// Transactions fetched by the caller, for legacy witnesses that name only a txid.
++struct MapResolver<'a>(&'a HashMap<Txid, Transaction>);
++
++impl ResolveWitness for MapResolver<'_> {
++    fn resolve_witness(&self, witness_id: Txid) -> Result<WitnessStatus, WitnessResolverError> {
++        Ok(match self.0.get(&witness_id) {
++            Some(tx) => WitnessStatus::Resolved(tx.clone(), WitnessOrd::Tentative),
++            None => WitnessStatus::Unresolved,
++        })
++    }
++    fn check_chain_net(&self, _chain_net: ChainNet) -> Result<(), WitnessResolverError> {
++        Ok(())
++    }
++}
++
++fn b64(json: &Value, field: &str) -> Result<Vec<u8>, String> {
++    let s = json
++        .get(field)
++        .and_then(|v| v.as_str())
++        .ok_or_else(|| format!("the old wallet has no {field}"))?;
++    general_purpose::STANDARD.decode(s).map_err(|e| format!("{field}: {e}"))
++}
++
++fn load_stash(json: &Value) -> Result<MemStashV0, String> {
++    let bytes = b64(json, "stock_stash_b64")?;
++    MemStashV0::from_strict_serialized::<{ u32::MAX as usize }>(
++        amplify::confinement::Confined::try_from(bytes).map_err(|e| e.to_string())?,
++    )
++    .map_err(|e| format!("old RGB stash: {e}"))
++}
++
++fn load_state(json: &Value) -> Result<MemStateV0, String> {
++    let bytes = b64(json, "stock_state_b64")?;
++    MemStateV0::from_strict_serialized::<{ u32::MAX as usize }>(
++        amplify::confinement::Confined::try_from(bytes).map_err(|e| e.to_string())?,
++    )
++    .map_err(|e| format!("old RGB state: {e}"))
++}
++
++fn load_index(json: &Value) -> Result<MemIndexV0, String> {
++    let bytes = b64(json, "stock_index_b64")?;
++    MemIndexV0::from_strict_serialized::<{ u32::MAX as usize }>(
++        amplify::confinement::Confined::try_from(bytes).map_err(|e| e.to_string())?,
++    )
++    .map_err(|e| format!("old RGB index: {e}"))
++}
++
++/// Whether `json` is a snapshot of the older version (it keeps the RGB stock as three V0 blobs).
++pub(crate) fn is_legacy_snapshot(json: &Value) -> bool {
++    json.get("stock_stash_b64").is_some() && json.get("rgb_store").is_none()
++}
++
++/// The txids of the old stash's witnesses that hold only a txid: `migrate` needs their transactions.
++pub(crate) fn legacy_unresolved_witnesses(json: &Value) -> Result<Vec<Txid>, String> {
++    if json.get("stock_stash_b64").and_then(|v| v.as_str()).is_none() {
++        return Ok(vec![]);
++    }
++    let stash = load_stash(json)?;
++    Ok(stash
++        .witnesses()
++        .iter()
++        .filter_map(|(txid, w)| match &w.public {
++            rgbstd::containers::legacy::PubWitness::Txid(_) => Some(*txid),
++            _ => None,
++        })
++        .collect())
++}
++
++fn put_assignment<State: StrictEncode + KnownState>(
++    store: &mut MemRgbStore,
++    contract_id: ContractId,
++    kind: AllocKind,
++    oa: &OutputAssignment<State>,
++) -> Result<(), String> {
++    let value = encode(&oa.state).map_err(|e| e.to_string())?;
++    // the legacy state holds the seal resolved, while it is now stored as defined: one naming the witness
++    // of its own assignment was defined on the witness transaction
++    let seal = match oa.witness {
++        Some(witness) if witness == oa.seal.txid => AllocSeal::witness_vout(oa.seal.vout),
++        _ => AllocSeal::explicit(oa.seal),
++    };
++    store
++        .put_allocation(AllocationWrite {
++            contract_id,
++            kind,
++            opout: oa.opout,
++            seal,
++            bundle_id: oa.bundle_id,
++            value: &value,
++        })
++        .unwrap_or_else(|e| match e {});
++    Ok(())
++}
++
++/// The RGB stock of the old snapshot as the new store, schema definitions included.
++fn convert_stock(
++    json: &Value,
++    supported: &[AssetSchema],
++    txs: &HashMap<Txid, Transaction>,
++) -> Result<String, String> {
++    let stash = load_stash(json)?;
++    let state = load_state(json)?;
++    let index = load_index(json)?;
++    let resolver = MapResolver(txs);
++    let mut store = MemRgbStore::default();
++
++    for genesis in stash.geneses().values() {
++        store.put_genesis(genesis).unwrap_or_else(|e| match e {});
++    }
++    for bundle in stash.bundles().values() {
++        store.put_bundle(bundle).unwrap_or_else(|e| match e {});
++    }
++    for (txid, witness) in stash.witnesses().iter() {
++        let witness = witness
++            .clone()
++            .into_v1(Some(&resolver))
++            .map_err(|e| format!("old RGB witness {txid}: {e}"))?;
++        store.put_witness(&witness).unwrap_or_else(|e| match e {});
++    }
++    for graph_seal in stash.secret_seals().iter() {
++        store.put_secret_seal(graph_seal, graph_seal.conceal()).unwrap_or_else(|e| match e {});
++    }
++    for (txid, ord) in state.witnesses().iter() {
++        store.put_witness_ord(*txid, *ord).unwrap_or_else(|e| match e {});
++    }
++    for opid in state.invalid_ops().iter() {
++        store.set_op_validity(*opid, false).unwrap_or_else(|e| match e {});
++    }
++    for (contract_id, mcs) in state.contracts().iter() {
++        for (ty, global) in mcs.global().iter() {
++            for (out, data) in global.known().iter() {
++                let (bundle_id, transition_type) = match out.op_witness {
++                    OpWitness::Genesis => (None, None),
++                    OpWitness::Transition(_, transition_type) => {
++                        let bundle_id = index.op_bundle_index().get(&out.opid).copied().ok_or_else(|| {
++                            format!("the old RGB index has no bundle for operation {} of {contract_id}", out.opid)
++                        })?;
++                        (Some(bundle_id), Some(transition_type))
++                    }
++                };
++                store
++                    .put_global(GlobalStateWrite {
++                        contract_id: *contract_id,
++                        type_id: *ty,
++                        opid: out.opid,
++                        index: out.index,
++                        nonce: out.nonce,
++                        bundle_id,
++                        transition_type,
++                        value: data,
++                    })
++                    .unwrap_or_else(|e| match e {});
++            }
++        }
++        for oa in mcs.rights().iter() {
++            put_assignment(&mut store, *contract_id, AllocKind::Declarative, oa)?;
++        }
++        for oa in mcs.fungibles().iter() {
++            put_assignment(&mut store, *contract_id, AllocKind::Fungible, oa)?;
++        }
++        for oa in mcs.data().iter() {
++            put_assignment(&mut store, *contract_id, AllocKind::Structured, oa)?;
++        }
++    }
++    for (contract_id, ci) in index.contract_index().iter() {
++        for (output_seal, opouts) in ci.outpoint_opouts().iter() {
++            let outpoint = OutPoint::new(output_seal.txid, output_seal.vout.to_u32());
++            for opout in opouts.iter() {
++                store.put_outpoint_opout(*contract_id, outpoint, *opout).unwrap_or_else(|e| match e {});
++            }
++        }
++    }
++    let genesis_contracts: HashMap<OpId, ContractId> = stash
++        .geneses()
++        .iter()
++        .map(|(contract_id, genesis)| (genesis.id(), *contract_id))
++        .collect();
++    for (secret_seal, opouts) in index.terminal_index().iter() {
++        for opout in opouts.iter() {
++            let contract_id = index
++                .op_bundle_index()
++                .get(&opout.op)
++                .and_then(|bundle_id| index.bundle_contract_index().get(bundle_id))
++                .or_else(|| genesis_contracts.get(&opout.op))
++                .ok_or_else(|| format!("the old RGB index has no contract for operation {}", opout.op))?;
++            store.put_secret_opout(*contract_id, *secret_seal, *opout).unwrap_or_else(|e| match e {});
++        }
++    }
++    for (opid, bundle_id) in index.op_bundle_index().iter() {
++        store.put_op_bundle(*opid, *bundle_id).unwrap_or_else(|e| match e {});
++    }
++    for (bundle_id, bundle) in stash.bundles().iter() {
++        for kt in &bundle.known_transitions {
++            for input in &kt.transition.inputs {
++                store.put_op_input(input, kt.opid, *bundle_id).unwrap_or_else(|e| match e {});
++            }
++        }
++    }
++    for (bundle_id, contract_id) in index.bundle_contract_index().iter() {
++        store.put_bundle_contract(*bundle_id, *contract_id).unwrap_or_else(|e| match e {});
++    }
++    for (bundle_id, txids) in index.bundle_witness_index().iter() {
++        for txid in txids.iter() {
++            store.put_bundle_witness(*bundle_id, *txid).unwrap_or_else(|e| match e {});
++        }
++    }
++
++    let mut stock = MemStock::with(store);
++    for schema in supported {
++        stock
++            .import_schema_definition(schema.schema_definition())
++            .map_err(|e| format!("schema {schema:?}: {e}"))?;
++    }
++    serialize_stock(&stock).ok_or_else(|| "could not save the converted RGB store".to_string())
++}
++
++/// The old database with the columns this version added, at their defaults. Transfers waiting for the
++/// other side (0.2 protocol) or never sent are failed.
++fn convert_db(db: &Value) -> Result<Value, String> {
++    let mut db = db.clone();
++    let obj = db.as_object_mut().ok_or("the old wallet database is not an object")?;
++    let rows = |obj: &mut serde_json::Map<String, Value>, table: &str, f: &mut dyn FnMut(&mut serde_json::Map<String, Value>)| {
++        if let Some(Value::Array(list)) = obj.get_mut(table) {
++            for row in list.iter_mut() {
++                if let Some(r) = row.as_object_mut() {
++                    f(r);
++                }
++            }
++        }
++    };
++    let mut failed: BTreeSet<i64> = BTreeSet::new();
++    rows(obj, "batch_transfers", &mut |r| {
++        let pending = matches!(r.get("status").and_then(|s| s.as_str()), Some("WaitingCounterparty" | "Initiated"));
++        if pending {
++            if let Some(i) = r.get("idx").and_then(|v| v.as_i64()) {
++                failed.insert(i);
++            }
++            r.insert("status".to_string(), json!("Failed"));
++        }
++    });
++    rows(obj, "transfers", &mut |r| {
++        r.entry("recipient_encryption").or_insert(json!("Unsupported"));
++    });
++    rows(obj, "transfer_transport_endpoints", &mut |r| {
++        r.entry("kind").or_insert(json!("RecipientProxy"));
++    });
++    rows(obj, "wallet_transactions", &mut |r| {
++        r.entry("status").or_insert(json!("WaitingConfirmations"));
++        r.entry("inputs").or_insert(json!([]));
++        r.entry("sent").or_insert(json!(0));
++        r.entry("received").or_insert(json!(0));
++        r.entry("fee").or_insert(json!(0));
++    });
++    let _ = failed;
++    Ok(db)
++}
++
++/// The old snapshot (JSON) as a snapshot of this version, written by `writer`.
++pub(crate) fn convert_legacy_snapshot(
++    json: &Value,
++    supported: &[AssetSchema],
++    txs: &HashMap<Txid, Transaction>,
++    writer: u64,
++) -> Result<WalletSnapshot, String> {
++    let rgb_store = convert_stock(json, supported, txs)?;
++    let db = serde_json::from_value(convert_db(json.get("db").ok_or("the old wallet has no database")?)?)
++        .map_err(|e| format!("old wallet database: {e}"))?;
++    // the BTC side: kept when it still reads, otherwise rebuilt by the next full scan
++    let bdk_changeset = json
++        .get("bdk_changeset")
++        .cloned()
++        .and_then(|v| serde_json::from_value(v).ok());
++    let received_consignments = json
++        .get("received_consignments")
++        .cloned()
++        .and_then(|v| serde_json::from_value(v).ok())
++        .unwrap_or_default();
++    let reuse_address_index = json
++        .get("reuse_address_index")
++        .cloned()
++        .and_then(|v| serde_json::from_value(v).ok())
++        .unwrap_or_default();
++    Ok(WalletSnapshot {
++        writer,
++        sequence: 1,
++        db,
++        bdk_changeset,
++        transfer_artifacts: HashMap::new(),
++        received_consignments,
++        received_consignment_meta: HashMap::new(),
++        received_signed_txs: HashMap::new(),
++        received_mints: HashMap::new(),
++        rgb_store,
++        reuse_address_index,
++    })
++}
++
++/// The IndexedDB key the older version saved this wallet under: its directory, without the network.
++pub(crate) fn legacy_key(wallet_dir: &std::path::Path) -> String {
++    wallet_dir.to_string_lossy().to_string()
++}
++
++/// Read the wallet the older version saved for `wallet_dir`, if any: `Some(json)` only for a legacy one.
++pub(crate) async fn load_legacy(wallet_dir: &std::path::Path) -> Result<Option<Value>, String> {
++    let Some(raw) = crate::wallet::idb_store::load_raw(&legacy_key(wallet_dir)).await? else {
++        return Ok(None);
++    };
++    let json: Value = serde_json::from_str(&raw).map_err(|e| format!("old wallet snapshot: {e}"))?;
++    Ok(is_legacy_snapshot(&json).then_some(json))
++}
++
++/// Convert the legacy wallet in `json` and save it under `new_key` (the old one stays where it is).
++pub(crate) async fn migrate_and_save(
++    json: &Value,
++    supported: &[AssetSchema],
++    txs: &HashMap<Txid, Transaction>,
++    writer: u64,
++    new_key: &str,
++) -> Result<WalletSnapshot, String> {
++    let snapshot = convert_legacy_snapshot(json, supported, txs, writer)?;
++    crate::wallet::idb_store::save_snapshot(new_key, &snapshot, None).await?;
++    Ok(snapshot)
++}
++
++/// The transactions of `txids` from an Esplora server (`{url}/tx/{txid}/hex`).
++pub(crate) async fn fetch_txs(indexer_url: &str, txids: &[Txid]) -> Result<HashMap<Txid, Transaction>, String> {
++    use gloo_net::http::Request;
++    let base = indexer_url.trim_end_matches('/');
++    let mut out = HashMap::new();
++    for txid in txids {
++        let resp = Request::get(&format!("{base}/tx/{txid}/hex"))
++            .send()
++            .await
++            .map_err(|e| format!("block server: {e}"))?;
++        if !resp.ok() {
++            return Err(format!("block server has no transaction {txid} ({})", resp.status()));
++        }
++        let hex = resp.text().await.map_err(|e| e.to_string())?;
++        let bytes = <Vec<u8> as rgbstd::rgbcore::bitcoin::hex::FromHex>::from_hex(hex.trim())
++            .map_err(|e| format!("transaction {txid}: {e}"))?;
++        let tx: Transaction = rgbstd::rgbcore::bitcoin::consensus::deserialize(&bytes)
++            .map_err(|e| format!("transaction {txid}: {e}"))?;
++        out.insert(*txid, tx);
++    }
++    Ok(out)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::wallet::idb_store::deserialize_stock;
++    use rgbstd::persistence::Stock;
++    use std::str::FromStr;
++
++    /// A snapshot written by rgb-lib-wasm 1.0.0-beta.3's own code (MASKED's engine up to 2.28): a MASKED NIA
++    /// issued to `aa…aa:1`, a settled issuance and an open 0.2 receive invoice.
++    const LEGACY: &str = include_str!("legacy_snapshot_b3.json");
++    const LEGACY_CONTRACT: &str = include_str!("legacy_snapshot_b3.json.contract");
++
++    #[test]
++    fn legacy_snapshot_converts() {
++        let json: Value = serde_json::from_str(LEGACY).unwrap();
++        assert!(is_legacy_snapshot(&json));
++        assert!(legacy_unresolved_witnesses(&json).unwrap().is_empty());
++        let snap = convert_legacy_snapshot(&json, &[AssetSchema::Nia, AssetSchema::Ifa], &HashMap::new(), 42).unwrap();
++        assert_eq!((snap.writer, snap.sequence), (42, 1));
++
++        // the tokens: the contract and its 21M on aa…aa:1, and the schemas this version needs
++        let stock: MemStock = deserialize_stock(&snap.rgb_store).unwrap();
++        let cid = ContractId::from_str(LEGACY_CONTRACT.trim()).unwrap();
++        assert!(stock.contracts().any(|c| c.unwrap().id == cid), "the contract came over");
++        let op = OutPoint::new(Txid::from_str(&"aa".repeat(32)).unwrap(), 1);
++        let mut held = 0u64;
++        for (_seal, states) in stock.contract_assignments_for(cid, [op]).unwrap() {
++            for (_opout, state) in states {
++                if let rgbstd::contract::AllocatedState::Amount(a) = state {
++                    held += a.as_u64();
++                }
++            }
++        }
++        assert_eq!(held, 21_000_000, "the balance came over");
++        assert!(stock.schemata().count() >= 2, "NIA and IFA schemas imported");
++
++        // the database: new columns at their defaults, the open 0.2 invoice failed, the rest untouched
++        let db = serde_json::to_value(&snap.db).unwrap();
++        let bt = db["batch_transfers"].as_array().unwrap();
++        assert_eq!(bt[0]["status"], "Settled");
++        assert_eq!(bt[1]["status"], "Failed");
++        assert_eq!(db["transfers"][1]["recipient_encryption"], "Unsupported");
++        assert_eq!(db["transfer_transport_endpoints"][0]["kind"], "RecipientProxy");
++        assert_eq!(db["wallet_transactions"][0]["status"], "WaitingConfirmations");
++        assert_eq!(db["assets"][0]["ticker"], "MASKED");
++        assert_eq!(snap.received_consignments.get("rid"), Some(&vec![1, 2, 3]));
++        assert!(snap.bdk_changeset.is_none());
++
++        // and it reads back as a snapshot of this version
++        let back: WalletSnapshot = serde_json::from_str(&serde_json::to_string(&snap).unwrap()).unwrap();
++        assert_eq!(back.sequence, 1);
++        let _ = Stock::<MemRgbStore>::default();
++    }
++
++    #[test]
++    fn current_snapshot_is_not_legacy() {
++        assert!(!is_legacy_snapshot(&json!({ "rgb_store": "", "db": {} })));
++        assert!(legacy_unresolved_witnesses(&json!({ "rgb_store": "" })).unwrap().is_empty());
++    }
++
++    #[test]
++    fn a_broken_legacy_stash_stops_the_conversion() {
++        let mut json: Value = serde_json::from_str(LEGACY).unwrap();
++        json["stock_stash_b64"] = json!("AAAA");
++        assert!(convert_legacy_snapshot(&json, &[AssetSchema::Nia], &HashMap::new(), 1).is_err());
++    }
++}
+diff --git a/src/wallet/legacy_snapshot_b3.json b/src/wallet/legacy_snapshot_b3.json
+new file mode 100644
+index 0000000..80f3fde
+--- /dev/null
++++ b/src/wallet/legacy_snapshot_b3.json
+@@ -0,0 +1 @@
++{"sequence":7,"db":{"txos":[{"idx":1,"txid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","vout":1,"btc_amount":"1000","spent":false,"exists":true,"pending_witness":false}],"next_txo_idx":2,"media":[],"next_media_idx":1,"assets":[{"idx":1,"media_idx":null,"id":"rgb:oQiumQTF-ON9XQxR-4522elN-BxoL8Tf-36QX6kf-DZJwIoY","schema":"Nia","added_at":1,"details":null,"initial_supply":"21000000","name":"Masked","precision":0,"ticker":"MASKED","timestamp":1,"max_supply":null,"known_circulating_supply":null,"reject_list_url":null}],"next_asset_idx":2,"batch_transfers":[{"idx":1,"txid":null,"status":"Settled","created_at":1,"updated_at":1,"expiration":null,"min_confirmations":0},{"idx":2,"txid":null,"status":"WaitingCounterparty","created_at":2,"updated_at":2,"expiration":99,"min_confirmations":1}],"next_batch_transfer_idx":3,"asset_transfers":[{"idx":1,"user_driven":true,"batch_transfer_idx":1,"asset_id":"rgb:oQiumQTF-ON9XQxR-4522elN-BxoL8Tf-36QX6kf-DZJwIoY"},{"idx":2,"user_driven":true,"batch_transfer_idx":2,"asset_id":null}],"next_asset_transfer_idx":3,"colorings":[{"idx":1,"txo_idx":1,"asset_transfer_idx":1,"type":"Issue","assignment":{"Fungible":21000000}}],"next_coloring_idx":2,"transfers":[{"idx":1,"asset_transfer_idx":1,"requested_assignment":{"Fungible":21000000},"incoming":true,"recipient_type":null,"recipient_id":null,"ack":null,"invoice_string":null},{"idx":2,"asset_transfer_idx":2,"requested_assignment":"Any","incoming":true,"recipient_type":null,"recipient_id":"utxob:x","ack":null,"invoice_string":"rgb:x"}],"next_transfer_idx":3,"transport_endpoints":[{"idx":1,"transport_type":"JsonRpc","endpoint":"https://scan.maskedwallet.com/rgb-proxy/json-rpc"}],"next_transport_endpoint_idx":2,"transfer_transport_endpoints":[{"idx":1,"transfer_idx":2,"transport_endpoint_idx":1,"used":false}],"next_transfer_transport_endpoint_idx":2,"wallet_transactions":[{"idx":1,"txid":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","type":"CreateUtxos"}],"next_wallet_transaction_idx":2,"pending_witness_scripts":[],"next_pending_witness_script_idx":1,"backup_info":null,"next_backup_info_idx":1},"bdk_changeset":null,"transfer_artifacts":{},"received_consignments":{"rid":[1,2,3]},"stock_stash_b64":"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","stock_state_b64":"AAAAAAAAAAABAKEIrpkExTjfV0MUeOdtnpTQcaC/E39+kF+pHw2ScCKGRWhwUfTMpuP2Zfx1/j4nswCANGeJrYOqDcKelaMV4zWhCK6ZBMU431dDFHjnbZ6U0HGgvxN/fpBfqR8NknAihgPQBwEAAAAAAAD//////////6EIrpkExTjfV0MUeOdtnpTQcaC/E39+kF+pHw2ScCKGEAAGTUFTS0VEBk1hc2tlZAAAAQAA0QcBAAAAAAAA//////////+hCK6ZBMU431dDFHjnbZ6U0HGgvxN/fpBfqR8NknAihgMAAAAAAQAA2gcBAAAAAAAA//////////+hCK6ZBMU431dDFHjnbZ6U0HGgvxN/fpBfqR8NknAihggAQG9AAQAAAAABAAAAAAAAAQAAAKEIrpkExTjfV0MUeOdtnpTQcaC/E39+kF+pHw2ScCKGoA8AAKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqAQAAAAhAb0ABAAAAAAAAAAAAAA==","stock_index_b64":"AAAAAAAAAAAAAAAAAAAAAAEAoQiumQTFON9XQxR4522elNBxoL8Tf36QX6kfDZJwIoYAAAAAAQAAAKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqAQAAAAEAAKEIrpkExTjfV0MUeOdtnpTQcaC/E39+kF+pHw2ScCKGoA8AAAAAAAA=","reuse_address_index":{}}
+\ No newline at end of file
+diff --git a/src/wallet/legacy_snapshot_b3.json.contract b/src/wallet/legacy_snapshot_b3.json.contract
+new file mode 100644
+index 0000000..76ad7af
+--- /dev/null
++++ b/src/wallet/legacy_snapshot_b3.json.contract
+@@ -0,0 +1 @@
++rgb:oQiumQTF-ON9XQxR-4522elN-BxoL8Tf-36QX6kf-DZJwIoY
+\ No newline at end of file
+diff --git a/src/wallet/mod.rs b/src/wallet/mod.rs
+index c5c45b2..46cf640 100644
+--- a/src/wallet/mod.rs
++++ b/src/wallet/mod.rs
+@@ -4,6 +4,8 @@
+ 
+ pub(crate) mod backup;
+ pub mod idb_store;
++#[cfg(feature = "esplora")]
++pub(crate) mod legacy_migration;
+ pub(crate) mod memory_store;
+ pub(crate) mod offline;
+ #[cfg(feature = "esplora")]
 diff --git a/src/wallet/offline.rs b/src/wallet/offline.rs
-index 31bcf9e..5749424 100644
+index a3a9f46..98d3cd1 100644
 --- a/src/wallet/offline.rs
 +++ b/src/wallet/offline.rs
-@@ -993,6 +993,8 @@ pub struct Wallet {
-     /// Persistent in-memory RGB stock.
-     pub(crate) rgb_stock: std::rc::Rc<std::cell::RefCell<Option<rgbstd::persistence::Stock>>>,
+@@ -1312,9 +1312,46 @@ pub struct Wallet {
+     pub(crate) rgb_stock: std::rc::Rc<std::cell::RefCell<Option<crate::utils::MemStock>>>,
      pub(crate) vss_client: Option<super::vss::VssBackupClient>,
+     pub(crate) last_vss_backup_error: std::cell::RefCell<Option<String>>,
 +    /// Outputs promised to a pre-signed listing (MASKED): never picked for sends, change or receives.
 +    pub(crate) reserved_outpoints: HashSet<Outpoint>,
++    /// Witness invoices of pre-signed purchases (MASKED): their seal blinding isn't derived.
++    pub(crate) presigned_receives: HashSet<String>,
  }
  
  impl Wallet {
-@@ -1139,6 +1141,7 @@ impl Wallet {
-             online_data: None,
-             #[cfg(feature = "esplora")]
-             transfer_artifacts: HashMap::new(),
++    /// MASKED: upgrade the wallet the previous version (rgb-lib-wasm 1.0.0-beta.3, RGB 0.11.1) saved for
++    /// `wallet_data`, before [`Wallet::restore`] opens it. Old witnesses that name only a txid get their
++    /// transaction from `indexer_url` (an Esplora server). The old snapshot is kept as it is.
++    ///
++    /// Returns `"none"` (no older wallet), `"current"` (already saved by this version) or `"migrated"`.
++    #[cfg(feature = "esplora")]
++    pub async fn migrate_legacy(wallet_data: WalletData, indexer_url: Option<String>) -> Result<String, Error> {
++        let wallet_dir = PathBuf::from(&wallet_data.data_dir).join(&wallet_data.master_fingerprint);
++        let new_key = wallet_dir
++            .join(wallet_data.bitcoin_network.to_string())
++            .to_string_lossy()
++            .to_string();
++        let persistence = |details: String| Error::Persistence { details };
++        if super::idb_store::load_raw(&new_key).await.map_err(persistence)?.is_some() {
++            return Ok(s!("current"));
++        }
++        let Some(json) = super::legacy_migration::load_legacy(&wallet_dir).await.map_err(persistence)? else {
++            return Ok(s!("none"));
++        };
++        let txids = super::legacy_migration::legacy_unresolved_witnesses(&json).map_err(persistence)?;
++        let txs = match (txids.is_empty(), indexer_url) {
++            (true, _) => HashMap::new(),
++            (false, Some(url)) => super::legacy_migration::fetch_txs(&url, &txids).await.map_err(persistence)?,
++            (false, None) => return Err(persistence(s!("the previous RGB wallet needs a block server to upgrade"))),
++        };
++        super::legacy_migration::migrate_and_save(&json, &wallet_data.supported_schemas, &txs, 0, &new_key)
++            .await
++            .map_err(|details| Error::Persistence {
++                details: format!("upgrading the RGB wallet saved by the previous version: {details}"),
++            })?;
++        Ok(s!("migrated"))
++    }
++
+     /// Create a wallet and restore its latest durable IndexedDB snapshot, if one exists.
+     ///
+     /// The returned wallet is ready for use only after the IndexedDB read and snapshot
+@@ -1325,6 +1362,31 @@ impl Wallet {
+         let snapshot = super::idb_store::load_snapshot(&wallet.idb_key())
+             .await
+             .map_err(|details| Error::Persistence { details })?;
++        // MASKED: nothing saved by this version yet: upgrade a wallet the older version saved, if there is one
++        // (an old witness naming only a txid needs `migrateLegacyWallet`, which fetches it, before this)
++        #[cfg(feature = "esplora")]
++        let snapshot = match snapshot {
++            Some(s) => Some(s),
++            None => match super::legacy_migration::load_legacy(&wallet.wallet_dir)
++                .await
++                .map_err(|details| Error::Persistence { details })?
++            {
++                Some(json) => Some(
++                    super::legacy_migration::migrate_and_save(
++                        &json,
++                        &wallet.wallet_data.supported_schemas,
++                        &HashMap::new(),
++                        wallet.idb_writer,
++                        &wallet.idb_key(),
++                    )
++                    .await
++                    .map_err(|details| Error::Persistence {
++                        details: format!("upgrading the RGB wallet saved by the previous version: {details}"),
++                    })?,
++                ),
++                None => None,
++            },
++        };
+         if let Some(snapshot) = snapshot {
+             wallet.idb_loaded = Some((snapshot.writer, snapshot.sequence));
+             wallet
+@@ -1475,6 +1537,8 @@ impl Wallet {
+             },
+             vss_client: None,
+             last_vss_backup_error: std::cell::RefCell::new(None),
 +            reserved_outpoints: HashSet::new(),
-             #[cfg(feature = "esplora")]
-             received_consignments: HashMap::new(),
-             idb_save_in_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-@@ -1330,8 +1333,10 @@ impl Wallet {
++            presigned_receives: HashSet::new(),
+         })
+     }
+ 
+@@ -1690,8 +1754,10 @@ impl Wallet {
              None => rgb_allocations.as_deref().unwrap(),
          };
  
@@ -241,28 +862,59 @@ index 31bcf9e..5749424 100644
          allocatable.sort_by_key(|t| t.rgb_allocations.len() + t.pending_blinded as usize);
          match allocatable.first() {
              Some(mut selected) => {
-@@ -1922,7 +1927,7 @@ impl Wallet {
+@@ -2618,7 +2684,7 @@ impl Wallet {
          Ok(psbt.to_string())
      }
  
 -    fn _sign_psbt(&self, psbt: &mut Psbt, sign_options: Option<SignOptions>) -> Result<(), Error> {
 +    pub(crate) fn _sign_psbt(&self, psbt: &mut Psbt, sign_options: Option<SignOptions>) -> Result<(), Error> {
          let sign_options = sign_options.unwrap_or_default();
+         let [colored, vanilla] = &self.signers;
          self.bdk_wallet
-             .sign(psbt, sign_options)
-@@ -3181,6 +3186,7 @@ mod address_reuse_tests {
-             online_data: None,
-             #[cfg(feature = "esplora")]
-             transfer_artifacts: HashMap::new(),
+@@ -4215,6 +4281,8 @@ pub(crate) mod address_reuse_tests {
+             rgb_stock: std::rc::Rc::new(std::cell::RefCell::new(None)),
+             vss_client: None,
+             last_vss_backup_error: std::cell::RefCell::new(None),
 +            reserved_outpoints: HashSet::new(),
-             #[cfg(feature = "esplora")]
-             received_consignments: HashMap::new(),
-             idb_save_in_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
++            presigned_receives: HashSet::new(),
+         }
+     }
+ 
 diff --git a/src/wallet/online.rs b/src/wallet/online.rs
-index d436834..26655e9 100644
+index ca96b4a..6a35a80 100644
 --- a/src/wallet/online.rs
 +++ b/src/wallet/online.rs
-@@ -1135,6 +1135,17 @@ impl Wallet {
+@@ -791,8 +791,9 @@ pub(crate) struct ConsignmentPayment<'c> {
+ 
+ pub(crate) enum ReceiveMatcher {
+     Blind(SecretSeal),
+-    /// the script paid and the blinding of the seal, derived from the keys of both parties
+-    Witness(ScriptBuf, u64),
++    /// the script paid and the blinding of the seal, derived from the keys of both parties (None: any
++    /// blinding, for a MASKED pre-signed purchase, whose seal the seller made before the buyer was known)
++    Witness(ScriptBuf, Option<u64>),
+ }
+ 
+ impl DbTransfer {
+@@ -817,7 +818,7 @@ impl DbTransfer {
+             RecipientTypeFull::Witness { .. } => {
+                 let script_pubkey = script_buf_from_recipient_id(recipient_id)?
+                     .expect("witness recipient ID should yield a script");
+-                Ok(ReceiveMatcher::Witness(script_pubkey, blinding))
++                Ok(ReceiveMatcher::Witness(script_pubkey, Some(blinding)))
+             }
+         }
+     }
+@@ -1598,7 +1599,7 @@ impl Wallet {
+                         }
+                         // the blinding is derived from the keys of both parties, so a seal with a
+                         // different one doesn't pay this transfer
+-                        if *blinding != seal.blinding {
++                        if blinding.is_some_and(|b| b != seal.blinding) {
+                             continue;
+                         }
+                         let vout = seal.vout.into_u32();
+@@ -2441,6 +2442,17 @@ impl Wallet {
      pub(crate) fn get_input_unspents(
          &self,
          unspents: &[LocalUnspent],
@@ -272,15 +924,15 @@ index d436834..26655e9 100644
 +        Ok(input_unspents)
 +    }
 +
-+    /// [`get_input_unspents`] including outputs reserved for a pre-signed listing (for the calls that name the
-+    /// exact output to spend).
++    /// [`get_input_unspents`] including outputs reserved for a pre-signed listing (MASKED: for the calls that
++    /// name the exact output to spend).
 +    pub(crate) fn input_unspents_any(
 +        &self,
 +        unspents: &[LocalUnspent],
      ) -> Result<Vec<LocalUnspent>, Error> {
          let mut input_unspents = unspents.to_vec();
          // consider the following UTXOs unspendable:
-@@ -1377,11 +1388,11 @@ impl Wallet {
+@@ -2815,11 +2827,11 @@ impl Wallet {
              if internal_unspents_outpoints.contains(&(txid.clone(), vout)) {
                  continue;
              }
@@ -289,7 +941,7 @@ index d436834..26655e9 100644
 -                .get_txo(&Outpoint { txid, vout })?
 -                .expect("outpoint should be in the DB")
 -                .into();
-+            // a peer-to-peer swap also spends the other side's output, which this wallet doesn't know
++            // a peer-to-peer swap (MASKED) also spends the other side's output, which this wallet doesn't know
 +            let Some(db_txo) = self.database.get_txo(&Outpoint { txid, vout })? else {
 +                continue;
 +            };
@@ -297,22 +949,124 @@ index d436834..26655e9 100644
              db_txo.spent = ActiveValue::Set(true);
              self.database.update_txo(db_txo)?;
          }
-@@ -3197,6 +3208,10 @@ impl Wallet {
+@@ -4723,6 +4735,22 @@ impl Wallet {
+                 &data.consignment_hash,
+             ) {
+                 Ok(bytes) => {
++                    // MASKED: a sender on RGB 0.11.1 sends the legacy V0 format: convert it to V1
++                    let bytes = match self.upgrade_legacy_consignment(bytes).await {
++                        Ok(b) => b,
++                        Err(Error::Network { details }) => return Err(Error::Network { details }),
++                        Err(e) => {
++                            error!(self.logger, "Failed to convert a legacy consignment: {e}");
++                            return self
++                                ._refuse_consignment_async(
++                                    &data,
++                                    &recipient_id,
++                                    &recipient_seed,
++                                    &mut updated_batch_transfer,
++                                )
++                                .await;
++                        }
++                    };
+                     self.received_consignments
+                         .insert(recipient_id.clone(), bytes);
+                 }
+@@ -4871,7 +4899,14 @@ impl Wallet {
+                 .await;
+         };
+         let blinding = derive_shared(&ed25519_from_seed(&seed), &sender_vk)?.seal_blinding;
+-        let matcher = transfer.receive_matcher(blinding)?;
++        let mut matcher = transfer.receive_matcher(blinding)?;
++        // MASKED: the buyer of a pre-signed listing posted this consignment to its own invoice; the seal was
++        // made by the seller before the buyer was known, so its blinding can't be the derived one
++        if self.presigned_receives.contains(&recipient_id) {
++            if let ReceiveMatcher::Witness(script, _) = matcher {
++                matcher = ReceiveMatcher::Witness(script, None);
++            }
++        }
+         let spent = Self::known_spent_opouts(&consignment);
+         let mut payments: Vec<_> = self.find_payments(&consignment, &matcher, &spent).collect();
+         if payments.len() != 1 {
+@@ -5805,6 +5840,8 @@ impl Wallet {
+                     details: s!("consignment not found in memory"),
+                 })?
+                 .clone();
++            // MASKED: a consignment received before the upgrade is still in the legacy V0 format
++            let consignment_bytes = self.upgrade_legacy_consignment(consignment_bytes).await?;
+             let consignment =
+                 RgbTransfer::load(&consignment_bytes[..]).map_err(InternalError::from)?;
  
-             for recipient in &mut info_contents_asset.recipients {
-                 let recipient_id = &recipient.recipient_id;
-+                // no transfer server: the caller delivered the consignment itself (RGB proxy protocol 1.0)
-+                if recipient.transport_endpoints.is_empty() {
-+                    continue;
-+                }
-                 let mut found_valid = false;
-                 for transport_endpoint in recipient.transport_endpoints.iter_mut() {
-                     if transport_endpoint.used {
-@@ -3878,3 +3893,430 @@ impl Wallet {
-         Ok(res)
+@@ -7053,6 +7090,10 @@ impl Wallet {
+         batch: bool,
+     ) -> Result<(), Error> {
+         for recipient in recipients {
++            // no transfer server: the caller delivers the consignment itself (MASKED swaps and listings)
++            if recipient.transport_endpoints.is_empty() {
++                continue;
++            }
+             let recipient_id = &recipient.recipient_id;
+             let recipient_vk = verifying_key_from_bytes(&recipient.public_key)?;
+             let derived = derive_shared(sender_sk, &recipient_vk)?;
+@@ -12074,3 +12115,497 @@ mod bfa_tests {
+         assert!(options(&format!(r#","evm_chains":{{"mainnet":{chain}}}"#)).is_err());
      }
  }
 +
++
++// ---- legacy consignments (MASKED) ----
++// Wallets still on RGB 0.11.1 (rgb-lib 0.3.0-beta.5 and earlier, MASKED up to 2.28) send consignments in the V0
++// format, which a V1 decoder refuses. rgb-ops converts them (`legacy` feature); bundles that name their witness
++// transaction only by txid get it from the indexer.
++impl Wallet {
++    /// `bytes` unchanged if they aren't a V0 transfer consignment; otherwise the same consignment as V1.
++    pub(crate) async fn upgrade_legacy_consignment(&self, bytes: Vec<u8>) -> Result<Vec<u8>, Error> {
++        let Some(v0) = legacy_transfer_v0(&bytes)? else {
++            return Ok(bytes);
++        };
++        let txids: Vec<RgbTxid> = v0
++            .bundles
++            .iter()
++            .filter_map(|b| match &b.pub_witness {
++                rgbstd::containers::legacy::PubWitness::Txid(t) => Some(*t),
++                _ => None,
++            })
++            .collect();
++        let resolver = self.prefetch_witnesses(txids).await?;
++        convert_legacy_transfer(v0, Some(&resolver))
++    }
++}
++
++/// The V0 transfer in `bytes` ("RGB\0TFR" then version 0), or None for anything else.
++pub(crate) fn legacy_transfer_v0(
++    bytes: &[u8],
++) -> Result<Option<rgbstd::containers::legacy::TransferV0>, Error> {
++    const HEAD: &[u8] = b"RGB\0TFR";
++    if bytes.len() < HEAD.len() + 1 || &bytes[..HEAD.len()] != HEAD || bytes[HEAD.len()] != 0 {
++        return Ok(None);
++    }
++    let data = amplify::confinement::Confined::<Vec<u8>, 0, { usize::MAX }>::try_from(
++        bytes[HEAD.len()..].to_vec(),
++    )
++    .map_err(|e| Error::Internal { details: format!("legacy consignment too large: {e}") })?;
++    use strict_encoding::StrictDeserialize;
++    let v0 = rgbstd::containers::legacy::TransferV0::from_strict_serialized::<{ usize::MAX }>(data)
++        .map_err(|e| Error::Internal { details: format!("can't read the legacy consignment: {e}") })?;
++    Ok(Some(v0))
++}
++
++/// A V0 transfer as V1 consignment bytes (what `RgbTransfer::load` reads).
++pub(crate) fn convert_legacy_transfer(
++    v0: rgbstd::containers::legacy::TransferV0,
++    resolver: Option<&dyn ResolveWitness>,
++) -> Result<Vec<u8>, Error> {
++    let v1: RgbTransfer = v0
++        .into_v1(resolver)
++        .map_err(|e| Error::Internal { details: format!("can't convert the legacy consignment: {e}") })?;
++    let mut out = Vec::new();
++    v1.save(&mut out).map_err(|e| Error::Internal { details: e.to_string() })?;
++    Ok(out)
++}
 +
 +// ---- peer-to-peer swaps (MASKED) ----
 +// A swap is one Bitcoin transaction with two inputs: the seller's RGB output and the buyer's bitcoin. Output 0
@@ -321,19 +1075,25 @@ index d436834..26655e9 100644
 +// and the seller's `send_end` broadcasts it and posts the consignment, recorded as a donation.
 +impl Wallet {
 +    /// The seller's half of a swap on a PSBT built by the caller (see `new_swap_psbt`). Colours it through the
-+    /// same path as `send_begin` and returns it unsigned. The RGB input must be one of the PSBT's inputs; any
-+    /// asset change goes to another output of this wallet, as with a normal send.
++    /// same path as `send_begin` and returns it unsigned; `send_end` then broadcasts it as a donation. The RGB input
++    /// must be one of the PSBT's inputs; any asset change goes to another output of this wallet.
++    ///
++    /// `invoice`: the buyer's witness invoice. A protocol 1.0 invoice (with transport endpoints and a public key)
++    /// gets the consignment posted by `send_end`, with the seal blinding derived from the keys of both parties.
++    /// A bare recipient ID (no endpoints) is self-delivered: the caller hands the consignment over, and `blinding`
++    /// (or a random one) is used. `sender_transport_endpoint`: this wallet's proxy, required with an invoice.
++    #[allow(clippy::too_many_arguments)]
 +    pub async fn color_swap(
 +        &mut self,
 +        online: Online,
 +        psbt: String,
 +        asset_id: String,
 +        amount: u64,
-+        recipient_id: String,
++        invoice: String,
 +        seal_vout: u32,
 +        seal_amount_sat: u64,
-+        transport_endpoints: Vec<String>,
 +        min_confirmations: u8,
++        sender_transport_endpoint: Option<String>,
 +        blinding: Option<u64>,
 +    ) -> Result<String, Error> {
 +        info!(self.logger, "Swap (begin) for {asset_id}...");
@@ -341,7 +1101,6 @@ index d436834..26655e9 100644
 +            return Err(Error::InvalidAmountZero);
 +        }
 +        let psbt = Psbt::from_str(&psbt)?;
-+        // the commitment output must be the first one, and the seal must be the one the buyer asked for
 +        let outputs = &psbt.unsigned_tx.output;
 +        if outputs.is_empty() || !outputs[0].script_pubkey.is_op_return() || outputs[0].value.to_sat() != 0 {
 +            return Err(Error::Internal { details: s!("swap PSBT: output 0 must be an empty OP_RETURN") });
@@ -349,60 +1108,72 @@ index d436834..26655e9 100644
 +        if seal_vout == 0 || seal_vout as usize >= outputs.len() {
 +            return Err(Error::Internal { details: s!("swap PSBT: no output at the seal position") });
 +        }
-+        let seal_script = crate::utils::script_buf_from_recipient_id(recipient_id.clone())?
++
++        let (_fee_rate, unspents, _input_unspents, mut runtime) = self._get_transfer_begin_data(online, 1)?;
++        let asset = self.database.check_asset_exists(asset_id.clone())?;
++        self.check_schema_support(&asset.schema)?;
++        if !matches!(asset.schema, AssetSchema::Nia | AssetSchema::Ifa) {
++            return Err(Error::InvalidAssignment);
++        }
++        let chainnet: ChainNet = self.bitcoin_network().into();
++        let operation_sk = crate::encryption::gen_ed25519();
++
++        let invoice_data = if invoice.trim().to_lowercase().starts_with("rgb:") {
++            Some(Invoice::new(invoice.trim().to_string())?.invoice_data())
++        } else {
++            None
++        };
++        let recipient = match invoice_data {
++            Some(d) if !d.transport_endpoints.is_empty() => {
++                if sender_transport_endpoint.is_none() {
++                    return Err(Error::InvalidTransportEndpoint { details: s!("missing sender transport endpoint") });
++                }
++                let r = Recipient {
++                    recipient_id: d.recipient_id.clone(),
++                    witness_data: Some(WitnessData { amount_sat: seal_amount_sat, blinding: None }),
++                    assignment: Assignment::Fungible(amount),
++                    transport_endpoints: d.transport_endpoints.clone(),
++                    public_key: d.public_key.clone(),
++                    encryption: d.encryption,
++                    expiration_timestamp: d.expiration_timestamp,
++                };
++                let mut vout = seal_vout;
++                let mut witness_recipients = vec![];
++                self._parse_recipient(&r, asset.schema, chainnet, &operation_sk, now().unix_timestamp(), &mut witness_recipients, &mut vout, false)
++                    .await?
++            }
++            other => {
++                let recipient_id = other.map(|d| d.recipient_id).unwrap_or(invoice.trim().to_string());
++                let beneficiary = XChainNet::<Beneficiary>::from_str(&recipient_id).map_err(|_| Error::InvalidRecipientID)?;
++                if beneficiary.chain_network() != chainnet {
++                    return Err(Error::InvalidRecipientNetwork);
++                }
++                LocalRecipient {
++                    recipient_id,
++                    local_recipient_data: LocalRecipientData::Witness(LocalWitnessData { amount_sat: seal_amount_sat, blinding, vout: seal_vout }),
++                    assignment: Assignment::Fungible(amount),
++                    transport_endpoints: vec![],
++                    public_key: vec![],
++                    encryption: Encryption::Unsupported,
++                    invoice_expiration: None,
++                }
++            }
++        };
++        let seal_script = crate::utils::script_buf_from_recipient_id(recipient.recipient_id.clone())?
 +            .ok_or(Error::InvalidRecipientData { details: s!("a swap pays a witness (wvout) invoice") })?;
 +        let seal_out = &outputs[seal_vout as usize];
 +        if seal_out.script_pubkey != seal_script || seal_out.value.to_sat() != seal_amount_sat {
 +            return Err(Error::Internal { details: s!("swap PSBT: the seal output does not pay the buyer's invoice") });
 +        }
 +
-+        let (_fee_rate, unspents, _input_unspents, mut runtime) = self._get_transfer_begin_data(online, 1)?;
-+
-+        let asset = self.database.check_asset_exists(asset_id.clone())?;
-+        self.check_schema_support(&asset.schema)?;
-+        if !matches!(asset.schema, AssetSchema::Nia | AssetSchema::Ifa) {
-+            return Err(Error::InvalidAssignment);
-+        }
-+
-+        let chainnet: ChainNet = self.bitcoin_network().into();
-+        let beneficiary = XChainNet::<Beneficiary>::from_str(&recipient_id).map_err(|_| Error::InvalidRecipientID)?;
-+        if beneficiary.chain_network() != chainnet {
-+            return Err(Error::InvalidRecipientNetwork);
-+        }
-+        // with a blinding chosen by the caller (RGB proxy protocol 1.0, where it's derived from the parties' shared
-+        // key) and no endpoints, the caller delivers the consignment itself: nothing goes to a 0.2 transfer server
-+        let self_delivered = transport_endpoints.is_empty() && blinding.is_some();
-+        let mut endpoints: Vec<LocalTransportEndpoint> = vec![];
-+        if !self_delivered {
-+            self.check_transport_endpoints(&transport_endpoints)?;
-+            let mut found_valid = false;
-+            for endpoint_str in &transport_endpoints {
-+                let te = TransportEndpoint::new(endpoint_str.clone())?;
-+                let mut lte = LocalTransportEndpoint {
-+                    transport_type: te.transport_type,
-+                    endpoint: te.endpoint.clone(),
-+                    used: false,
-+                    usable: false,
-+                };
-+                if crate::utils::check_proxy_async(&te.endpoint).await.is_ok() {
-+                    lte.usable = true;
-+                    found_valid = true;
-+                }
-+                endpoints.push(lte);
-+            }
-+            if !found_valid {
-+                return Err(Error::InvalidTransportEndpoints { details: s!("no valid transport endpoints") });
-+            }
-+        }
-+
 +        let psbt = self
-+            ._color_swap_psbt(psbt, &asset_id, amount, recipient_id, seal_vout, seal_amount_sat, endpoints, unspents, &mut runtime, min_confirmations, blinding)
++            ._color_swap_psbt(psbt, &asset_id, amount, recipient, unspents, &mut runtime, min_confirmations, operation_sk.to_bytes().to_vec(), sender_transport_endpoint)
 +            .await?;
 +        info!(self.logger, "Swap (begin) completed");
 +        Ok(psbt.to_string())
 +    }
 +
-+    /// Colour `psbt` for `amount` of `asset_id` to the witness seal at `seal_vout` (shared by `color_swap` and
++    /// Colour `psbt` for `amount` of `asset_id` to `recipient`, a witness seal (shared by `color_swap` and
 +    /// `presign_sale`). Stores the transfer artifacts under the final txid, like `send_begin`.
 +    #[allow(clippy::too_many_arguments)]
 +    async fn _color_swap_psbt(
@@ -410,30 +1181,19 @@ index d436834..26655e9 100644
 +        mut psbt: Psbt,
 +        asset_id: &str,
 +        amount: u64,
-+        recipient_id: String,
-+        seal_vout: u32,
-+        seal_amount_sat: u64,
-+        endpoints: Vec<LocalTransportEndpoint>,
++        recipient: LocalRecipient,
 +        unspents: Vec<LocalUnspent>,
 +        runtime: &mut RgbRuntime,
 +        min_confirmations: u8,
-+        blinding: Option<u64>,
++        operation_secret_key: Vec<u8>,
++        sender_transport_endpoint: Option<String>,
 +    ) -> Result<Psbt, Error> {
 +        let asset_id = asset_id.to_string();
 +        let asset = self.database.check_asset_exists(asset_id.clone())?;
 +        let assignment = Assignment::Fungible(amount);
 +        let mut needed = AssignmentsCollection::default();
 +        assignment.add_to_assignments(&mut needed);
-+        let recipient = LocalRecipient {
-+            recipient_id: recipient_id.clone(),
-+            local_recipient_data: LocalRecipientData::Witness(LocalWitnessData {
-+                amount_sat: seal_amount_sat,
-+                blinding,
-+                vout: seal_vout,
-+            }),
-+            assignment,
-+            transport_endpoints: endpoints,
-+        };
++        let invoice_expiration = recipient.invoice_expiration;
 +
 +        // only this wallet's outputs that the PSBT already spends can carry the asset (a PSBT names its inputs, so
 +        // an output reserved for a pre-signed listing may be one of them: cancelling spends it)
@@ -472,12 +1232,16 @@ index d436834..26655e9 100644
 +                assignments_needed: needed,
 +                assignments_spent: HashMap::new(),
 +                main_transition: TypeOfTransition::Transfer,
++                burn_reason: None,
++                before_block: None,
++                linked_to_contract: None,
 +            },
 +        );
 +
 +        let txid = psbt.unsigned_tx.compute_txid().to_string();
 +        let mut rejected = HashSet::new();
-+        let ok = self
++        let mut reject_lists: RejectLists = HashMap::new();
++        let fascia = self
 +            ._prepare_rgb_psbt_wasm(
 +                &mut psbt,
 +                &mut transfer_info_map,
@@ -486,18 +1250,30 @@ index d436834..26655e9 100644
 +                unspents,
 +                runtime,
 +                min_confirmations,
++                invoice_expiration,
 +                None,
 +                &mut rejected,
++                &mut reject_lists,
 +            )
 +            .await?;
-+        if !ok {
++        if fascia.is_none() {
 +            return Err(Error::Internal { details: s!("part of this asset is on the issuer's reject list: it can't be swapped") });
 +        }
 +        let final_txid = psbt.unsigned_tx.compute_txid().to_string();
 +        if final_txid != txid {
 +            if let Some(artifacts) = self.transfer_artifacts.remove(&txid) {
-+                self.transfer_artifacts.insert(final_txid, artifacts);
++                self.transfer_artifacts.insert(final_txid.clone(), artifacts);
 +            }
++        }
++        // what `send_end` needs, as `send_begin` leaves it: the operation key, the sender proxy (unused by a donation
++        // except as a record), the inputs it reserves and its expiration
++        if let Some(artifacts) = self.transfer_artifacts.get_mut(&final_txid) {
++            if let Some(info) = artifacts.batch_info.as_mut() {
++                info.operation_secret_key = Some(operation_secret_key);
++                info.sender_transport_endpoint = Some(sender_transport_endpoint.unwrap_or_else(|| s!("rpcs://localhost/json-rpc")));
++            }
++            artifacts.inputs = psbt.unsigned_tx.input.iter().map(|i| i.previous_output.into()).collect();
++            artifacts.expiration = invoice_expiration.unwrap_or_else(|| now().unix_timestamp() + DURATION_SEND_TRANSFER);
 +        }
 +        Ok(psbt)
 +    }
@@ -675,9 +1451,18 @@ index d436834..26655e9 100644
 +        psbt.inputs[0].witness_utxo = Some(TxOut { value: Amount::ZERO, script_pubkey: payout.clone() });
 +        psbt.inputs[PRESIGNED_SELLER_INDEX].witness_utxo = Some(prev.txout.clone());
 +        let recipient_id = crate::utils::recipient_id_from_script_buf(payout.clone(), self.bitcoin_network());
-+
++        let recipient = LocalRecipient {
++            recipient_id,
++            local_recipient_data: LocalRecipientData::Witness(LocalWitnessData { amount_sat: PRESIGNED_SEAL_SATS, blinding: None, vout: PRESIGNED_SEAL_VOUT }),
++            assignment: Assignment::Fungible(amount),
++            transport_endpoints: vec![],
++            public_key: vec![],
++            encryption: Encryption::Unsupported,
++            invoice_expiration: None,
++        };
++        let operation_sk = crate::encryption::gen_ed25519();
 +        let mut psbt = self
-+            ._color_swap_psbt(psbt, &asset_id, amount, recipient_id, PRESIGNED_SEAL_VOUT, PRESIGNED_SEAL_SATS, vec![], unspents, &mut runtime, min_confirmations, None)
++            ._color_swap_psbt(psbt, &asset_id, amount, recipient, unspents, &mut runtime, min_confirmations, operation_sk.to_bytes().to_vec(), None)
 +            .await?;
 +        let template_txid = psbt.unsigned_tx.compute_txid().to_string();
 +        let artifacts = self.transfer_artifacts.remove(&template_txid);
@@ -712,35 +1497,17 @@ index d436834..26655e9 100644
 +        self.rgb_runtime()?.upsert_witness(id, WitnessOrd::Archived)?;
 +        Ok(())
 +    }
-+
-+    /// The buyer of a pre-signed listing posts the consignment (with its final transaction, see
-+    /// `rust_only::complete_presigned_consignment`) for its own invoice, so its wallet accepts the tokens like any
-+    /// incoming transfer.
-+    pub async fn post_own_consignment(
-+        &self,
-+        proxy_url: String,
-+        recipient_id: String,
-+        consignment: Vec<u8>,
-+        txid: String,
-+        vout: u32,
-+    ) -> Result<(), Error> {
-+        let te = TransportEndpoint::new(proxy_url)?;
-+        let res = self
-+            .wasm_proxy_client
-+            .post_consignment(&te.endpoint, recipient_id, &consignment, txid, Some(vout))
-+            .await?;
-+        if let Some(err) = res.error {
-+            if err.message.contains("already used") {
-+                return Err(Error::RecipientIDAlreadyUsed);
-+            }
-+            return Err(Error::InvalidTransportEndpoint { details: format!("proxy error: {}", err.message) });
-+        }
-+        Ok(())
-+    }
 +}
 +
++impl Wallet {
++    /// MASKED: the witness invoices of pre-signed purchases this wallet made (see `ReceiveMatcher::Witness`).
++    /// The list lives in memory; MASKED sets it every time it opens the wallet.
++    pub fn set_presigned_receives(&mut self, recipient_ids: Vec<String>) {
++        self.presigned_receives = recipient_ids.into_iter().collect();
++    }
++}
 diff --git a/src/wallet/rust_only.rs b/src/wallet/rust_only.rs
-index 7cc1b66..7ee132d 100644
+index 4e07a9c..06b9a3d 100644
 --- a/src/wallet/rust_only.rs
 +++ b/src/wallet/rust_only.rs
 @@ -52,6 +52,12 @@ pub struct ValidateConsignmentResult {
@@ -756,7 +1523,7 @@ index 7cc1b66..7ee132d 100644
  }
  
  impl Wallet {
-@@ -646,6 +652,18 @@ pub fn validate_consignment_offchain(
+@@ -554,6 +560,18 @@ pub fn validate_consignment_offchain(
      consignment_bytes: &[u8],
      txid: &str,
      bitcoin_network: BitcoinNetwork,
@@ -775,8 +1542,8 @@ index 7cc1b66..7ee132d 100644
  ) -> Result<ValidateConsignmentResult, Error> {
      let consignment = RgbTransfer::load(consignment_bytes).map_err(|e| Error::Internal {
          details: format!("Failed to load consignment: {e}"),
-@@ -672,6 +690,26 @@ pub fn validate_consignment_offchain(
-     match consignment.clone().validate(&resolver, &validation_config) {
+@@ -589,6 +607,26 @@ pub fn validate_consignment_offchain(
+     {
          Ok(valid_consignment) => {
              let status = valid_consignment.validation_status();
 +            let seal_amount = seal_vout.map(|vout| {
@@ -788,7 +1555,7 @@ index 7cc1b66..7ee132d 100644
 +                                continue;
 +                            }
 +                            for a in typed_assigns.as_fungible().iter() {
-+                                if let Assign::Revealed { seal, state, .. } = a {
++                                if let Assign { seal: rgbstd::BuilderSeal::Revealed(seal), state } = a {
 +                                    if seal.txid == TxPtr::WitnessTx && seal.vout.into_u32() == vout {
 +                                        total = total.saturating_add(state.as_u64());
 +                                    }
@@ -802,7 +1569,7 @@ index 7cc1b66..7ee132d 100644
              Ok(ValidateConsignmentResult {
                  valid: true,
                  warnings: Some(
-@@ -683,6 +721,8 @@ pub fn validate_consignment_offchain(
+@@ -600,6 +638,8 @@ pub fn validate_consignment_offchain(
                  ),
                  error: None,
                  details: None,
@@ -811,7 +1578,7 @@ index 7cc1b66..7ee132d 100644
              })
          }
          Err(ValidationError::InvalidConsignment(failure)) => Ok(ValidateConsignmentResult {
-@@ -690,12 +730,16 @@ pub fn validate_consignment_offchain(
+@@ -607,24 +647,32 @@ pub fn validate_consignment_offchain(
              warnings: None,
              error: Some("invalid".to_string()),
              details: Some(failure.to_string()),
@@ -826,9 +1593,25 @@ index 7cc1b66..7ee132d 100644
 +            contract_id: None,
 +            seal_amount: None,
          }),
+         Err(ValidationError::PendingClaims(count)) => Ok(ValidateConsignmentResult {
+             valid: false,
+             warnings: None,
+             error: Some("external_anchors".to_string()),
+             details: Some(format!("{count} mint claim(s) to check online")),
++            contract_id: None,
++            seal_amount: None,
+         }),
+         Err(e) => Ok(ValidateConsignmentResult {
+             valid: false,
+             warnings: None,
+             error: Some("unexpected".to_string()),
+             details: Some(e.to_string()),
++            contract_id: None,
++            seal_amount: None,
+         }),
      }
  }
-@@ -704,6 +748,55 @@ pub fn validate_consignment_offchain(
+@@ -633,6 +681,55 @@ pub fn validate_consignment_offchain(
  mod tests {
      use super::*;
  
@@ -884,7 +1667,7 @@ index 7cc1b66..7ee132d 100644
      #[test]
      fn validate_consignment_offchain_invalid_bytes() {
          let result = validate_consignment_offchain(
-@@ -737,9 +830,12 @@ mod tests {
+@@ -666,9 +763,12 @@ mod tests {
              warnings: Some(vec!["warn1".to_string()]),
              error: None,
              details: None,
@@ -897,7 +1680,7 @@ index 7cc1b66..7ee132d 100644
          assert!(deserialized.valid);
          assert_eq!(deserialized.warnings.unwrap(), vec!["warn1".to_string()]);
          assert!(deserialized.error.is_none());
-@@ -749,6 +845,8 @@ mod tests {
+@@ -678,6 +778,8 @@ mod tests {
              warnings: None,
              error: Some("invalid".to_string()),
              details: Some("schema mismatch".to_string()),
@@ -906,7 +1689,7 @@ index 7cc1b66..7ee132d 100644
          };
          let json = serde_json::to_string(&result_invalid).unwrap();
          let deserialized: ValidateConsignmentResult = serde_json::from_str(&json).unwrap();
-@@ -761,3 +859,477 @@ mod tests {
+@@ -719,3 +821,477 @@ mod tests {
          assert_eq!(IndexerProtocol::Esplora.to_string(), "Esplora");
      }
  }
@@ -1239,7 +2022,7 @@ index 7cc1b66..7ee132d 100644
 +    let mut found = 0;
 +    for wb in bundles.iter_mut() {
 +        if wb.witness_id() == template {
-+            wb.pub_witness = PubWitness::Tx(tx.clone());
++            wb.tx = tx.clone();
 +            found += 1;
 +        }
 +    }

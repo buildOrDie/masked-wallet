@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Build MASKED's RGB engine: UTEXO's rgb-lib-wasm v1.0.0-beta.3 (the version MASKED ships) plus masked-swap.patch
-# (peer-to-peer swaps: colorSwap, newSwapPsbt, verifySwapPsbt, …; pre-signed listings: presignSale, presignedBuyPsbt, …)
-# and masked-uda.patch (RGB21 / UDA NFTs: receive, list, send; engineFeatures()) and masked-witness-vout.patch (receives a
-# witness transfer whose sender gave no vout, e.g. UniSat 1.8 on a 0.2 proxy). Output: vendor/rgb-lib-wasm/, which
-# `npm run build` uses instead of the npm package.
+# Build MASKED's RGB engine: UTEXO's rgb-lib-wasm v1.0.0-beta.4 (RGB 0.11.2, transfer server protocol 1.0) plus
+# masked-b4.patch: peer-to-peer swaps (colorSwap, newSwapPsbt, verifySwapPsbt, …), pre-signed listings
+# (presignSale, presignedBuyPsbt, setPresignedReceives, …), transfers from RGB 0.11.1 wallets (old-format
+# consignments converted on arrival) and the upgrade of wallets saved by MASKED's previous engine
+# (migrateLegacyWallet). Output: vendor/rgb-lib-wasm/, which `npm run build` uses instead of the npm package.
 #
 # Needs: git, Rust (rustup) with the wasm32 target, wasm-pack 0.14, and a C compiler that targets WebAssembly
 # (on a Mac: `brew install llvm`; Apple's own clang can't). 10–20 minutes the first time.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"; root="$(cd "$here/.." && pwd)"
-tag=v1.0.0-beta.3
-commit=5e38cfb1282d6067ebcdf741f32cf8cccbd654ab
+tag=v1.0.0-beta.4
+commit=f0e266f039744896baa39e3a35766ef01c0f369a
 work="$here/.build/rgb-lib-wasm"
 
 command -v cargo >/dev/null || { echo "Install Rust first: https://rustup.rs"; exit 1; }
@@ -25,16 +25,16 @@ fi
 rm -rf "$work"; mkdir -p "$(dirname "$work")"
 git clone --quiet --depth 1 --branch "$tag" https://github.com/UTEXO-Protocol/rgb-lib-wasm.git "$work"
 [[ "$(git -C "$work" rev-parse HEAD)" == "$commit" ]] || { echo "Upstream $tag is not $commit any more. Stop."; exit 1; }
-git -C "$work" apply "$here/masked-swap.patch"
-git -C "$work" apply "$here/masked-uda.patch"
-git -C "$work" apply "$here/masked-witness-vout.patch"
-(cd "$work" && cargo test --locked --lib swap_ -q && cargo test --locked --lib presigned -q && cargo test --locked --lib uda_ -q)   # swap, listing and NFT checks, natively
+git -C "$work" apply "$here/masked-b4.patch"
+# swaps, listings, the wallet upgrade and the engine's own tests, natively
+(cd "$work" && cargo test --locked --lib -q)
 (cd "$work/bindings/wasm" && wasm-pack build --release --target web --out-dir pkg)
 
 out="$root/vendor/rgb-lib-wasm"; rm -rf "$out"; mkdir -p "$out"
 cp "$work/bindings/wasm/pkg/"rgb_lib_wasm_bindings* "$out/"
-node -e "require('fs').writeFileSync('$out/package.json', JSON.stringify({name:'@utexo/rgb-lib-wasm',version:'1.0.0-beta.3+masked-swap-uda-vout',type:'module',main:'rgb_lib_wasm_bindings.js',types:'rgb_lib_wasm_bindings.d.ts'},null,2))"
-grep -q newSwapPsbt "$out/rgb_lib_wasm_bindings.d.ts" && grep -q presignSale "$out/rgb_lib_wasm_bindings.d.ts" || { echo "The built engine has no swap functions. Stop."; exit 1; }
-grep -q engineFeatures "$out/rgb_lib_wasm_bindings.d.ts" || { echo "The built engine has no NFT (UDA) support. Stop."; exit 1; }
+node -e "require('fs').writeFileSync('$out/package.json', JSON.stringify({name:'@utexo/rgb-lib-wasm',version:'1.0.0-beta.4+masked',type:'module',main:'rgb_lib_wasm_bindings.js',types:'rgb_lib_wasm_bindings.d.ts'},null,2))"
+for f in newSwapPsbt presignSale migrateLegacyWallet setPresignedReceives; do
+  grep -q "$f" "$out/rgb_lib_wasm_bindings.d.ts" || { echo "The built engine has no $f. Stop."; exit 1; }
+done
 shasum -a 256 "$out/rgb_lib_wasm_bindings_bg.wasm"
-echo "Engine with swaps and NFTs in vendor/rgb-lib-wasm. Now: npm run build"
+echo "Engine (beta.4 + MASKED) in vendor/rgb-lib-wasm. Now: npm run build"

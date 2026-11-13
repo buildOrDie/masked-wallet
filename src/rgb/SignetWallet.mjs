@@ -40,6 +40,8 @@ export class SignetWallet {
         await wallet.init();
         // outputs promised to Instant listings: before anything else can spend them
         wallet.reserve?.(this.instantReserved());
+        // Instant purchases whose transfer is still to arrive (protocol 1.0: matched without the derived blinding)
+        wallet.expectPurchases?.(Object.values(this.instantStore().all()).filter((e) => e?.role === 'buyer' && e.recipientId).map((e) => String(e.recipientId)));
         if (backup) {
           if (typeof payload.rgbBackup !== 'string') throw new Error('Backup does not contain RGB state.');
           await wallet.restoreFromBackupBytes(unb64(payload.rgbBackup), password);

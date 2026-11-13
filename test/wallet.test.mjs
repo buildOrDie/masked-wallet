@@ -529,7 +529,7 @@ test('a slow block server keeps RGB open with a retry note; RGB waits for the wa
   app.rgb.acquire = async () => {}; app.rgb.startTimer = () => calls.push('timer');
   app.rgb.runtime = async () => ({ newTestMnemonic: () => WORDS });
   app.rgb.serviceFor = async () => (app.rgb.service = { profile: app.rgb.profile, open: async () => calls.push('open'), snapshot: async ({ full }) => { calls.push(full ? 'full' : 'quick'); throw new Error('Network timeout: the server did not answer in time'); }, close: async () => {} });
-  globalThis.localStorage.removeItem(`${app.rgb.profile.vaultKey}.scanned-v2`);
+  globalThis.localStorage.removeItem(`${app.rgb.profile.vaultKey}.scanned-v3`);
   await app.rgb.open(await app.rgb.walletKey());
   assert.equal(app.rgb.ready, true, 'still open');
   assert.deepEqual(calls, ['open', 'timer', 'full'], 'first open on this engine: full scan');
