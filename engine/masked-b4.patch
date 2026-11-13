@@ -11,7 +11,7 @@ index 884d686..e2896b5 100644
  rgb-strict-encoding = { version = "=1.0.5", default-features = false, features = [
      "bitcoin",
 diff --git a/bindings/wasm/src/lib.rs b/bindings/wasm/src/lib.rs
-index 51b6efd..9f1636e 100644
+index 51b6efd..832b59b 100644
 --- a/bindings/wasm/src/lib.rs
 +++ b/bindings/wasm/src/lib.rs
 @@ -635,6 +635,166 @@ impl WasmWallet {
@@ -154,10 +154,10 @@ index 51b6efd..9f1636e 100644
 +    /// The buyer's PSBT for a pre-signed listing: `inputs` `[{ outpoint, sats, script, tx? }]`, the seal script
 +    /// (hex), and `change` `{ script, sats }` or null.
 +    #[wasm_bindgen(js_name = "presignedBuyPsbt")]
-+    pub fn presigned_buy_psbt(template: &str, inputs_js: JsValue, seal_script: &str, change_js: JsValue) -> Result<String, JsValue> {
++    pub fn presigned_buy_psbt(template: &str, inputs_js: JsValue, seal_script: &str, change_js: JsValue, seller_tx: Option<String>) -> Result<String, JsValue> {
 +        let inputs = serde_wasm_bindgen::from_value(inputs_js).map_err(|e| JsValue::from_str(&format!("Invalid inputs: {e}")))?;
 +        let change = if change_js.is_null() || change_js.is_undefined() { None } else { Some(serde_wasm_bindgen::from_value(change_js).map_err(|e| JsValue::from_str(&format!("Invalid change: {e}")))?) };
-+        rgb_lib_wasm::wallet::rust_only::presigned_buy_psbt(template, inputs, seal_script.to_string(), change).map_err(|e| JsValue::from_str(&e.to_string()))
++        rgb_lib_wasm::wallet::rust_only::presigned_buy_psbt(template, inputs, seal_script.to_string(), change, seller_tx).map_err(|e| JsValue::from_str(&e.to_string()))
 +    }
 +
 +    /// The buyer's last check of its signed transaction (hex) against the template. Returns its txid.
@@ -1050,7 +1050,7 @@ index a3a9f46..98d3cd1 100644
      }
  
 diff --git a/src/wallet/online.rs b/src/wallet/online.rs
-index ca96b4a..efa6ec8 100644
+index ca96b4a..3e562fc 100644
 --- a/src/wallet/online.rs
 +++ b/src/wallet/online.rs
 @@ -791,8 +791,9 @@ pub(crate) struct ConsignmentPayment<'c> {
@@ -1177,7 +1177,7 @@ index ca96b4a..efa6ec8 100644
              let recipient_id = &recipient.recipient_id;
              let recipient_vk = verifying_key_from_bytes(&recipient.public_key)?;
              let derived = derive_shared(sender_sk, &recipient_vk)?;
-@@ -12074,3 +12115,569 @@ mod bfa_tests {
+@@ -12074,3 +12115,628 @@ mod bfa_tests {
          assert!(options(&format!(r#","evm_chains":{{"mainnet":{chain}}}"#)).is_err());
      }
  }
@@ -1700,19 +1700,33 @@ index ca96b4a..efa6ec8 100644
 +    use bdk_wallet::bitcoin::{psbt::PsbtSighashType, sighash::TapSighashType};
 +    use crate::wallet::offline::address_reuse_tests::make_test_wallet_with_keys;
 +
-+    fn template(wallet: &mut Wallet) -> Psbt {
-+        let script = wallet._get_new_address(KeychainKind::External).unwrap().script_pubkey();
++    /// A transaction paying `sats` to `script` at output 1 (output 0 pays elsewhere).
++    fn funding(script: ScriptBuf, sats: u64, tag: u8) -> BdkTransaction {
++        BdkTransaction {
++            version: Version::TWO,
++            lock_time: LockTime::ZERO,
++            input: vec![TxIn { previous_output: bdk_wallet::bitcoin::OutPoint { txid: bdk_wallet::bitcoin::Txid::from_str(&format!("{tag:02x}").repeat(32)).unwrap(), vout: 0 }, script_sig: ScriptBuf::new(), sequence: Sequence::ENABLE_RBF_NO_LOCKTIME, witness: Witness::new() }],
++            output: vec![
++                TxOut { value: Amount::from_sat(5_000), script_pubkey: ScriptBuf::new_op_return([tag]) },
++                TxOut { value: Amount::from_sat(sats), script_pubkey: script },
++            ],
++        }
++    }
++
++    fn template_from(wallet: &mut Wallet, seller_prev: &BdkTransaction) -> Psbt {
++        let script = seller_prev.output[1].script_pubkey.clone();
 +        let payout = wallet._get_new_address(KeychainKind::Internal).unwrap().script_pubkey();
 +        let op = |b: &str, vout| bdk_wallet::bitcoin::OutPoint { txid: bdk_wallet::bitcoin::Txid::from_str(&b.repeat(32)).unwrap(), vout };
++        let seller_op = bdk_wallet::bitcoin::OutPoint { txid: seller_prev.compute_txid(), vout: 1 };
 +        let tx = BdkTransaction {
 +            version: Version::TWO,
 +            lock_time: LockTime::ZERO,
 +            input: vec![
 +                TxIn { previous_output: op("01", 0), script_sig: ScriptBuf::new(), sequence: Sequence::ENABLE_RBF_NO_LOCKTIME, witness: Witness::new() },
-+                TxIn { previous_output: op("ab", 1), script_sig: ScriptBuf::new(), sequence: Sequence::ENABLE_RBF_NO_LOCKTIME, witness: Witness::new() },
++                TxIn { previous_output: seller_op, script_sig: ScriptBuf::new(), sequence: Sequence::ENABLE_RBF_NO_LOCKTIME, witness: Witness::new() },
 +            ],
 +            output: vec![
-+                TxOut { value: Amount::ZERO, script_pubkey: ScriptBuf::new_op_return([]) },
++                TxOut { value: Amount::ZERO, script_pubkey: ScriptBuf::new_op_return([7u8; 32]) },
 +                TxOut { value: Amount::from_sat(21_000), script_pubkey: payout.clone() },
 +                TxOut { value: Amount::from_sat(PRESIGNED_SEAL_SATS), script_pubkey: payout },
 +            ],
@@ -1720,6 +1734,11 @@ index ca96b4a..efa6ec8 100644
 +        let mut psbt = Psbt::from_unsigned_tx(tx).unwrap();
 +        psbt.inputs[PRESIGNED_SELLER_INDEX].witness_utxo = Some(TxOut { value: Amount::from_sat(1_000), script_pubkey: script });
 +        psbt
++    }
++
++    fn template(wallet: &mut Wallet) -> Psbt {
++        let script = wallet._get_new_address(KeychainKind::External).unwrap().script_pubkey();
++        template_from(wallet, &funding(script, 1_000, 0xab))
 +    }
 +
 +    #[test]
@@ -1746,9 +1765,49 @@ index ca96b4a..efa6ec8 100644
 +        assert_eq!(sig.len(), 65);
 +        assert_eq!(sig[64], TapSighashType::SinglePlusAnyoneCanPay as u8);
 +    }
++
++    /// The buyer's wallet signs its coin only with the seller's transaction in hand (BDK wants the previous
++    /// transaction of every input the wallet doesn't know); the seller's signature still holds.
++    #[test]
++    fn buyer_signs_an_instant_purchase_with_the_sellers_transaction() {
++        use crate::wallet::rust_only::{SwapInput, check_presigned_final, presigned_buy_psbt, presigned_listing_info};
++        let mut seller = make_test_wallet_with_keys(crate::keys::generate_keys(BitcoinNetwork::Regtest), false);
++        let seller_prev = funding(seller._get_new_address(KeychainKind::External).unwrap().script_pubkey(), 1_000, 0xab);
++        let mut t = template_from(&mut seller, &seller_prev);
++        seller.sign_presigned_template(&mut t, seller_prev.output[1].clone()).unwrap();
++        let template = t.to_string();
++        presigned_listing_info(&template).unwrap();
++
++        let mut buyer = make_test_wallet_with_keys(crate::keys::generate_keys(BitcoinNetwork::Regtest), false);
++        let pay = funding(buyer._get_new_address(KeychainKind::Internal).unwrap().script_pubkey(), 30_000, 0xcd);
++        let seal = buyer._get_new_address(KeychainKind::External).unwrap().script_pubkey().to_hex_string();
++        let input = SwapInput {
++            outpoint: format!("{}:1", pay.compute_txid()),
++            sats: 30_000,
++            script: pay.output[1].script_pubkey.to_hex_string(),
++            tx: Some(bdk_wallet::bitcoin::consensus::encode::serialize_hex(&pay)),
++        };
++        let seller_hex = bdk_wallet::bitcoin::consensus::encode::serialize_hex(&seller_prev);
++
++        // without the seller's transaction: what MASKED 2.29.4 buyers hit
++        let p = presigned_buy_psbt(&template, vec![input.clone()], seal.clone(), None, None).unwrap();
++        let err = buyer.sign_psbt(p, None).unwrap_err();
++        assert!(err.to_string().contains("Missing non-witness UTXO"), "{err}");
++
++        // with it: signed, and the final transaction checks out against the template
++        let p = presigned_buy_psbt(&template, vec![input.clone()], seal.clone(), None, Some(seller_hex.clone())).unwrap();
++        let signed = Psbt::from_str(&buyer.sign_psbt(p, None).unwrap()).unwrap();
++        assert!(signed.inputs[0].final_script_witness.is_some(), "the buyer's coin is signed");
++        let tx = signed.extract_tx_unchecked_fee_rate();
++        check_presigned_final(&template, &bdk_wallet::bitcoin::consensus::encode::serialize_hex(&tx), &seal).unwrap();
++
++        // a seller transaction that isn't the signed output's is refused
++        let other = bdk_wallet::bitcoin::consensus::encode::serialize_hex(&funding(seller_prev.output[1].script_pubkey.clone(), 999, 0xab));
++        assert!(presigned_buy_psbt(&template, vec![input], seal, None, Some(other)).is_err());
++    }
 +}
 diff --git a/src/wallet/rust_only.rs b/src/wallet/rust_only.rs
-index 4e07a9c..06b9a3d 100644
+index 4e07a9c..007a95f 100644
 --- a/src/wallet/rust_only.rs
 +++ b/src/wallet/rust_only.rs
 @@ -52,6 +52,12 @@ pub struct ValidateConsignmentResult {
@@ -1930,7 +1989,7 @@ index 4e07a9c..06b9a3d 100644
          };
          let json = serde_json::to_string(&result_invalid).unwrap();
          let deserialized: ValidateConsignmentResult = serde_json::from_str(&json).unwrap();
-@@ -719,3 +821,477 @@ mod tests {
+@@ -719,3 +821,491 @@ mod tests {
          assert_eq!(IndexerProtocol::Esplora.to_string(), "Esplora");
      }
  }
@@ -2164,7 +2223,9 @@ index 4e07a9c..06b9a3d 100644
 +/// The buyer's PSBT for a pre-signed listing: the buyer's first input in place of the placeholder (input 0), the
 +/// seller's signed input 1 and outputs 0-1 unchanged, the seal (output 2) paid to `seal_script`, then the buyer's other
 +/// inputs and its change (if any). The buyer signs its inputs.
-+pub fn presigned_buy_psbt(template: &str, buyer_inputs: Vec<SwapInput>, seal_script: String, change: Option<SwapOutput>) -> Result<String, Error> {
++/// `seller_tx`: the seller's output's whole transaction (hex). The buyer's wallet signs only when it holds the
++/// previous transaction of every input it doesn't know itself (BDK), and the seller's is one of them.
++pub fn presigned_buy_psbt(template: &str, buyer_inputs: Vec<SwapInput>, seal_script: String, change: Option<SwapOutput>, seller_tx: Option<String>) -> Result<String, Error> {
 +    use bdk_wallet::bitcoin::{Amount, Sequence, TxIn, Witness};
 +    presigned_listing_info(template)?;
 +    if buyer_inputs.is_empty() {
@@ -2193,6 +2254,18 @@ index 4e07a9c..06b9a3d 100644
 +    }
 +    let mut psbt = Psbt::from_unsigned_tx(tx).map_err(|e| Error::Internal { details: e.to_string() })?;
 +    psbt.inputs[SELLER] = t.inputs[SELLER].clone();
++    if let Some(h) = seller_tx.as_deref().filter(|h| !h.trim().is_empty()) {
++        let bytes = <Vec<u8> as bdk_wallet::bitcoin::hex::FromHex>::from_hex(h.trim()).map_err(|_| bad_listing("bad seller transaction hex"))?;
++        let prev: BdkTransaction = bdk_wallet::bitcoin::consensus::deserialize(&bytes).map_err(|_| bad_listing("bad seller transaction"))?;
++        if prev.compute_txid() != seller_op.txid {
++            return Err(bad_listing("the seller's transaction does not match its output"));
++        }
++        // the signed amount and script must be the ones on chain
++        if prev.output.get(seller_op.vout as usize) != psbt.inputs[SELLER].witness_utxo.as_ref() {
++            return Err(bad_listing("the seller's output on chain differs from the signed one"));
++        }
++        psbt.inputs[SELLER].non_witness_utxo = Some(prev);
++    }
 +    let slots: Vec<usize> = std::iter::once(0).chain(2..psbt.inputs.len()).collect();
 +    for (slot, k) in slots.into_iter().zip(order) {
 +        let i = &buyer_inputs[k];
@@ -2342,7 +2415,7 @@ index 4e07a9c..06b9a3d 100644
 +            SwapInput { outpoint: format!("{}:2", "ce".repeat(32)), sats: 20000, script: buyer.clone(), tx: None },
 +        ];
 +        let change = Some(SwapOutput { script: Some(buyer.clone()), sats: 60000 + 1000 - 51000 - 330 - 700 });
-+        let p = presigned_buy_psbt(&t, inputs.clone(), seal.clone(), change).unwrap();
++        let p = presigned_buy_psbt(&t, inputs.clone(), seal.clone(), change, None).unwrap();
 +        let psbt = Psbt::from_str(&p).unwrap();
 +        assert_eq!(psbt.unsigned_tx.input.len(), 3);
 +        assert_eq!(psbt.unsigned_tx.input[0].previous_output.to_string(), inputs[0].outpoint);
@@ -2380,10 +2453,10 @@ index 4e07a9c..06b9a3d 100644
 +
 +        // not enough bitcoin
 +        let poor = vec![SwapInput { outpoint: format!("{}:0", "cd".repeat(32)), sats: 100, script: buyer.clone(), tx: None }];
-+        assert!(presigned_buy_psbt(&t, poor, seal.clone(), None).is_err());
++        assert!(presigned_buy_psbt(&t, poor, seal.clone(), None, None).is_err());
 +        // the seller's own output can't be the buyer's coin
 +        let own = vec![SwapInput { outpoint: format!("{}:1", "ab".repeat(32)), sats: 90000, script: buyer.clone(), tx: None }];
-+        assert!(presigned_buy_psbt(&t, own, seal, None).is_err());
++        assert!(presigned_buy_psbt(&t, own, seal, None, None).is_err());
 +    }
 +
 +    #[test]

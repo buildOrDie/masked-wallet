@@ -901,7 +901,8 @@ export class LiteWallet {
     if (change < 546n) change = 0n;
     if (paid - base - feeFor(bis.map((b) => b.script), change > 0n) < 0n) throw new Error('Not enough bitcoin for the price and the network fee.');
     const inputs = pay.coins.map((c, k) => ({ outpoint: c.outpoint, sats: bis[k].sats, script: bis[k].script, tx: bis[k].tx }));
-    const unsigned = this.lib.WasmWallet.presignedBuyPsbt(String(l.psbt), inputs, seal, change > 0n ? { script: await this.ownScript(), sats: Number(change) } : null);
+    // the seller's transaction too: the engine signs only with the previous transaction of every input in hand
+    const unsigned = this.lib.WasmWallet.presignedBuyPsbt(String(l.psbt), inputs, seal, change > 0n ? { script: await this.ownScript(), sats: Number(change) } : null, si.tx || null);
     const txHex = this.extractHex(this.sign(unsigned));
     const txid = this.lib.WasmWallet.checkPresignedFinal(String(l.psbt), txHex, seal);
     const completed = this.lib.WasmWallet.completePresignedConsignment(consignment, info.templateTxid, txHex);

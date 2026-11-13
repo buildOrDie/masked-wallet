@@ -30,7 +30,7 @@ function fakeLib(net) {
     psbtTxid: () => T('7'),
     witnessSealScript: (inv) => `5120seal${inv.slice(-4)}`,
     presignedListingInfo: (p) => { if (String(p).startsWith('signed:')) return {}; if (String(p).startsWith('old:')) throw new Error('old layout'); const j = JSON.parse(p); if (!j.sig) throw new Error('the seller\'s signature is not valid'); return j.info; },
-    presignedBuyPsbt: (tpl, ins, seal, change) => JSON.stringify({ tpl: JSON.parse(tpl), ins, seal, change }),
+    presignedBuyPsbt: (tpl, ins, seal, change, sellerTx) => JSON.stringify({ tpl: JSON.parse(tpl), ins, seal, change, sellerTx }),
     checkPresignedFinal: (tpl, hexTx, seal) => { const j = JSON.parse(hexTx); if (j.seal !== seal) throw new Error('the seal does not pay the buyer'); return T('f'); },
     completePresignedConsignment: (bytes, tt, hexTx) => enc({ ...JSON.parse(new TextDecoder().decode(bytes)), final: true }),
   };
@@ -235,7 +235,7 @@ test('payCoinsFor: a confirmed coin first, else unconfirmed change, else several
 test('buyer: pays with two coins when one is not enough', async () => {
   const chain = fakeChain();
   const seller = `${T('a')}:0`, c1 = `${T('d')}:1`, c2 = `${T('e')}:0`;
-  chain.outs[seller] = { sats: 1000, script: '5120sell' };
+  chain.outs[seller] = { sats: 1000, script: '5120sell', tx: 'a0' };
   chain.outs[c1] = { sats: 15000, script: '5120buy', tx: 'dd' };
   chain.outs[c2] = { sats: 9000, script: '5120buy', tx: 'ee' };
   const info = { sellerOutpoint: seller, sellerSats: 1000, sellerScript: '5120sell', payoutSats: 21000, opretScript: '6a20', templateTxid: T('6') };
@@ -243,9 +243,10 @@ test('buyer: pays with two coins when one is not enough', async () => {
   const offer = { offerId: 'sw0123456789ab', assetId: ASSET, amount: '500', priceSats: '20000', state: 'OPEN' };
   const b = wallet({ name: 'buyer', lib: fakeLib(), chain, coins: [{ outpoint: c1, txout: { value: 15000 }, is_spent: false }, { outpoint: c2, txout: { value: 9000 }, is_spent: false }] });
   let built;
-  b.w.lib.WasmWallet.presignedBuyPsbt = (tpl, ins, seal, change) => { built = { ins, change }; return JSON.stringify({ seal }); };
+  b.w.lib.WasmWallet.presignedBuyPsbt = (tpl, ins, seal, change, sellerTx) => { built = { ins, change, sellerTx }; return JSON.stringify({ seal }); };
   await b.w.instantBuy({ offerId: offer.offerId, network: 'Signet', offer, listing, feeRate: 2 }, b.store);
   assert.deepEqual(built.ins.map((i) => i.outpoint), [c1, c2]);
+  assert.equal(built.sellerTx, 'a0', 'the seller\'s transaction goes with it: the engine signs only with it');
   // 24000 in − 20000 price − 330 seal − the fee for the real size (3 inputs, 4 outputs) at 2 sat/vB
   const { txVbytes, OPRET_SCRIPT, P2TR_SCRIPT } = await import('../src/rgb/swap.mjs');
   const vb = txVbytes(['5120sell', '5120buy', '5120buy'], [OPRET_SCRIPT, info.payoutScript || P2TR_SCRIPT, P2TR_SCRIPT, P2TR_SCRIPT]);
