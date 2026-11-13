@@ -26,7 +26,8 @@ RGB 0.11.2 and transfer server protocol 1.0 (the protocol UniSat 1.8 and current
 | --- | --- |
 | Incoming transfers in the old (V0) format | Converted to V1 on arrival (rgb-ops `legacy`), fetching any witness transaction named only by its txid. MASKED users who haven't updated and the Launchpad escrow can still send to an upgraded wallet |
 | `migrateLegacyWallet(walletDataJson, indexerUrl)` | Upgrades the wallet the previous engine (beta.3) saved, before `WasmWallet.create` opens it: the RGB history, balances and indexes go into the new store (as rgb-lib's own `migrate_rgb_fs_to_db` does for its files), the database gets its new columns, transfers still waiting on the 0.2 protocol are failed (freeing what they held), the bitcoin side is kept or rebuilt by a full scan. The old copy stays in IndexedDB. `create` runs it too, without network |
-| `engineFeatures()` | `["swap", "presign", "proxy-v1", "legacy-migration", "legacy-consignments"]` |
+| `wallet.restoreBackup(bytes, password)`, `wallet.restoreBackupOnline(bytes, password, indexerUrl)` | Also restore a backup the previous engine made (MASKED 2.28 and older), converted the same way; one naming an old witness transaction only by its txid needs the online call, which fetches it |
+| `engineFeatures()` | `["swap", "presign", "proxy-v1", "legacy-migration", "legacy-consignments", "legacy-backup"]` |
 
 Not in this version: NFTs (UDA); beta.4 has no UDA schema yet (the previous patch, `masked-uda.patch`, is in the git
 history for when it does).

@@ -970,5 +970,21 @@ export class LiteWallet {
 
   async createBackup({ password }) { this.lastBackupBytes = this.wallet.backup(password); }
   getLastBackupBytes() { return this.lastBackupBytes; }
-  async restoreFromBackupBytes(bytes, password) { this.wallet.restoreBackup(bytes, password); await this.save(); }
+  /**
+   * Restore an RGB backup. The 0.11.2 engine also reads backups made before the upgrade (MASKED 2.28 and older); one
+   * naming an old transaction only by its id is restored with a block server, trying each in turn.
+   */
+  async restoreFromBackupBytes(bytes, password) {
+    if (typeof this.wallet.restoreBackupOnline !== 'function') { this.wallet.restoreBackup(bytes, password); await this.save(); return; }
+    try { this.wallet.restoreBackup(bytes, password); } catch (e) {
+      if (!/needs the block server/i.test(String(e?.message || e))) throw e;
+      const servers = [...new Set([this.indexer, ...this.indexers()].filter(Boolean))];
+      let last = e;
+      for (const url of servers) {
+        try { await this.wallet.restoreBackupOnline(bytes, password, url); last = null; break; } catch (err) { last = err; }
+      }
+      if (last) throw last;
+    }
+    await this.save();
+  }
 }

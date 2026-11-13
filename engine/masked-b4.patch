@@ -11,7 +11,7 @@ index 884d686..e2896b5 100644
  rgb-strict-encoding = { version = "=1.0.5", default-features = false, features = [
      "bitcoin",
 diff --git a/bindings/wasm/src/lib.rs b/bindings/wasm/src/lib.rs
-index 51b6efd..156f6e0 100644
+index 51b6efd..9f1636e 100644
 --- a/bindings/wasm/src/lib.rs
 +++ b/bindings/wasm/src/lib.rs
 @@ -635,6 +635,166 @@ impl WasmWallet {
@@ -181,7 +181,30 @@ index 51b6efd..156f6e0 100644
      /// Send RGB assets (end): broadcast a signed PSBT. Returns an OperationResult JS object.
      #[wasm_bindgen(js_name = "sendEnd")]
      pub async fn send_end(
-@@ -1217,7 +1377,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
+@@ -1074,6 +1234,22 @@ impl WasmWallet {
+             .map_err(|e| JsValue::from_str(&e.to_string()))
+     }
+ 
++    /// MASKED: `restoreBackup` that also takes the block server, for a backup made by the previous engine whose
++    /// RGB data names a witness transaction only by its txid.
++    #[wasm_bindgen(js_name = "restoreBackupOnline")]
++    pub async fn restore_backup_online(
++        &self,
++        backup_bytes: Vec<u8>,
++        password: String,
++        indexer_url: String,
++    ) -> Result<(), JsValue> {
++        self.inner
++            .borrow_mut()
++            .restore_backup_with_indexer(&backup_bytes, &password, &indexer_url)
++            .await
++            .map_err(|e| JsValue::from_str(&e.to_string()))
++    }
++
+     /// Check if the wallet needs a backup. Returns true if modified since last backup.
+     #[wasm_bindgen(js_name = "backupInfo")]
+     pub fn backup_info(&self) -> Result<bool, JsValue> {
+@@ -1217,7 +1393,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
  /// Works before the witness transaction is broadcast. Takes the raw consignment
  /// bytes (strict-encoded, not base64), the witness transaction ID, and the Bitcoin network.
  ///
@@ -191,7 +214,7 @@ index 51b6efd..156f6e0 100644
  #[wasm_bindgen(js_name = "validateConsignmentOffchain")]
  pub fn validate_consignment_offchain(
      consignment_bytes: &[u8],
-@@ -1235,3 +1396,43 @@ pub fn validate_consignment_offchain(
+@@ -1235,3 +1412,43 @@ pub fn validate_consignment_offchain(
      .map_err(|e| JsValue::from_str(&e.to_string()))?;
      to_js(&result)
  }
@@ -213,7 +236,7 @@ index 51b6efd..156f6e0 100644
 +/// MASKED: the features of this engine build.
 +#[wasm_bindgen(js_name = "engineFeatures")]
 +pub fn engine_features() -> Vec<String> {
-+    vec!["swap".into(), "presign".into(), "proxy-v1".into(), "legacy-migration".into(), "legacy-consignments".into()]
++    vec!["swap".into(), "presign".into(), "proxy-v1".into(), "legacy-migration".into(), "legacy-consignments".into(), "legacy-backup".into()]
 +}
 +
 +#[wasm_bindgen(js_name = "inspectSwapConsignment")]
@@ -235,6 +258,152 @@ index 51b6efd..156f6e0 100644
 +    .map_err(|e| JsValue::from_str(&e.to_string()))?;
 +    to_js(&result)
 +}
+diff --git a/src/wallet/backup.rs b/src/wallet/backup.rs
+index 2300f6a..c681a3a 100644
+--- a/src/wallet/backup.rs
++++ b/src/wallet/backup.rs
+@@ -160,6 +160,8 @@ impl super::Wallet {
+     /// The wallet must be created first via `Wallet::new()` with the same mnemonic/xpubs.
+     /// The restored state persists only if this wallet may save: it was built with `Wallet::restore()`, or its data directory holds no snapshot.
+     /// A restore that fails changes nothing. When only the save fails, the restored state stays in memory and the call returns a persistence error.
++    /// MASKED: a backup made by the previous engine (beta.3) is converted as it is restored; one whose RGB data
++    /// names a witness transaction only by its txid needs `restore_backup_with_indexer`.
+     pub fn restore_backup(&mut self, backup_bytes: &[u8], password: &str) -> Result<(), Error> {
+         let (pub_data, ciphertext) = decode_backup(backup_bytes)?;
+         let payload_json = decrypt_payload(ciphertext, password, &pub_data)?;
+@@ -172,8 +174,77 @@ impl super::Wallet {
+         Ok(())
+     }
+ 
++    /// MASKED: `restore_backup` that also fetches, from the Esplora server at `indexer_url`, the witness
++    /// transactions a backup of the previous engine names only by txid.
++    #[cfg(feature = "esplora")]
++    pub async fn restore_backup_with_indexer(
++        &mut self,
++        backup_bytes: &[u8],
++        password: &str,
++        indexer_url: &str,
++    ) -> Result<(), Error> {
++        let (pub_data, ciphertext) = decode_backup(backup_bytes)?;
++        let payload_json = decrypt_payload(ciphertext, password, &pub_data)?;
++        let value: serde_json::Value =
++            serde_json::from_slice(&payload_json).map_err(|_| Error::InvalidBackup)?;
++        let txids = super::legacy_migration::legacy_unresolved_witnesses(&value)
++            .map_err(|_| Error::InvalidBackup)?;
++        let txs = if txids.is_empty() {
++            std::collections::HashMap::new()
++        } else {
++            super::legacy_migration::fetch_txs(indexer_url, &txids)
++                .await
++                .map_err(|details| Error::Internal { details })?
++        };
++        self.restore_payload_with(&payload_json, &txs)?;
++        self.queue_save()?;
++        super::idb_store::request_persistent_storage();
++        Ok(())
++    }
++
+     /// Restore the wallet and the RGB stock from a backup payload. Both restore paths use it.
+     fn restore_payload(&mut self, payload_json: &[u8]) -> Result<(), Error> {
++        self.restore_payload_with(payload_json, &std::collections::HashMap::new())
++    }
++
++    /// MASKED: restore a backup, of this version or of the previous engine (beta.3), whose old witness
++    /// transactions named only by txid are in `txs`.
++    fn restore_payload_with(
++        &mut self,
++        payload_json: &[u8],
++        #[allow(unused_variables)] txs: &std::collections::HashMap<
++            rgbstd::rgbcore::bitcoin::Txid,
++            rgbstd::rgbcore::bitcoin::Transaction,
++        >,
++    ) -> Result<(), Error> {
++        let value: serde_json::Value =
++            serde_json::from_slice(payload_json).map_err(|_| Error::InvalidBackup)?;
++        if value.get("stock_stash_b64").is_some() && value.get("rgb_store").is_none() {
++            #[cfg(feature = "esplora")]
++            {
++                let missing: Vec<_> = super::legacy_migration::legacy_unresolved_witnesses(&value)
++                    .map_err(|_| Error::InvalidBackup)?
++                    .into_iter()
++                    .filter(|t| !txs.contains_key(t))
++                    .collect();
++                if !missing.is_empty() {
++                    return Err(Error::Internal {
++                        details: s!("this RGB backup was made before the engine upgrade and needs the block server to restore: use restoreBackupOnline"),
++                    });
++                }
++                let schemas = self.wallet_data.supported_schemas.clone();
++                let snapshot =
++                    super::legacy_migration::convert_legacy_snapshot(&value, &schemas, txs, 0)
++                        .map_err(|details| Error::Internal {
++                            details: format!("RGB backup made before the engine upgrade: {details}"),
++                        })?;
++                // its BTC side may not read in this version: then the current one is kept and the next
++                // full scan rebuilds it
++                return self.restore_from_snapshot(snapshot);
++            }
++            #[cfg(not(feature = "esplora"))]
++            return Err(Error::InvalidBackup);
++        }
+         let payload: WalletBackupPayload =
+             serde_json::from_slice(payload_json).map_err(|_| Error::InvalidBackup)?;
+         // Without a BDK changeset the restore skips the descriptor check.
+@@ -860,6 +931,54 @@ mod tests {
+         );
+     }
+ 
++    /// MASKED: a backup the previous engine (beta.3) made restores into this version, converted.
++    #[test]
++    #[cfg(not(target_arch = "wasm32"))]
++    fn legacy_backup_restores() {
++        use crate::utils::MemStock;
++        use crate::wallet::offline::address_reuse_tests::make_test_wallet_with_keys;
++        use rgbstd::persistence::Stock;
++        use std::str::FromStr;
++
++        let legacy = include_str!("legacy_snapshot_b3.json");
++        let cid = rgbstd::ContractId::from_str(include_str!("legacy_snapshot_b3.json.contract").trim()).unwrap();
++        let mut wallet = make_test_wallet_with_keys(crate::keys::generate_keys(crate::BitcoinNetwork::Regtest), false);
++        wallet.wallet_data.supported_schemas = vec![crate::AssetSchema::Nia, crate::AssetSchema::Ifa];
++        *wallet.rgb_stock.borrow_mut() = Some(MemStock::default());
++
++        let (ciphertext, pub_data) = encrypt_payload(legacy.as_bytes(), "pw").unwrap();
++        let backup = encode_backup(&ciphertext, &pub_data).unwrap();
++        // a wrong password is still refused
++        assert!(wallet.restore_backup(&backup, "nope").is_err());
++        let _ = wallet.restore_backup(&backup, "pw").map_err(|e| {
++            // only the save may fail natively (no IndexedDB); the restore itself must not
++            assert!(matches!(e, Error::Persistence { .. }), "restore failed: {e}");
++        });
++
++        let stock = wallet.rgb_stock.borrow();
++        let stock: &Stock<_> = stock.as_ref().unwrap();
++        assert!(stock.contracts().any(|c| c.unwrap().id == cid), "the token came over");
++        let db = serde_json::to_value(&*wallet.database).unwrap();
++        assert_eq!(db["assets"][0]["ticker"], "MASKED");
++        assert_eq!(db["batch_transfers"][1]["status"], "Failed");
++        assert_eq!(wallet.received_consignments.get("rid"), Some(&vec![1, 2, 3]));
++    }
++
++    /// MASKED: a broken old backup changes nothing.
++    #[test]
++    #[cfg(not(target_arch = "wasm32"))]
++    fn broken_legacy_backup_keeps_wallet() {
++        let keys = crate::keys::generate_keys(crate::BitcoinNetwork::Regtest);
++        let mut wallet = wallet_with_transfer(keys);
++        let before = wallet.serialize_backup_payload().unwrap();
++        let mut legacy: serde_json::Value = serde_json::from_str(include_str!("legacy_snapshot_b3.json")).unwrap();
++        legacy["stock_stash_b64"] = serde_json::json!("AAAA");
++        let (ciphertext, pub_data) = encrypt_payload(&serde_json::to_vec(&legacy).unwrap(), "pw").unwrap();
++        let backup = encode_backup(&ciphertext, &pub_data).unwrap();
++        assert!(wallet.restore_backup(&backup, "pw").is_err());
++        assert_eq!(wallet.serialize_backup_payload().unwrap(), before);
++    }
++
+     #[test]
+     #[cfg(not(target_arch = "wasm32"))]
+     fn failed_restore_with_bad_rgb_store_keeps_wallet() {
 diff --git a/src/wallet/idb_store.rs b/src/wallet/idb_store.rs
 index 03ebcc5..171059a 100644
 --- a/src/wallet/idb_store.rs

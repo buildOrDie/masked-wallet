@@ -127,3 +127,29 @@ test('the new engine without its wallet upgrade never opens (it would start an e
   await assert.rejects(open(f), /without its wallet upgrade/);
   assert.equal(f.calls.some((c) => c[0] === 'create'), false);
 });
+
+test('an RGB backup made before the upgrade: restored offline, or with a block server when it needs one', async () => {
+  const f = fakeV1();
+  const w = await open(f);
+  const seen = [];
+  w.save = async () => { seen.push('save'); };
+  // a current backup, or an old one whose transactions it holds
+  w.wallet.restoreBackup = (b, pw) => { seen.push(['restore', pw]); };
+  w.wallet.restoreBackupOnline = async () => { seen.push('online'); };
+  await w.restoreFromBackupBytes(new Uint8Array([1]), 'pw');
+  assert.deepEqual(seen, [['restore', 'pw'], 'save']);
+  // an old one naming a transaction only by its id: the block servers, in turn
+  seen.length = 0;
+  w.wallet.restoreBackup = () => { throw new Error('Internal error: this RGB backup was made before the engine upgrade and needs the block server to restore: use restoreBackupOnline'); };
+  let n = 0;
+  w.wallet.restoreBackupOnline = async (b, pw, url) => { seen.push(['online', url]); if (n++ === 0) throw new Error('block server: down'); };
+  w.params = { ...w.params, indexerUrls: ['https://mine.example/api'] };
+  w.indexer = null;
+  await w.restoreFromBackupBytes(new Uint8Array([1]), 'pw');
+  assert.deepEqual(seen, [['online', 'https://mine.example/api'], ['online', 'https://mempool.space/signet/api'], 'save']);
+  // a wrong password is not retried
+  seen.length = 0;
+  w.wallet.restoreBackup = () => { throw new Error('Invalid backup'); };
+  await assert.rejects(w.restoreFromBackupBytes(new Uint8Array([1]), 'x'), /Invalid backup/);
+  assert.deepEqual(seen, []);
+});
