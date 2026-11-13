@@ -425,7 +425,7 @@ export class RgbSettings {
     list = list.filter((e) => e.stage !== 'cancelled' || Date.now() - (e.at || 0) < 86400_000).slice(0, 20);
     if (!list.length) return '';
     const label = { outdated: 'signed by an older MASKED: cancel it on the market and list again', moving: 'moving the tokens to their own output, live after it confirms', ready: 'live: anyone can buy it', cancelling: 'cancelling: waiting for the transaction to confirm', cancelled: 'cancelled', sold: 'sold' };
-    const rows = list.map((e) => `<li><span>${esc(Number(e.amount).toLocaleString('en-US'))} <span class="mono">${esc(short(e.assetId, 6))}</span> for ${esc(Number(e.priceSats).toLocaleString('en-US'))} sats<small class="muted">${esc(label[e.stage] || e.stage)}</small></span></li>`).join('');
+    const rows = list.map((e) => `<li><span>${esc(Number(e.amount).toLocaleString('en-US'))} <span class="mono">${esc(short(e.assetId, 6))}</span> for ${esc(Number(e.priceSats).toLocaleString('en-US'))} sats<small class="muted">${esc(label[e.stage] || e.stage)}</small>${e.waiting ? `<small class="${/couldn't/.test(e.waiting) ? 'warn' : 'muted'}">${esc(e.waiting)}</small>` : ''}</span></li>`).join('');
     return `<div class="cloud-box"><div class="cloud-h"><b>Instant listings</b><span class="muted small">${list.filter((e) => e.stage === 'ready').length} live</span></div>
       <p class="muted small">Signed once, bought any time, even with MASKED closed. Cancel one on the market: that moves its tokens so the signature can't be used.</p>
       <ul class="auto-list">${rows}</ul></div>`;

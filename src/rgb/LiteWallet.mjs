@@ -785,11 +785,21 @@ export class LiteWallet {
       if (e?.role !== 'seller') continue;
       try {
         if (e.stage === 'moving') {
-          const v = await this.instantSign(id, e, store);
-          if (v.stage === 'ready') changes.push(v);
-          // not confirmed yet: if no block server has the move (dropped, or never sent), send it again (every 2 min)
-          else if (e.moveHex && e.moveTxid && Date.now() - (e.rebroadcastAt || 0) > 120000) {
-            store.set(id, { ...e, rebroadcastAt: Date.now() });
+          let v;
+          try { v = await this.instantSign(id, e, store); } catch (err) {
+            // the engine refused to sign: say why where the listing is shown, instead of waiting in silence
+            const why = `MASKED couldn't sign this listing: ${String(err?.message || err).slice(0, 200)}`;
+            if (why !== e.waiting) store.set(id, { ...e, waiting: why, waitingAt: Date.now() });
+            continue;
+          }
+          if (v.stage === 'ready') { changes.push(v); continue; }
+          // still waiting: say on what (every 2 min), and if no block server has the move (dropped, or never sent), send it again
+          if (Date.now() - (e.waitingAt || 0) > 120000) {
+            const why = await this.moveStatus(e);
+            store.set(id, { ...e, waiting: why, waitingAt: Date.now() });
+          }
+          if (e.moveHex && e.moveTxid && Date.now() - (e.rebroadcastAt || 0) > 120000) {
+            store.set(id, { ...store.get(id), rebroadcastAt: Date.now() });
             await this.ensureBroadcast(e.moveHex, e.moveTxid).catch(() => {});
           }
         } else if (e.stage === 'ready' && e.psbt && !e.outdated && !this.validListing(e.psbt)) {

@@ -319,3 +319,18 @@ test('instantAmounts: the amounts alone on a settled output of this asset, large
   const us = [unspent('a', 0, [tok(508)]), unspent('b', 0, [tok(191)]), unspent('c', 0, [tok(508)]), unspent('d', 0, [{ ...tok(40), settled: false }]), unspent('e', 0, [tok(70), { ...tok(5), assetId: 'rgb:other' }]), unspent('f', 1, [tok(900)])];
   assert.deepEqual(instantAmounts(us, ASSET, new Set([`${T('f')}:1`])), ['508', '191']);
 });
+
+test('seller: a listing the engine refuses to sign after the move says why, instead of waiting in silence', async () => {
+  const chain = fakeChain();
+  const from = `${T('b')}:0`, fee = `${T('c')}:2`;
+  chain.outs[from] = { sats: 1000, script: '5120rgb', tx: 'aa' };
+  chain.outs[fee] = { sats: 5000, script: '5120btc', tx: 'bb' };
+  const rgb = [unspent('b', 0, [tok(800)])];
+  const s = wallet({ name: 'seller', lib: fakeLib(), chain, rgb, coins: [{ outpoint: fee, txout: { value: 5000 }, is_spent: false }] });
+  await s.w.instantList({ offerId: 'sw0123456789ab', assetId: ASSET, amount: '500', priceSats: '20000', feeRate: 2 }, s.store);
+  rgb.splice(0, 1, unspent('5', 1, [tok(500)]), unspent('9', 0, [tok(300)]));
+  s.w.wallet.presignSale = async () => { throw new Error('that output can\'t be listed: it isn\'t a settled RGB output of this wallet'); };
+  assert.deepEqual(await s.w.instantProgress(s.store, s.store.all()), []);
+  assert.match(s.store.get('sw0123456789ab').waiting, /couldn't sign this listing: that output can't be listed/);
+  assert.equal(s.store.get('sw0123456789ab').stage, 'moving');
+});
