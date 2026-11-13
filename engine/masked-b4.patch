@@ -1050,7 +1050,7 @@ index a3a9f46..98d3cd1 100644
      }
  
 diff --git a/src/wallet/online.rs b/src/wallet/online.rs
-index ca96b4a..6a35a80 100644
+index ca96b4a..efa6ec8 100644
 --- a/src/wallet/online.rs
 +++ b/src/wallet/online.rs
 @@ -791,8 +791,9 @@ pub(crate) struct ConsignmentPayment<'c> {
@@ -1177,7 +1177,7 @@ index ca96b4a..6a35a80 100644
              let recipient_id = &recipient.recipient_id;
              let recipient_vk = verifying_key_from_bytes(&recipient.public_key)?;
              let derived = derive_shared(sender_sk, &recipient_vk)?;
-@@ -12074,3 +12115,497 @@ mod bfa_tests {
+@@ -12074,3 +12115,569 @@ mod bfa_tests {
          assert!(options(&format!(r#","evm_chains":{{"mainnet":{chain}}}"#)).is_err());
      }
  }
@@ -1647,15 +1647,31 @@ index ca96b4a..6a35a80 100644
 +            return Err(Error::Internal { details: s!("the listing transaction changed while colouring") });
 +        }
 +
-+        psbt.inputs[PRESIGNED_SELLER_INDEX].sighash_type = Some(PsbtSighashType::from(TapSighashType::SinglePlusAnyoneCanPay));
-+        let sign_options = SignOptions { allow_all_sighashes: true, ..Default::default() };
-+        self._sign_psbt(&mut psbt, Some(sign_options))?;
-+        if psbt.inputs[PRESIGNED_SELLER_INDEX].final_script_witness.is_none() {
-+            return Err(Error::Internal { details: s!("the wallet could not sign its output") });
-+        }
++        self.sign_presigned_template(&mut psbt, prev.txout.clone())?;
 +        self.reserved_outpoints.insert(op.clone());
 +        info!(self.logger, "Pre-signed listing ready");
 +        Ok(PresignedSale { psbt: psbt.to_string(), consignment, template_txid, seller_outpoint: op.to_string(), seller_sats })
++    }
++
++    /// Sign the seller's input of a listing template SIGHASH_SINGLE|ANYONECANPAY. Input 0 is only a placeholder
++    /// for the buyer's coin: it is left out of the signing (its details cleared), and the seller's input is signed
++    /// from its witness UTXO, which a taproot signature commits to (BDK otherwise refuses unless every input carries
++    /// a P2TR UTXO).
++    pub(crate) fn sign_presigned_template(&self, psbt: &mut Psbt, seller_utxo: TxOut) -> Result<(), Error> {
++        use bdk_wallet::bitcoin::{psbt::PsbtSighashType, sighash::TapSighashType};
++        if !seller_utxo.script_pubkey.is_p2tr() {
++            return Err(Error::Internal { details: s!("that output isn't a taproot output: move the tokens to a new output of this wallet first") });
++        }
++        psbt.inputs[0] = Default::default();
++        psbt.inputs[PRESIGNED_SELLER_INDEX].non_witness_utxo = None;
++        psbt.inputs[PRESIGNED_SELLER_INDEX].witness_utxo = Some(seller_utxo);
++        psbt.inputs[PRESIGNED_SELLER_INDEX].sighash_type = Some(PsbtSighashType::from(TapSighashType::SinglePlusAnyoneCanPay));
++        let sign_options = SignOptions { allow_all_sighashes: true, trust_witness_utxo: true, ..Default::default() };
++        self._sign_psbt(psbt, Some(sign_options))?;
++        if psbt.inputs[PRESIGNED_SELLER_INDEX].final_script_witness.is_none() {
++            return Err(Error::Internal { details: s!("the wallet could not sign its output") });
++        }
++        Ok(())
 +    }
 +
 +    /// Drop a colouring that will never be broadcast (its delivery failed): forget its artifacts and archive its
@@ -1673,6 +1689,62 @@ index ca96b4a..6a35a80 100644
 +    /// The list lives in memory; MASKED sets it every time it opens the wallet.
 +    pub fn set_presigned_receives(&mut self, recipient_ids: Vec<String>) {
 +        self.presigned_receives = recipient_ids.into_iter().collect();
++    }
++}
++
++/// MASKED: signing an Instant listing template (input 0 a placeholder for the buyer's coin).
++#[cfg(test)]
++mod presigned_sign_tests {
++    use super::*;
++    use bdk_wallet::bitcoin::{Amount, Sequence, TxIn, Witness, absolute::LockTime, transaction::Version};
++    use bdk_wallet::bitcoin::{psbt::PsbtSighashType, sighash::TapSighashType};
++    use crate::wallet::offline::address_reuse_tests::make_test_wallet_with_keys;
++
++    fn template(wallet: &mut Wallet) -> Psbt {
++        let script = wallet._get_new_address(KeychainKind::External).unwrap().script_pubkey();
++        let payout = wallet._get_new_address(KeychainKind::Internal).unwrap().script_pubkey();
++        let op = |b: &str, vout| bdk_wallet::bitcoin::OutPoint { txid: bdk_wallet::bitcoin::Txid::from_str(&b.repeat(32)).unwrap(), vout };
++        let tx = BdkTransaction {
++            version: Version::TWO,
++            lock_time: LockTime::ZERO,
++            input: vec![
++                TxIn { previous_output: op("01", 0), script_sig: ScriptBuf::new(), sequence: Sequence::ENABLE_RBF_NO_LOCKTIME, witness: Witness::new() },
++                TxIn { previous_output: op("ab", 1), script_sig: ScriptBuf::new(), sequence: Sequence::ENABLE_RBF_NO_LOCKTIME, witness: Witness::new() },
++            ],
++            output: vec![
++                TxOut { value: Amount::ZERO, script_pubkey: ScriptBuf::new_op_return([]) },
++                TxOut { value: Amount::from_sat(21_000), script_pubkey: payout.clone() },
++                TxOut { value: Amount::from_sat(PRESIGNED_SEAL_SATS), script_pubkey: payout },
++            ],
++        };
++        let mut psbt = Psbt::from_unsigned_tx(tx).unwrap();
++        psbt.inputs[PRESIGNED_SELLER_INDEX].witness_utxo = Some(TxOut { value: Amount::from_sat(1_000), script_pubkey: script });
++        psbt
++    }
++
++    #[test]
++    fn listing_template_signs_without_the_buyers_coin() {
++        let mut wallet = make_test_wallet_with_keys(crate::keys::generate_keys(BitcoinNetwork::Regtest), false);
++        let mut psbt = template(&mut wallet);
++
++        // what MASKED 2.29.0 hit: BDK refuses to sign from a witness UTXO when an input (the placeholder) has none
++        let mut old = psbt.clone();
++        old.inputs[PRESIGNED_SELLER_INDEX].sighash_type = Some(PsbtSighashType::from(TapSighashType::SinglePlusAnyoneCanPay));
++        let err = wallet._sign_psbt(&mut old, Some(SignOptions { allow_all_sighashes: true, ..Default::default() })).unwrap_err();
++        assert!(err.to_string().contains("Missing non-witness UTXO"), "{err}");
++
++        // a placeholder that happens to name one of the wallet's scripts is not signed either
++        let seller = psbt.inputs[PRESIGNED_SELLER_INDEX].witness_utxo.clone().unwrap();
++        psbt.inputs[0].witness_utxo = Some(seller.clone());
++        wallet.sign_presigned_template(&mut psbt, seller).unwrap();
++        assert!(psbt.inputs[PRESIGNED_SELLER_INDEX].final_script_witness.is_some(), "the seller's input is signed");
++        assert!(psbt.inputs[0].final_script_witness.is_none() && psbt.inputs[0].witness_utxo.is_none(), "the placeholder is left alone");
++
++        // and the buyer's side reads it: the signature is SIGHASH_SINGLE|ANYONECANPAY over the seller's input
++        let w = psbt.inputs[PRESIGNED_SELLER_INDEX].final_script_witness.clone().unwrap();
++        let sig = w.iter().next().unwrap();
++        assert_eq!(sig.len(), 65);
++        assert_eq!(sig[64], TapSighashType::SinglePlusAnyoneCanPay as u8);
 +    }
 +}
 diff --git a/src/wallet/rust_only.rs b/src/wallet/rust_only.rs
