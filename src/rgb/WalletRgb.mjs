@@ -773,7 +773,8 @@ export class WalletRgb {
             await this.checkProxies();
             throw new Error('Transfer server permission changed. Review the server and try again.');
           }
-          const r = await this.service.send({ invoice: p.invoice, assetId: p.assetId, amount: String(p.amount), fee: this.fee(), endpoint: p.check.endpoint, nft: !!p.nft });
+          // the token change needs a free RGB output of this wallet: none (or all full), make some first
+          const r = await this.withOutputs(() => this.service.send({ invoice: p.invoice, assetId: p.assetId, amount: String(p.amount), fee: this.fee(), endpoint: p.check.endpoint, nft: !!p.nft }));
           this.sent = { txid: r?.txid || '', shown: p.shown, ticker: p.ticker, nft: !!p.nft };
           this.pending = null;
           await this.refresh();

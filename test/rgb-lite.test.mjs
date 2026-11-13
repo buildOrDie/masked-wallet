@@ -81,6 +81,12 @@ test('prepare outputs, issue, receive: signs with its own keys and saves to Inde
   assert.equal(await w.createUtxos({ upTo: true, num: 4, size: 1000, feeRate: 2 }), 4);
   assert.deepEqual(calls.find((c) => c[0] === 'createUtxosBegin'), ['createUtxosBegin', true, 4, 1000, 2n, false]);
   assert.deepEqual(calls.find((c) => c[0] === 'createUtxosEnd'), ['createUtxosEnd', 'signed-psbt-u', false]);
+  // "up to 4" makes none when outputs with room already exist; a send may still need one for its change: make 2
+  const real = w.w.createUtxosBegin.bind(w.w);
+  w.w.createUtxosBegin = async (o, upTo, ...rest) => { if (upTo) throw new Error('AllocationsAlreadyAvailable'); return real(o, upTo, ...rest); };
+  await w.createUtxos({ upTo: true, num: 4, size: 1000, feeRate: 2 });
+  assert.deepEqual(calls.filter((c) => c[0] === 'createUtxosBegin').pop(), ['createUtxosBegin', false, 2, 1000, 2n, false]);
+  w.w.createUtxosBegin = real;
   const a = await w.issueAssetNia({ ticker: 'MASKED', name: 'masket', precision: 2, amounts: [240000000] });
   assert.equal(a.assetId, 'rgb:NEW');
   assert.deepEqual(calls.find((c) => c[0] === 'issue'), ['issue', 'MASKED', 'masket', 2, [240000000]]);

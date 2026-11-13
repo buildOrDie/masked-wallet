@@ -192,7 +192,14 @@ export class LiteWallet {
   /** Make outputs that can hold RGB assets (one Bitcoin transaction). */
   async createUtxos({ upTo = true, num: n = 4, size = 1000, feeRate }) {
     const online = this.requireOnline();
-    const psbt = await this.wallet.createUtxosBegin(online, upTo, n, size, BigInt(Math.round(feeRate)), false);
+    const begin = (u, k) => this.wallet.createUtxosBegin(online, u, k, size, BigInt(Math.round(feeRate)), false);
+    let psbt;
+    // upTo counts outputs that still have room for more tokens and makes only the difference, so it can make none
+    // (AllocationsAlreadyAvailable) while a send still finds no output to take its change: then make 2 anyway
+    try { psbt = await begin(upTo, n); } catch (e) {
+      if (!upTo || !/AllocationsAlreadyAvailable|allocations already available/i.test(String(e?.message || e))) throw e;
+      psbt = await begin(false, 2);
+    }
     const count = await this.wallet.createUtxosEnd(online, this.sign(psbt), false);
     await this.save();
     return count;
