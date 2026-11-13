@@ -153,6 +153,24 @@ export function freeSellerCoinFor(unspents, assetId, amount, skip = new Set()) {
   return sellerCoinFor(free, assetId, amount);
 }
 
+/**
+ * Outputs to pay `amount` from when sending (not swapping): the one smallest output that covers it, else the fewest
+ * outputs, largest first, whose settled tokens add up to it (the engine spends them all and keeps the change).
+ * Returns { coins, held } (held: the settled total, for the error when it's short) and coins null when short.
+ */
+export function sendCoinsFor(unspents, assetId, amount, skip = new Set()) {
+  const want = BigInt(amount);
+  const free = (unspents || []).filter((u) => { const o = u.utxo?.outpoint; return u.utxo?.colorable && u.utxo.exists !== false && !(o && skip.has(`${String(o.txid).toLowerCase()}:${o.vout}`)); })
+    .map((u) => ({ u, held: heldOn(u, assetId) })).filter((x) => x.held > 0n);
+  const held = free.reduce((t, x) => t + x.held, 0n);
+  const coin = (x) => { const o = x.u.utxo.outpoint; return { outpoint: `${String(o.txid).toLowerCase()}:${o.vout}`, sats: String(x.u.utxo.btcAmount), held: x.held }; };
+  const one = free.filter((x) => x.held >= want).sort((a, b) => (a.held < b.held ? -1 : a.held > b.held ? 1 : 0))[0];
+  if (one) return { coins: [coin(one)], held };
+  const coins = []; let got = 0n;
+  for (const x of free.sort((a, b) => (a.held > b.held ? -1 : a.held < b.held ? 1 : 0))) { coins.push(coin(x)); got += x.held; if (got >= want) return { coins, held }; }
+  return { coins: null, held };
+}
+
 /** Instant listing layout (engine: presign_sale): inputs 0 the buyer's, 1 the seller's; outputs 0 commitment, 1 payout, 2 the buyer's seal. */
 export const INSTANT_SEAL_OUTPUT = 2;
 /**

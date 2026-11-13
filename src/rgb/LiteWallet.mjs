@@ -6,7 +6,7 @@
 import * as btc from '@scure/btc-signer';
 import { hex, base64 } from '@scure/base';
 import { isInvoiceV1, readInvoiceV1, invoiceIdOf, pickEndpoint, newSenderKey, sharedKeys, deliverConsignment, endpointUrl, rpc, PROXY_V1 } from './proxyV1.mjs';
-import { SEAL_SATS, SEAL_OUTPUT, SWAP_SIZE_VB, b64, buyerOutputs, outpointOf, completionBlocker, readOffer, buyerCoinFor, offerable, payoutFor, changedTerms, unb64, exactCoinFor, freeSellerCoinFor, instantAmounts, INSTANT_SEAL_OUTPUT, INSTANT_SEAL_SATS, payCoinsFor, txVbytes, OPRET_SCRIPT, P2TR_SCRIPT } from './swap.mjs';
+import { SEAL_SATS, SEAL_OUTPUT, SWAP_SIZE_VB, b64, buyerOutputs, outpointOf, completionBlocker, readOffer, buyerCoinFor, offerable, payoutFor, changedTerms, unb64, exactCoinFor, freeSellerCoinFor, sendCoinsFor, instantAmounts, INSTANT_SEAL_OUTPUT, INSTANT_SEAL_SATS, payCoinsFor, txVbytes, OPRET_SCRIPT, P2TR_SCRIPT } from './swap.mjs';
 
 /** rgb-lib names for our network ids. Utexo's custom Signet uses Signet rules too. */
 const NETWORKS = { mainnet: 'Mainnet', signet: 'Signet', utexo: 'Signet', testnet: 'Testnet', testnet4: 'Testnet4', regtest: 'Regtest' };
@@ -316,22 +316,30 @@ export class LiteWallet {
     // the transaction: an RGB coin holding the tokens, bitcoin for the fee; outputs: commitment, the invoice's output,
     // change. The engine puts any token change back on another output of this wallet.
     await this.wallet.sync(online);
-    const from = freeSellerCoinFor(plain(this.wallet.listUnspents(false)) || [], assetId, amount, this.reserved);
-    if (!from) throw new Error('No settled RGB output of this wallet holds that much of the token in one place. Wait for incoming transfers to settle.');
+    // the tokens: one output if one holds enough, else several (the engine spends them all and keeps the change)
+    const pick = sendCoinsFor(plain(this.wallet.listUnspents(false)) || [], assetId, amount, this.reserved);
+    if (!pick.coins) throw new Error(pick.held > 0n
+      ? `Only ${pick.held.toLocaleString('en-US')} of this token is settled and free in this wallet (base units). Wait for incoming transfers to settle, or send less.`
+      : 'None of this token is settled and free in this wallet yet. Wait for incoming transfers to settle.');
+    const froms = pick.coins;
     const rate = Math.max(1, Number(feeRate) || 1);
     const sealScript = this.lib.WasmWallet.witnessSealScript(invoice);
     const seal = BigInt(LiteWallet.WITNESS_SATS);
     const own = await this.ownScript();
-    const feeFor = (n) => BigInt(Math.ceil(rate * txVbytes([P2TR_SCRIPT, ...Array(n).fill(P2TR_SCRIPT)], [OPRET_SCRIPT, sealScript, own])));
+    const feeFor = (n) => BigInt(Math.ceil(rate * txVbytes([...Array(froms.length).fill(P2TR_SCRIPT), ...Array(n).fill(P2TR_SCRIPT)], [OPRET_SCRIPT, sealScript, own])));
+    const tokenSats = froms.reduce((t, c) => t + BigInt(c.sats), 0n);
+    // the token outputs' own sats count towards the seal and the fee; bitcoin coins top up the rest
+    const short = feeFor(1) + seal + 546n - tokenSats;
     const { all, confirmed } = await this.btcCoins();
-    const pay = payCoinsFor(confirmed, all, feeFor(1) + seal + 546n, feeFor(2) - feeFor(1));
-    if (!pay) throw new Error(`Your RGB wallet needs about ${(feeFor(1) + seal + 546n).toLocaleString('en-US')} sats in bitcoin for this. Tap Add BTC for RGB on Home.`);
-    const [si, ...fis] = await Promise.all([this.outpointInfo(from.outpoint), ...pay.coins.map((c) => this.outpointInfo(c.outpoint))]);
-    const fee = BigInt(Math.ceil(rate * txVbytes([si.script, ...fis.map((f) => f.script)], [OPRET_SCRIPT, sealScript, own])));
-    const change = BigInt(si.sats) + fis.reduce((t, f) => t + BigInt(f.sats), 0n) - seal - fee;
+    const pay = short > 0n ? payCoinsFor(confirmed, all, short, feeFor(2) - feeFor(1)) : { coins: [] };
+    if (!pay) throw new Error(`Your RGB wallet needs about ${short.toLocaleString('en-US')} sats in bitcoin for this. Tap Add BTC for RGB on Home.`);
+    const infos = await Promise.all([...froms, ...pay.coins].map((c) => this.outpointInfo(c.outpoint)));
+    const sis = infos.slice(0, froms.length), fis = infos.slice(froms.length);
+    const fee = BigInt(Math.ceil(rate * txVbytes(infos.map((f) => f.script), [OPRET_SCRIPT, sealScript, own])));
+    const change = infos.reduce((t, f) => t + BigInt(f.sats), 0n) - seal - fee;
     if (change < 546n) throw new Error('Not enough bitcoin for the network fee.');
     const unsigned = this.lib.WasmWallet.newSwapPsbt(
-      [{ outpoint: from.outpoint, sats: si.sats, script: si.script, tx: si.tx }, ...pay.coins.map((c, k) => ({ outpoint: c.outpoint, sats: fis[k].sats, script: fis[k].script, tx: fis[k].tx }))],
+      [...froms.map((c, k) => ({ outpoint: c.outpoint, sats: sis[k].sats, script: sis[k].script, tx: sis[k].tx })), ...pay.coins.map((c, k) => ({ outpoint: c.outpoint, sats: fis[k].sats, script: fis[k].script, tx: fis[k].tx }))],
       [{ script: sealScript, sats: Number(seal) }, { script: own, sats: Number(change) }],
     );
     // no 0.2 server, and the derived blinding: MASKED delivers the consignment itself

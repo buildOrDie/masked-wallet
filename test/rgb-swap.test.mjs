@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as btc from '@scure/btc-signer';
 import { LiteWallet } from '../src/rgb/LiteWallet.mjs';
-import { SEAL_SATS, buyerOutputs, outpointOf, completionBlocker, readOffer, buyerCoinFor, sellerCoinFor, offerable, payoutFor } from '../src/rgb/swap.mjs';
+import { SEAL_SATS, buyerOutputs, outpointOf, completionBlocker, readOffer, buyerCoinFor, sellerCoinFor, sendCoinsFor, offerable, payoutFor } from '../src/rgb/swap.mjs';
 
 const ASSET = 'rgb:2dkSTbr-jFhznbPmo-TQ3Kdm9-SWcFsJA-bFZa5Ef-Q8Fy8oo';
 const T = (c) => c.repeat(64);
@@ -26,6 +26,12 @@ test('helpers: picking outputs, what can be sold, payouts, offers', () => {
   assert.deepEqual(sellerCoinFor(rgb, ASSET, 500), { outpoint: `${T('e')}:0`, sats: '1000' }, 'the least that still covers it; unsettled does not count');
   assert.equal(sellerCoinFor(rgb, ASSET, 900), null, 'one swap uses one output');
   assert.deepEqual(offerable(rgb, ASSET), { total: '1400', max: '800' });
+  // sending (not swapping) may spend several outputs
+  assert.deepEqual(sendCoinsFor(rgb, ASSET, 500).coins.map((c) => c.outpoint), [`${T('e')}:0`], 'one output when one covers it');
+  assert.deepEqual(sendCoinsFor(rgb, ASSET, 900).coins.map((c) => c.outpoint), [`${T('d')}:2`, `${T('e')}:0`], 'else largest first');
+  const short = sendCoinsFor(rgb, ASSET, 1500);
+  assert.equal(short.coins, null); assert.equal(short.held, 1400n, 'unsettled does not count');
+  assert.deepEqual(sendCoinsFor(rgb, ASSET, 900, new Set([`${T('d')}:2`])).coins, null, 'reserved outputs are left alone');
   assert.equal(payoutFor(20000, 1000), 20000n);
   assert.equal(payoutFor(20000, 1500), 20500n);
   assert.throws(() => payoutFor(20000, 600), /seal needs/);

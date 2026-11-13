@@ -189,6 +189,21 @@ test('wallet: pays a 1.0 invoice as a donation — blinding from the keys, no 0.
   const mine = sharedKeys(recipient.seed, params.sender_pk);
   assert.equal(colored.blinding, mine.blinding);
   assert.deepEqual([...decryptBlob(mine.key, file, params.consignment_hash)], [1, 2, 3, 0xee], 'the consignment with the signed transaction');
+  // the tokens spread over two outputs, neither enough alone: both are spent (the engine keeps the change)
+  let built;
+  lib.WasmWallet.newSwapPsbt = (ins, outs) => { built = ins.map((i) => i.outpoint); return JSON.stringify({ ins: built, outs }); };
+  w.w.listUnspents = () => [
+    { utxo: { colorable: true, outpoint: { txid: T('a'), vout: 0 }, btcAmount: 1000 }, rgbAllocations: [{ assetId: ASSET, settled: true, assignment: { Fungible: 300 } }] },
+    { utxo: { colorable: true, outpoint: { txid: T('b'), vout: 2 }, btcAmount: 1000 }, rgbAllocations: [{ assetId: ASSET, settled: true, assignment: { Fungible: 400 } }] },
+    { utxo: { colorable: true, outpoint: { txid: T('d'), vout: 0 }, btcAmount: 1000 }, rgbAllocations: [{ assetId: ASSET, settled: false, assignment: { Fungible: 900 } }] },
+  ];
+  w.outpointInfo = async (op) => ({ sats: op.startsWith(T('c')) ? 5000 : 1000, script: '5120' + '55'.repeat(32), tx: 'aa' });
+  server.posts.length = 0; order.length = 0;
+  await w.onchainSend({ invoice, assetId: ASSET, amount: 600, feeRate: 1 });
+  assert.deepEqual(built.slice(0, 2), [`${T('b')}:2`, `${T('a')}:0`], 'both token outputs, largest first; never the unsettled one');
+  assert.equal(colored.amount, '600');
+  // more than is settled: says how much is
+  await assert.rejects(w.onchainSend({ invoice, assetId: ASSET, amount: 800, feeRate: 1 }), /Only 700 of this token is settled/);
   // an engine without the blinding argument is refused before anything happens
   w.w.colorSwap = async (a, b, c, d, e, f, g, h, i) => i;
   assert.equal(w.canProxyV1, false);
