@@ -109,6 +109,10 @@ test('SDK string errors become readable messages', async () => {
   const { rgbError } = await import('../src/rgb/WalletRgb.mjs');
   assert.match(rgbError('Invalid indexer: not a valid esplora server'), /Can't reach the Utexo Signet RGB servers/);
   assert.match(rgbError(new TypeError('Failed to fetch')), /Can't reach the Utexo Signet RGB servers/);
+  const node = (m) => `Failed broadcast: Esplora async error: HttpResponse { status: 400, message: "sendrawtransaction RPC error: {\\"code\\":-26,\\"message\\":\\"${m}\\"}" }`;
+  assert.match(rgbError(node('insufficient fee, rejecting replacement abc; new feerate 0.00001 <= old feerate 0.00002')), /already spent by another of your transactions.*rejecting replacement/);
+  assert.match(rgbError(node('min relay fee not met, 100 < 141')), /network fee was too low.*min relay fee not met/);
+  assert.match(rgbError(node('dust')), /refused the transaction: dust$/);
   assert.match(rgbError('InsufficientBitcoins'), /Not enough test BTC/);
   assert.match(rgbError('InsufficientAllocationSlots'), /still setting up/);
   assert.match(rgbError('Insufficient allocations'), /still setting up/, 'the wording rgb-lib-wasm uses');

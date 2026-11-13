@@ -364,7 +364,13 @@ export class LiteWallet {
       throw e;
     }
     // delivered: now broadcast (the spec: never before the upload succeeded)
-    const r = plain(await this.wallet.sendEnd(online, signed, true));
+    let r;
+    try { r = plain(await this.wallet.sendEnd(online, signed, true)); } catch (e) {
+      // refused by the network (e.g. a coin already spent by an unconfirmed transaction): it never happened, so the
+      // tokens are freed; the recipient's server holds a transfer that never confirms, so that invoice is used up
+      try { this.wallet.abandonColoring?.(txid); await this.save(); } catch { /* a reload drops it too */ }
+      throw e;
+    }
     await this.save();
     return { ...r, txid: String(r?.txid || txid), protocol: PROXY_V1 };
   }

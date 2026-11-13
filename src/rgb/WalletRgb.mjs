@@ -24,6 +24,15 @@ export function rgbError(error, profile = profileOf('utexo')) {
   if (/invalid indexer/i.test(full) && (profile.id === 'mainnet' || profile.id === 'public')) return `RGB couldn't reach a block server (mempool.space or blockstream.info). If you use an ad blocker, VPN or firewall, allow these sites, or set your own server in Settings → Blockchain server. Then try again.`;
   if (/invalid indexer|failed to fetch|network ?error|internet|ECONN|proxy/i.test(full)) return `Can't reach the ${profile.label} RGB servers right now. Check your connection and try again. (${text})`;
   if (/no valid transport endpoints|invalid transport endpoint/i.test(full)) return 'Could not reach the transfer server named in this invoice. Allow MASKED to reach it when asked, or ask for an invoice from MASKED or another wallet using proxy.iriswallet.com.';
+  // the Bitcoin node refused the transaction: say why, in full (the reason is at the end of a long message)
+  if (/sendrawtransaction|failed ?broadcast/i.test(full)) {
+    const reason = (full.replace(/\\"/g, '"').match(/"message"\s*:\s*"([^"]+)"/) || [])[1] || '';
+    if (/rejecting replacement|mempool-conflict|missingorspent|missing-inputs|insufficient fee/i.test(reason)) {
+      return `Not sent: a coin it used was already spent by another of your transactions that hasn't confirmed yet. Nothing left your wallet. Wait for one block, tap Refresh, then try again. (${reason})`;
+    }
+    if (/min relay fee|mempool min fee|fee not met/i.test(reason)) return `Not sent: the network fee was too low. Pick a higher fee and try again. (${reason})`;
+    return `Not sent: the Bitcoin network refused the transaction${reason ? `: ${reason}` : ` (${text})`}`;
+  }
   if (/insufficient ?allocation|allocation ?slots|no (colorable|available) (utxo|output)s?/i.test(text)) {
     return `RGB is still setting up. Wait for one block (about 10 minutes), then try again. (${text})`;
   }
@@ -514,7 +523,7 @@ export class WalletRgb {
    * Do something that needs free RGB outputs. If there are none, make them first (one Bitcoin transaction) and
    * try again; if they still need a block, say so plainly.
    */
-  async withOutputs(fn) {
+  async withOutputs(fn, { retry = true } = {}) {
     try { return await fn(); } catch (e) {
       const text = typeof e === 'string' ? e : e?.message || '';
       if (!NEEDS_OUTPUTS.test(text)) throw e;
@@ -522,6 +531,8 @@ export class WalletRgb {
       this.message = 'Setting up RGB…'; this.app.render();
       await this.service.createUtxos(this.fee());
       await this.refresh();
+      // a send doesn't go again straight away: its bitcoin could clash with the new outputs' unconfirmed transaction
+      if (!retry) throw new Error('RGB is set up. Wait for one block (about 10 minutes), then tap again.');
       try { return await fn(); } catch (e2) {
         if (NEEDS_OUTPUTS.test(typeof e2 === 'string' ? e2 : e2?.message || '')) throw new Error('RGB is set up. Wait for one block (about 10 minutes), then tap again.');
         throw e2;
@@ -774,7 +785,7 @@ export class WalletRgb {
             throw new Error('Transfer server permission changed. Review the server and try again.');
           }
           // the token change needs a free RGB output of this wallet: none (or all full), make some first
-          const r = await this.withOutputs(() => this.service.send({ invoice: p.invoice, assetId: p.assetId, amount: String(p.amount), fee: this.fee(), endpoint: p.check.endpoint, nft: !!p.nft }));
+          const r = await this.withOutputs(() => this.service.send({ invoice: p.invoice, assetId: p.assetId, amount: String(p.amount), fee: this.fee(), endpoint: p.check.endpoint, nft: !!p.nft }), { retry: false });
           this.sent = { txid: r?.txid || '', shown: p.shown, ticker: p.ticker, nft: !!p.nft };
           this.pending = null;
           await this.refresh();
