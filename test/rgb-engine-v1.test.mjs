@@ -83,7 +83,8 @@ test('sending on the 0.11.2 engine: the invoice\'s key, encryption and expiry; A
   assert.equal(r.txid, T('7'));
   const [, map, donation, fee, minConf, expires, sender, lockTime, dryRun] = f.calls.find((c) => c[0] === 'sendBegin');
   assert.deepEqual(map[ASSET][0], { recipientId: 'sb:wvout:A8cJ7Ww3', witnessData: { amountSat: '330', blinding: null }, assignment: { Fungible: 20 }, transportEndpoints: ['rpcs://wallet-api-signet.unisat.space/json-rpc'], publicKey: 'ab'.repeat(32), encryption: 'Required', expirationTimestamp: 1900000000 });
-  assert.deepEqual([donation, fee, minConf, expires, sender, lockTime, dryRun], [false, 1n, 1, 1900000000, 'rpcs://scan.maskedwallet.com/rgb-proxy-v1/json-rpc', null, false]);
+  // the send lapses 10 minutes (the engine's margin) and 2 more before the invoice: an invoice's own expiry is refused
+  assert.deepEqual([donation, fee, minConf, expires, sender, lockTime, dryRun], [false, 1n, 1, 1900000000 - 600 - 120, 'rpcs://scan.maskedwallet.com/rgb-proxy-v1/json-rpc', null, false]);
   assert.deepEqual(f.calls.find((c) => c[0] === 'sendEnd'), ['sendEnd', 'signed-psbt-s', false]);
   // an invoice on the old protocol is refused before anything is built, with the reason
   await assert.rejects(w.onchainSend({ invoice: 'rgb:old', assetId: ASSET, amount: 1, feeRate: 1 }), /old transfer server protocol \(0\.2\)/);
@@ -152,4 +153,14 @@ test('an RGB backup made before the upgrade: restored offline, or with a block s
   w.wallet.restoreBackup = () => { throw new Error('Invalid backup'); };
   await assert.rejects(w.restoreFromBackupBytes(new Uint8Array([1]), 'x'), /Invalid backup/);
   assert.deepEqual(seen, []);
+});
+
+test('sending on the 0.11.2 engine: an invoice about to expire is refused before anything is built', async () => {
+  const f = fakeV1();
+  const w = await open(f);
+  const soon = BigInt(Math.floor(Date.now() / 1000) + 900); // 15 minutes: less than the margin and 5 minutes to go out
+  const inv = f.lib.WasmInvoice;
+  f.lib.WasmInvoice = class extends inv { invoiceData() { return { ...super.invoiceData(), expirationTimestamp: soon }; } };
+  await assert.rejects(w.onchainSend({ invoice: 'rgb:new', assetId: ASSET, amount: 20, feeRate: 1 }), /expires too soon/);
+  assert.equal(f.calls.some((c) => c[0] === 'sendBegin'), false);
 });

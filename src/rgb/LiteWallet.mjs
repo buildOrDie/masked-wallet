@@ -242,6 +242,8 @@ export class LiteWallet {
   /** Sats the sender puts in the new output when paying a witness invoice (above dust, so it relays). */
   /** BTC on the receiver's new output for a "No BTC needed" invoice: the Taproot dust limit, the least Bitcoin allows. */
   static WITNESS_SATS = 330;
+  /** The engine's margin between a send's expiry and its invoice's (rgb-lib INVOICE_EXPIRATION_MARGIN_SECS). */
+  static INVOICE_MARGIN_SECS = 600;
 
   /**
    * An invoice. Blind (default): receives onto one of our RGB outputs, blinded, so the sender learns no address;
@@ -343,14 +345,18 @@ export class LiteWallet {
       throw new Error('This invoice uses the old transfer server protocol (0.2). Ask the recipient for a new invoice from an up-to-date wallet (MASKED 2.29 or later, UniSat 1.8 or later).');
     }
     const now = Math.floor(Date.now() / 1000);
-    const expires = Math.max(now + 600, Number(d.expirationTimestamp) || now + 86400);
+    // the send must lapse at least 10 minutes (the engine's margin for clock differences) before the invoice does,
+    // so the recipient is still waiting whenever it goes out; 2 more minutes for this computer's clock
+    const invoiceExp = Number(d.expirationTimestamp) || 0;
+    const expires = invoiceExp ? invoiceExp - LiteWallet.INVOICE_MARGIN_SECS - 120 : now + 86400;
+    if (expires < now + 300) throw new Error('This invoice expires too soon to pay safely. Ask the recipient for a new one.');
     const recipients = {
       [assetId]: [{
         recipientId: d.recipientId,
         witnessData: d.witness ? { amountSat: String(LiteWallet.WITNESS_SATS), blinding: null } : null,
         assignment: isNft ? 'NonFungible' : { Fungible: amount },
         transportEndpoints: d.transportEndpoints,
-        publicKey: d.publicKey, encryption: d.encryption, expirationTimestamp: Number(d.expirationTimestamp) || expires,
+        publicKey: d.publicKey, encryption: d.encryption, expirationTimestamp: invoiceExp || null,
       }],
     };
     const begin = await this.wallet.sendBegin(online, recipients, false, BigInt(Math.round(feeRate)), 1, expires, this.transport, null, false);
