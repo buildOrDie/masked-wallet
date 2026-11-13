@@ -1,0 +1,43 @@
+diff --git a/src/wallet/online.rs b/src/wallet/online.rs
+index a49c513..594c547 100644
+--- a/src/wallet/online.rs
++++ b/src/wallet/online.rs
+@@ -2244,6 +2244,38 @@ impl Wallet {
+         let validity = validation_status.validity();
+         debug!(self.logger, "Consignment validity: {:?}", validity);
+ 
++        // A witness receive whose sender gave no vout (some wallets post only the txid to a 0.2 proxy): the output
++        // is the one in the witness TX paying this invoice's script. Taken only when exactly one output pays it;
++        // otherwise vout stays None and the consignment is refused as before.
++        let vout = match (vout, &transfer.recipient_type) {
++            (None, Some(RecipientTypeFull::Witness { .. })) => consignment
++                .bundles
++                .iter()
++                .find(|ab| ab.witness_id() == witness_id)
++                .and_then(|ab| match &ab.pub_witness {
++                    PubWitness::Tx(tx) => {
++                        let script_pubkey = script_buf_from_recipient_id(recipient_id.clone())
++                            .ok()
++                            .flatten()?;
++                        let mut paying = tx
++                            .output
++                            .iter()
++                            .enumerate()
++                            .filter(|(_, o)| o.script_pubkey == script_pubkey)
++                            .map(|(i, _)| i as u32);
++                        match (paying.next(), paying.next()) {
++                            (Some(i), None) => Some(i),
++                            _ => None,
++                        }
++                    }
++                    _ => None,
++                }),
++            (v, _) => v,
++        };
++        if vout.is_some() {
++            debug!(self.logger, "Witness receive vout: {:?}", vout);
++        }
++
+         // check the info provided via the proxy is correct
+         if let Some(anchored_bundle) = consignment
+             .bundles
