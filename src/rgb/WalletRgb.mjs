@@ -488,6 +488,7 @@ export class WalletRgb {
           : ok ? 'Instant listing is live: buyers can buy it now, even with MASKED closed.' : 'Instant listing signed. Open the market and tap Finish listing on it.');
       }
       if (c.stage === 'cancelled') this.app.toast('Listing cancelled. Your tokens moved to a new output.');
+      if (c.stage === 'purchase-failed') this.app.toast(`An Instant purchase didn't go through, and nothing was paid: ${c.why}`);
       if (c.stage === 'outdated') this.app.toast('An Instant listing was signed by an older MASKED and can\'t sell. Cancel it on the market, then list again.');
     }
     await this.publishPending().catch(() => {});

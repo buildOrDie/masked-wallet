@@ -705,6 +705,35 @@ export class LiteWallet {
   }
 
   /**
+   * Broadcast to every block server at once (a purchase must reach the network, not just one server), then check that
+   * one of them really has it. Throws "no block server accepted it" with the reason when the network refuses it.
+   */
+  async broadcastAll(txHex, txid) {
+    const list = [...new Set([this.indexer, ...this.indexers()].filter(Boolean))];
+    const tries = await Promise.all(list.map(async (base) => {
+      try {
+        const r = await fetch(`${base}/tx`, { method: 'POST', body: txHex });
+        const text = (await r.text().catch(() => '')).trim();
+        // Esplora answers a txid when it took the transaction
+        if ((r.ok && /^[0-9a-f]{64}$/i.test(text)) || /already (in|known)|txn-already|in block chain|already have/i.test(text)) return { ok: true };
+        return { ok: false, why: text.slice(0, 200) || String(r.status), refused: r.status === 400 };
+      } catch (e) { return { ok: false, why: String(e?.message || e) }; }
+    }));
+    if (!tries.some((t) => t.ok)) {
+      const refused = tries.find((t) => t.refused) || tries[0] || { why: 'no block server' };
+      throw new Error(`The transaction is signed but no block server accepted it: ${refused.why}`);
+    }
+    // taken: check it is really there (a server can drop it at once, for example when it conflicts with its mempool)
+    for (let i = 0; i < 3; i++) {
+      for (const base of list) {
+        try { const r = await fetch(`${base}/tx/${txid}/hex`); if (r.ok && /^[0-9a-f]{20,}$/i.test((await r.text()).trim())) return true; } catch { /* the next one */ }
+      }
+      await new Promise((res) => setTimeout(res, this.recheckMs ?? 2000));
+    }
+    throw new Error('The transaction is signed but no block server accepted it: a server took it, then none kept it (it may conflict with another transaction of this wallet).');
+  }
+
+  /**
    * Seller: start an Instant listing. With an output holding exactly the amount, it's signed at once
    * ({ stage: 'ready', psbt, consignment, templateTxid, sellerOutpoint }); otherwise the tokens move first
    * ({ stage: 'moving', txid }) and `instantProgress` signs it once that transaction confirms.
@@ -804,6 +833,10 @@ export class LiteWallet {
   async instantProgress(store, all) {
     const changes = [];
     for (const [id, e] of Object.entries(all)) {
+      if (e?.role === 'buyer') {
+        try { const c = await this.purchaseProgress(id, e, store); if (c) changes.push(c); } catch { /* next refresh */ }
+        continue;
+      }
       if (e?.role !== 'seller') continue;
       try {
         if (e.stage === 'moving') {
@@ -845,6 +878,24 @@ export class LiteWallet {
       } catch { /* next refresh */ }
     }
     return changes;
+  }
+  /**
+   * Buyer, after a refresh: a purchase sent but not in a block yet. Confirmed: done. Gone from the block servers: sent
+   * again (every 2 minutes). Refused (its coins were spent by another transaction): failed, nothing paid.
+   */
+  async purchaseProgress(id, e, store) {
+    if (!e.posted || !e.txHex || e.failed || e.confirmed || Date.now() - (e.checkedAt || 0) < 120000) return null;
+    store.set(id, { ...e, checkedAt: Date.now() });
+    let st = null;
+    try { st = await (await this.esplora(`/tx/${e.txid}/status`)).json(); } catch { st = null; }
+    if (st?.confirmed) { store.set(id, { ...store.get(id), confirmed: true, txHex: undefined }); return null; }
+    if (await this.knowsTx(e.txid)) return null;
+    try { await this.broadcastAll(e.txHex, e.txid); return null; } catch (err) {
+      const why = String(err?.message || err);
+      if (!/no block server accepted it/.test(why)) return null;
+      store.set(id, { ...store.get(id), failed: why, txHex: undefined, at: Date.now() });
+      return { offerId: id, stage: 'purchase-failed', why: why.split(': ').slice(1).join(': ').slice(0, 160) };
+    }
   }
   /** Seller: cancel an Instant listing. A signed one is moved to a new output (an on-chain transaction). */
   async instantCancel({ offerId, feeRate }, store) {
@@ -934,8 +985,8 @@ export class LiteWallet {
     // once a block server has the transaction
     store.set(o.offerId, { role: 'buyer', assetId: o.assetId, amount: String(o.amount), priceSats: String(o.priceSats), recipientId: r.recipientId, invoice: r.invoice, txid, txHex, completed: b64(completed), posted: false, at: Date.now() });
     this.expectPurchases([...this.purchases, r.recipientId]);
-    onStep(`Sending the purchase to ${hostOf(this.indexer)}…`);
-    try { await this.ensureBroadcast(txHex, txid); } catch (err) {
+    onStep('Sending the purchase to the Bitcoin network…');
+    try { await this.broadcastAll(txHex, txid); } catch (err) {
       const why = String(err?.message || err);
       if (/no block server accepted it/.test(why)) {
         store.set(o.offerId, { ...store.get(o.offerId), failed: why, completed: undefined, txHex: undefined, at: Date.now() });
@@ -943,6 +994,8 @@ export class LiteWallet {
       }
       throw err; // a network problem: kept, and sent again on the next refresh
     }
+    // the wallet learns at once that its coins are spent, so nothing else of it spends them again
+    try { await this.wallet.sync(online); } catch { /* the next refresh */ }
     await this.instantPost(o.offerId, store);
     await this.save();
     return { txid };
@@ -963,7 +1016,8 @@ export class LiteWallet {
       if (this.engineV1) await this.postOwnV1(e);
       else await this.wallet.postOwnConsignment(this.transport, e.recipientId, unb64(e.completed), e.txid, INSTANT_SEAL_OUTPUT);
     } catch (err) { if (!/already used|already paid|quota/i.test(String(err?.message || err))) return false; }
-    store.set(String(offerId), { ...e, posted: true, completed: undefined, txHex: undefined, at: Date.now() });
+    // the signed purchase is kept until it confirms: a refresh sends it again if the network dropped it
+    store.set(String(offerId), { ...e, posted: true, completed: undefined, at: Date.now() });
     return true;
   }
 

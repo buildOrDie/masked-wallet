@@ -368,3 +368,52 @@ test('a sale pays the Public address when it is set; without it, the RGB wallet 
   assert.notEqual(t.log.findLast((x) => x[0] === 'payout')[1], '0014' + 'cd'.repeat(20));
   assert.equal(t.store.get('sw0123456789ab').payoutPublic, false);
 });
+
+function buySetup() {
+  const chain = fakeChain();
+  const seller = `${T('a')}:0`, c1 = `${T('d')}:1`;
+  chain.outs[seller] = { sats: 1000, script: '5120sell', tx: 'a0' };
+  chain.outs[c1] = { sats: 30000, script: '5120buy', tx: 'dd' };
+  const info = { sellerOutpoint: seller, sellerSats: 1000, sellerScript: '5120sell', payoutSats: 21000, opretScript: '6a20', templateTxid: T('6') };
+  const listing = { psbt: JSON.stringify({ sig: true, info }), consignment: b64(enc({ valid: true, contractId: ASSET, sealAmount: 500 })), templateTxid: T('6') };
+  const offer = { offerId: 'sw0123456789ab', assetId: ASSET, amount: '500', priceSats: '20000', state: 'OPEN' };
+  const b = wallet({ name: 'buyer', lib: fakeLib(), chain, coins: [{ outpoint: c1, txout: { value: 30000 }, is_spent: false }] });
+  b.w.recheckMs = 1;
+  return { chain, b, offer, listing };
+}
+
+test('buyer: a purchase a server takes but none keeps is not reported as bought; nothing paid', async () => {
+  const { chain, b, offer, listing } = buySetup();
+  const prev = globalThis.fetch;
+  // the server answers its txid, but the transaction is gone at once (for example it conflicts with its mempool)
+  globalThis.fetch = async (url, init = {}) => {
+    const u = String(url).replace('https://esplora.test', '');
+    if (init.method === 'POST' && u === '/tx') return new Response(T('f'));
+    if (/\/hex$/.test(u)) return new Response('Transaction not found', { status: 404 });
+    return prev(url, init);
+  };
+  await assert.rejects(b.w.instantBuy({ offerId: offer.offerId, network: 'Signet', offer, listing, feeRate: 2 }, b.store), /can't be bought any more.*Nothing was paid/);
+  assert.match(b.store.get(offer.offerId).failed, /none kept it/);
+  assert.ok(!b.store.get(offer.offerId).posted, 'the tokens are not expected');
+  globalThis.fetch = prev; void chain;
+});
+
+test('buyer: a sent purchase is kept until it confirms; dropped, it is sent again; refused, it fails and says so', async () => {
+  const { chain, b, offer, listing } = buySetup();
+  b.w.postOwnV1 = async () => {}; // the transfer server
+  const r = await b.w.instantBuy({ offerId: offer.offerId, network: 'Signet', offer, listing, feeRate: 2 }, b.store);
+  assert.ok(r.txid);
+  const e = b.store.get(offer.offerId);
+  assert.equal(e.posted, true); assert.ok(e.txHex, 'kept until it confirms');
+  // the network dropped it: the next check sends it again
+  chain.posted.length = 0;
+  assert.equal(await b.w.purchaseProgress(offer.offerId, b.store.get(offer.offerId), b.store), null);
+  assert.equal(chain.posted.length, 1, 'sent again');
+  // dropped again, and now refused (its coin was spent by something else): failed, said once
+  chain.posted.length = 0; chain.reject = 'sendrawtransaction RPC error: {"code":-25,"message":"bad-txns-inputs-missingorspent"}';
+  b.store.set(offer.offerId, { ...b.store.get(offer.offerId), checkedAt: 0 });
+  const c = await b.w.purchaseProgress(offer.offerId, b.store.get(offer.offerId), b.store);
+  assert.equal(c.stage, 'purchase-failed'); assert.match(c.why, /missingorspent/);
+  assert.equal(b.store.get(offer.offerId).txHex, undefined);
+  assert.equal(await b.w.purchaseProgress(offer.offerId, b.store.get(offer.offerId), b.store), null, 'said once');
+});
