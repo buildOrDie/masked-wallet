@@ -10,6 +10,7 @@ export class OrdChecker {
     this.store = store;
     this.failed = new Map(); // `${net}:${outpoint}` → do not retry before (ms)
     this.memo = null;
+    this.downUntil = new Map(); // net → ord did not answer at all (no such server, offline): skip it until then (ms)
   }
 
   get key() { return `wren.ord.${this.netOf()}`; }
@@ -40,7 +41,7 @@ export class OrdChecker {
     const net = this.netOf();
     // force: also small coins (asked for when someone unlocks one)
     let todo = list.filter((c) => (force ? c.sats != null && !c.example : this.needs(c)) && !this.of(c) && !c.pending && (force || (this.failed.get(`${net}:${c.txid}:${c.vout}`) || 0) < Date.now()));
-    if (!todo.length) return;
+    if (!todo.length || (!force && (this.downUntil.get(net) || 0) > Date.now())) return;
     const save = (op, j) => {
       const runes = Array.isArray(j.runes) ? j.runes.length : j.runes ? Object.keys(j.runes).length : 0;
       this.put(op, { ins: (j.inscriptions || []).length, runes, at: Date.now() });
@@ -52,7 +53,12 @@ export class OrdChecker {
         const arr = await fetchWithin(10000, `${ORD[net]}/outputs`, { method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(ops) }, (r) => (r.ok ? r.json() : null));
         if (!Array.isArray(arr) || arr.length !== ops.length) break;
         arr.forEach((j, k) => { const op = j?.outpoint || ops[k]; if (j && j.indexed !== false && ops.includes(op)) save(op, j); });
-      } catch { break; }
+      } catch (e) {
+        // no answer at all (the server's name doesn't resolve, it is offline): one coin at a time would only fail
+        // the same way, once per coin. Ask again in 10 minutes. A timeout or busy server still gets the fallback.
+        if (e?.name !== 'AbortError') { this.downUntil.set(net, Date.now() + 600_000); return; }
+        break;
+      }
     }
     todo = todo.filter((c) => !this.of(c)).slice(0, 60);
     if (!todo.length) return;
