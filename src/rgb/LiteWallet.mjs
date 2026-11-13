@@ -47,6 +47,8 @@ const IMAGE_MIME = /^image\/(png|jpeg|gif|webp)$/;
 
 const hostOf = (u) => { try { return new URL(String(u)).host; } catch { return 'the block server'; } };
 
+const OLD_CONSIGNMENT = /ConsignmentVe|unsupported value `0`/i;
+
 export class LiteWallet {
   /**
    * @param {object} lib  the loaded rgb-lib-wasm module ({ WasmWallet, WasmInvoice, restoreKeys })
@@ -771,7 +773,14 @@ export class LiteWallet {
     } catch (err) { return `MASKED couldn't check the move: ${String(err?.message || err).slice(0, 120)}`; }
   }
   /** A listing this engine would accept as a buyer (the current layout). */
-  validListing(psbt) { try { this.lib.WasmWallet.presignedListingInfo(String(psbt)); return true; } catch { return false; } }
+  validListing(psbt, consignment = null, templateTxid = '') {
+    try { this.lib.WasmWallet.presignedListingInfo(String(psbt)); } catch { return false; }
+    return !(consignment && this.oldConsignment(unb64(String(consignment)), templateTxid));
+  }
+  /** A transfer in the RGB 0.11.1 format (signed by MASKED before 2.29): the 0.11.2 engine can't check it before it's on chain. */
+  oldConsignment(bytes, txid) {
+    try { this.lib.inspectSwapConsignment(bytes, String(txid), this.net, INSTANT_SEAL_OUTPUT); return false; } catch (e) { return OLD_CONSIGNMENT.test(String(e?.message || e)); }
+  }
   instantView(offerId, e) {
     return { offerId: String(offerId), stage: e.stage, txid: e.soldTxid || e.cancelTxid || e.moveTxid || null, ...(e.stage === 'ready' ? { psbt: e.psbt, consignment: e.consignment, templateTxid: e.templateTxid, sellerOutpoint: e.coin } : {}) };
   }
@@ -802,7 +811,7 @@ export class LiteWallet {
             store.set(id, { ...store.get(id), rebroadcastAt: Date.now() });
             await this.ensureBroadcast(e.moveHex, e.moveTxid).catch(() => {});
           }
-        } else if (e.stage === 'ready' && e.psbt && !e.outdated && !this.validListing(e.psbt)) {
+        } else if (e.stage === 'ready' && e.psbt && !e.outdated && !this.validListing(e.psbt, e.consignment, e.templateTxid)) {
           // signed by an earlier MASKED in a layout buyers refuse: it can't sell; cancelling moves the tokens back
           store.set(id, { ...e, outdated: true });
           changes.push({ offerId: id, stage: 'outdated' });
@@ -862,6 +871,7 @@ export class LiteWallet {
     try { info = plain(this.lib.WasmWallet.presignedListingInfo(String(l.psbt || ''))); } catch (e) { throw new Error(`The listing does not check out: ${e?.message || e}`); }
     if (String(info.templateTxid) !== String(l.templateTxid)) throw new Error('The listing does not match its transfer.');
     if (BigInt(String(info.payoutSats)) - BigInt(String(info.sellerSats)) !== o.priceSats) throw new Error('The signed price is not the offer\'s price.');
+    if (this.oldConsignment(unb64(String(l.consignment || '')), info.templateTxid)) throw new Error('This listing was signed by a MASKED older than 2.29, in the old RGB format, and can\'t be bought any more. Nothing was paid. The seller cancels it on the market and lists it again.');
     const online = this.requireOnline();
     onStep(`Checking your bitcoin on ${hostOf(this.indexer)}…`);
     await this.wallet.sync(online);

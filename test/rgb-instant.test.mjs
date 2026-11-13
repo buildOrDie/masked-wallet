@@ -335,3 +335,21 @@ test('seller: a listing the engine refuses to sign after the move says why, inst
   assert.match(s.store.get('sw0123456789ab').waiting, /couldn't sign this listing: that output can't be listed/);
   assert.equal(s.store.get('sw0123456789ab').stage, 'moving');
 });
+
+test('a listing whose transfer is in the old RGB format (signed before 2.29): the buyer is told, nothing paid; the seller is told to list again', async () => {
+  const lib = fakeLib();
+  lib.inspectSwapConsignment = () => { throw new Error('Internal error: Failed to load consignment: unsupported value `0` for enum `ConsignmentVersion`'); };
+  const chain = fakeChain();
+  const seller = `${T('a')}:0`;
+  chain.outs[seller] = { sats: 1000, script: '5120sell', tx: 'a0' };
+  const info = { sellerOutpoint: seller, sellerSats: 1000, sellerScript: '5120sell', payoutSats: 21000, opretScript: '6a20', templateTxid: T('6') };
+  const listing = { psbt: JSON.stringify({ sig: true, info }), consignment: b64(new Uint8Array([0, 1, 2])), templateTxid: T('6') };
+  const offer = { offerId: 'sw0123456789ab', assetId: ASSET, amount: '500', priceSats: '20000', state: 'OPEN' };
+  const b = wallet({ name: 'buyer', lib, chain });
+  await assert.rejects(b.w.instantBuy({ offerId: offer.offerId, network: 'Signet', offer, listing, feeRate: 2 }, b.store), /older than 2\.29.*Nothing was paid/);
+  assert.equal(b.log.some((x) => x[0] === 'sendEnd' || x[0] === 'broadcast'), false);
+  // the seller's own copy: flagged once, so the market says to cancel and list again
+  const s = wallet({ name: 'seller', lib, chain });
+  s.store.set('sw0123456789ab', { role: 'seller', stage: 'ready', psbt: listing.psbt, consignment: listing.consignment, templateTxid: T('6'), coin: seller, assetId: ASSET, amount: '500', priceSats: '20000' });
+  assert.deepEqual(await s.w.instantProgress(s.store, s.store.all()), [{ offerId: 'sw0123456789ab', stage: 'outdated' }]);
+});
