@@ -14,7 +14,7 @@ export class ApproveView extends View {
   render() {
     const a = this.app.approvals.active;
     if (!a || a.loading) return `<section class="card center"><p class="muted">Loading request…</p></section>`;
-    if (a.gone) return `<section class="card center"><p>This request has expired.</p><button class="btn ghost" onclick="window.close()">Close</button></section>`;
+    if (a.gone) return `<section class="card center"><p>This request has expired.</p>${this.app.platform.local ? '<button class="btn ghost" data-go="market">Back to the market</button>' : '<button class="btn ghost" onclick="window.close()">Close</button>'}</section>`;
     if (a.done) return `<section class="done"><div class="done-ic">${I.check}</div><h1>Done</h1><p class="muted">You can close this window.</p></section>`;
     let host = a.origin; try { host = new URL(a.origin).host; } catch {}
     const blocked = (NEEDS_PREP.includes(a.method) && !a.prep) || ((a.method === 'signPsbt' || a.method === 'signPsbts') && !!a.prepErr);

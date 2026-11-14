@@ -22,6 +22,8 @@ export class Platform {
     this.requestId = params.get('req');
     this.isPopup = params.has('popup');
     this.rgbResumeId = params.get('rgbResume');
+    /** @type {((m: any) => any) | null} */
+    this.local = null;
   }
 
   get hasExt() { return typeof chrome !== 'undefined' && !!chrome.runtime?.id && !!chrome.storage?.local; }
@@ -42,7 +44,8 @@ export class Platform {
 
   // ---- messages to the background ----
   connect(name) { return chrome.runtime.connect({ name }); }
-  message(m) { return chrome.runtime.sendMessage(m); }
+  /** In the phone app the in-app market answers these (AppMarket sets `local`); in the extension, the background. */
+  message(m) { return this.local ? Promise.resolve(this.local(m)) : chrome.runtime.sendMessage(m); }
 
   // ---- chrome.storage.local (shared with the background) ----
   async storageGet(key) { return (await chrome.storage.local.get(key))[key]; }

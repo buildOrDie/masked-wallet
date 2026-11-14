@@ -20,6 +20,10 @@ import { ApproveView } from './views/ApproveView.mjs';
 import { BackupView, LockView, OnboardView, SetPasswordView } from './views/GateViews.mjs';
 
 export const NAV = [['home', 'Wallet', I.wallet], ['mint', 'Mint', I.mint], ['settings', 'Settings', I.gear]];
+/** The phone app adds the Market tab (MASKED's market and Launchpad inside the app, see AppMarket). */
+export const APP_NAV = [NAV[0], ['market', 'Market', I.globe], ...NAV.slice(1)];
+/** The Market tab's own screen stays empty: the market is a frame over it (kept loaded between tabs). */
+class MarketView { render() { return '<section class="market-under" aria-hidden="true"></section>'; } }
 import { $, $$ } from './dom.mjs';
 import { lang, tr, trHtml } from '../i18n/translate.mjs';
 
@@ -32,7 +36,7 @@ export class Screen {
     this.views = {
       approve: new ApproveView(app), home: new HomeView(app), token: new TokenView(app), receive: new ReceiveView(app), relay: new RelayView(app),
       send: new SendView(app, 'send'), shield: new SendView(app, 'shield'), activity: new ActivityView(app), mint: new MintView(app), settings: new SettingsView(app), accounts: new AccountsView(app), leaf: new LeafView(app), ecash: new EcashView(app), ordinals: new OrdinalsView(app),
-      rgbtok: new RgbTokenView(app), rgbsend: new RgbSendView(app),
+      rgbtok: new RgbTokenView(app), rgbsend: new RgbSendView(app), market: new MarketView(),
     };
     // screens in front of the wallet, by lock state
     this.gates = { locked: new LockView(app), onboard: new OnboardView(app), 'onboard-cancel': new OnboardView(app), migrate: new SetPasswordView(app), backup: new BackupView(app) };
@@ -85,9 +89,12 @@ export class Screen {
     const pb = $('#panelBtn'); if (pb) pb.hidden = !app.platform.canOpenSidePanel || state.view === 'approve';
     app.sites.publishPublic();
     app.trade.publish();
-    $('#nav').innerHTML = trHtml(NAV.map(([k, n, ic]) => `<button data-go="${k}" class="${this.navOf(state.view) === k ? 'on' : ''}">${ic}<span>${n}</span></button>`).join(''));
+    const nav = app.platform.isApp ? APP_NAV : NAV;
+    $('#nav').classList.toggle('four', nav.length === 4);
+    $('#nav').innerHTML = trHtml(nav.map(([k, n, ic]) => `<button data-go="${k}" class="${this.navOf(state.view) === k ? 'on' : ''}">${ic}<span>${n}</span></button>`).join(''));
     if (document.documentElement.lang !== lang()) document.documentElement.lang = lang();
     app.store.set('wren.view', this.navOf(state.view));
+    app.market?.sync();
   }
 
   /** The page shell's own labels (header buttons): translated once per language, English kept to switch back. */

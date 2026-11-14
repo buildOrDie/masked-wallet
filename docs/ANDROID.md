@@ -2,8 +2,14 @@
 
 The Android app is the MASKED wallet itself (the same code as the Chrome extension) inside a
 [Capacitor](https://capacitorjs.com) app: Public, Shielded, Ecash, Ordinals and RGB, with the RGB engine
-built with swaps. Not in the app yet: connecting to websites (the `window.masked` provider); that needs an
-in-app browser and comes next.
+built with swaps.
+
+The **Market** tab opens MASKED's website (RGB market and Launchpad) inside the app, connected to the wallet
+the way the extension connects it: the site runs in a frame and asks the app through `postMessage`
+(`src/dapp/AppMarket.mjs`; the site's side is `web/lib/masked-app.mjs`). The app answers only
+maskedwallet.com and signet.maskedwallet.com, only from its own frame; requests are checked by the same code
+as the extension's (`src/dapp/requests.mjs`), and every connection, signature and payment opens the usual
+approval screen. Other websites can't connect to the app.
 
 - App id `com.maskedwallet.app`, version = `package.json` (2.29.10 → versionCode 22910)
 - `scripts/build-mobile.mjs` builds the wallet's files into `dist/mobile` (the extension build without the

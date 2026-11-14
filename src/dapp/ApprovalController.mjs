@@ -273,7 +273,8 @@ export class ApprovalController {
     const a = this.active;
     a.done = true;
     this.app.render();
-    this.app.platform.message({ type: 'resolveRequest', id: a.id, ...payload }).finally(() => setTimeout(() => window.close(), 150));
+    // the extension's approval window closes; the phone app goes back to the market (AppMarket)
+    this.app.platform.message({ type: 'resolveRequest', id: a.id, ...payload }).finally(() => { if (!this.app.platform.local) setTimeout(() => window.close(), 150); });
   }
 
   reject() { this.finish({ error: { code: 4001, message: 'User rejected the request.' } }); }
