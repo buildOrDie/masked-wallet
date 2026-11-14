@@ -1,4 +1,5 @@
 // Packaged ESM boundary: the existing wallet loads the WASM SDK only when RGB is enabled.
+import '../core/polyfills.mjs'; // first: AbortSignal.timeout / .any for older phone WebViews
 export { SignetWallet } from './SignetWallet.mjs';
 export { loadRgbSdk } from './load-sdk.mjs';
 import { entropyToMnemonic, generateMnemonic } from '@scure/bip39';

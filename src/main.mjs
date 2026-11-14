@@ -1,4 +1,5 @@
 // MASKED wallet: the page script of the extension popup, side panel and approval window.
+import './core/polyfills.mjs'; // first: older phone WebViews
 import SECP_WASM from '../node_modules/tiny-secp256k1/lib/secp256k1.wasm';
 import { initFast } from './crypto/sp-fast.mjs';
 import EXAMPLE from './wallet/example.json';
