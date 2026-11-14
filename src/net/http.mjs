@@ -3,7 +3,25 @@
 export const NET_TIMEOUT_MS = 15000;
 
 /** The browser's own fetch, captured before EsploraPool routes blockchain URLs through its failover. */
-export const rawFetch = globalThis.fetch.bind(globalThis);
+const nativeFetch = globalThis.fetch.bind(globalThis);
+
+/**
+ * Public block servers that answer any site (CORS). In the phone app every request otherwise goes through Android's
+ * own HTTP code (CapacitorHttp), which on some phones (a Galaxy S9 on Android 9) never gets through to them while
+ * the WebView's network stack does at once. So in the app these go through the WebView's fetch, which Capacitor
+ * keeps as CapacitorWebFetch; MASKED's own servers and anything else stay on CapacitorHttp.
+ */
+export const WEB_FETCH_HOSTS = /^https:\/\/(mempool\.space|blockstream\.info)\//;
+const webFetch = typeof globalThis.CapacitorWebFetch === 'function' ? globalThis.CapacitorWebFetch.bind(globalThis) : null;
+
+/** @param {RequestInfo | URL} input */
+export function transportFor(input) {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : /** @type {any} */ (input)?.url;
+  return webFetch && typeof url === 'string' && WEB_FETCH_HOSTS.test(url) ? webFetch : nativeFetch;
+}
+
+/** @param {RequestInfo | URL} input @param {RequestInit} [init] */
+export const rawFetch = (input, init) => transportFor(input)(input, init);
 
 export function timedFetch(input, init = {}) {
   if (init.signal) return rawFetch(input, init);
