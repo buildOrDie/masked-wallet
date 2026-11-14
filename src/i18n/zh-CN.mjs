@@ -9,7 +9,6 @@ export const ZH_CN = {
   'Wallet': '钱包',
   'Mint': '铸造',
   'Settings': '设置',
-  'Market': '市场',
   'Launchpad': '发射台',
   'Back to the market': '返回市场',
   'Set up or open your own wallet to connect (the demo wallet can browse only).': '设置或打开你自己的钱包即可连接(演示钱包只能浏览)。',
