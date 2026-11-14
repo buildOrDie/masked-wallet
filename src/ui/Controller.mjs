@@ -1,5 +1,6 @@
 // User input: one listener per event type on the document, routed by data attributes (data-go, data-set,
 // data-tok, …) and by button id. Each handler changes state through the app's services and re-renders.
+import { copyText } from './copy.mjs';
 import { setLang, tr, trHtml } from '../i18n/translate.mjs';
 import * as sp from '../crypto/sp-core.mjs';
 import { fromHex } from '../core/bytes.mjs';
@@ -150,7 +151,7 @@ export class Controller {
     if (d.side) { app.side.set(d.side); this.render(); return true; }
     if (d.lang) { setLang(d.lang); try { localStorage.setItem('masked.lang-hint', '1'); } catch { /* */ } this.render(); return true; }
     if (d.copy != null) {
-      try { await navigator.clipboard.writeText(d.copy); this.toast('Copied'); } catch { this.toast('Copy failed — select and copy manually'); }
+      this.toast((await copyText(d.copy)) ? 'Copied' : 'Copy failed — select and copy manually');
       return true;
     }
     if (d.go) { this.go(t); return true; }
