@@ -23,6 +23,7 @@ export const RGB_FUND_SATS = 30_000;
 export function rgbError(error, profile = profileOf('utexo')) {
   const full = typeof error === 'string' ? error : (error instanceof Error ? error.message : String(error?.['message'] ?? ''));
   const text = brief(full);
+  if (full) console.warn('[RGB] error:', full);
   if (/did not answer in time|timed? ?out|\b429\b|too many requests|status: 50[234]\b|bad gateway|service unavailable|gateway time/i.test(full)) return `The ${profile.label} block server is busy or down right now.`;
   if (/invalid indexer/i.test(full) && (profile.id === 'mainnet' || profile.id === 'public')) return `RGB couldn't reach a block server (mempool.space or blockstream.info). If you use an ad blocker, VPN or firewall, allow these sites, or set your own server in Settings → Blockchain server. Then try again.`;
   if (/invalid indexer|failed to fetch|network ?error|internet|ECONN|proxy/i.test(full)) return `Can't reach the ${profile.label} RGB servers right now. Check your connection and try again. (${text})`;

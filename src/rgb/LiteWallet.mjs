@@ -120,7 +120,11 @@ export class LiteWallet {
     for (let i = 0; i < list.length; i++) {
       const u = list[(start + i) % list.length];
       if (skip && u === skip && list.length > 1) continue;
-      try { this.online = await this.connect(u); this.indexer = u; return u; } catch (e) { last = e; }
+      try { this.online = await this.connect(u); this.indexer = u; return u; } catch (e) {
+        last = e;
+        // the engine's own words for each server (the screen shows a short version)
+        console.warn('[RGB] block server', u, 'refused:', e?.message || e);
+      }
     }
     throw last || new Error('Invalid indexer: no block server answered');
   }

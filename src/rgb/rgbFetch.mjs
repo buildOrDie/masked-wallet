@@ -26,7 +26,11 @@ export async function rgbFetch(input, init) {
     for (let i = 0; ; i++) {
       // a Request body can be read once: send a copy each time
       const req = typeof Request !== 'undefined' && input instanceof Request ? input.clone() : input;
-      const r = await globalThis.fetch(req, init);
+      let r;
+      try { r = await globalThis.fetch(req, init); } catch (e) {
+        console.warn('[RGB] request failed', /** @type {any} */ (input)?.url || String(input), e?.name, e?.message || e);
+        throw e;
+      }
       if ([429, 502, 503, 504].includes(r.status) && i < RETRIES) { await pause(1000 * 2 ** i); continue; }
       return r;
     }
