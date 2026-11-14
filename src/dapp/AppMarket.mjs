@@ -5,8 +5,8 @@
 import { makeHandler, err } from './requests.mjs';
 import { tr } from '../i18n/translate.mjs';
 
-/** Where the Market tab opens, by network. */
-export const MARKET_SITES = { signet: 'https://signet.maskedwallet.com', main: 'https://maskedwallet.com' };
+/** Where the Market tab opens, by network. Mainnet has no market yet: add main: 'https://maskedwallet.com' when it opens. */
+export const MARKET_SITES = { signet: 'https://signet.maskedwallet.com' };
 /** The sites the app answers (the extension answers any site the person connects; the app frame only shows these). */
 export const APP_SITES = new Set(['https://maskedwallet.com', 'https://www.maskedwallet.com', 'https://signet.maskedwallet.com']);
 export const MARKET_PAGES = [['rgb', 'Market'], ['launch', 'Launchpad']];
@@ -132,7 +132,7 @@ export class AppMarket {
 
   /** The address the frame opens for this network and page. */
   url(net = this.app.state.net, page = this.page) {
-    return `${MARKET_SITES[net] || MARKET_SITES.signet}/${page}?app=masked`;
+    return MARKET_SITES[net] ? `${MARKET_SITES[net]}/${page}?app=masked` : '';
   }
 
   /** After every render: show the market on its tab, keep connected sites up to date, drop a request left behind. */
@@ -160,12 +160,16 @@ export class AppMarket {
       box.innerHTML = `<div class="market-bar"><div class="seg" role="radiogroup">${MARKET_PAGES.map(([k, l]) => `<button role="radio" data-market-page="${k}">${tr(l)}</button>`).join('')}</div>
         <button class="icon-btn" data-market-reload title="${tr('Reload')}" aria-label="${tr('Reload')}"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.6-4.5L4 8M4 4v4h4M4 13a8 8 0 0 0 14.6 4.5L20 16M20 20v-4h-4"/></svg></button></div>
         <p class="market-note" hidden></p>
+        <div class="market-soon" hidden><h2>${tr('The market is on Signet for now')}</h2>
+          <p class="muted">${tr('The RGB market and Launchpad run on Signet (test coins) while they are tested. Mainnet comes later.')}</p>
+          <button class="btn primary wide" data-market-signet>${tr('Switch to Signet')}</button></div>
         <iframe title="MASKED market" referrerpolicy="no-referrer" allow="clipboard-write"></iframe>`;
       box.addEventListener('click', (e) => {
         const t = /** @type {HTMLElement} */ (e.target).closest('button');
         if (!t) return;
         if (t.dataset.marketPage) { this.page = t.dataset.marketPage; this.open(true); }
         if (t.hasAttribute('data-market-reload')) this.open(true);
+        if (t.hasAttribute('data-market-signet')) this.app.setNet('signet');
       });
       doc.body.append(box);
       this.box = box;
@@ -177,8 +181,13 @@ export class AppMarket {
     this.box.style.top = `${Math.round(top?.getBoundingClientRect().bottom || 0)}px`;
     this.box.style.bottom = `${nav?.offsetHeight || 64}px`;
     for (const b of this.box.querySelectorAll('[data-market-page]')) b.setAttribute('aria-checked', String(/** @type {HTMLElement} */ (b).dataset.marketPage === this.page));
+    // no market on this network (Mainnet, for now): say so instead of an error page
+    const live = !!this.url();
+    this.box.querySelector('.market-soon').hidden = live;
+    this.box.querySelector('.market-bar').hidden = !live;
+    this.frame.hidden = !live;
     const note = this.box.querySelector('.market-note');
-    const demo = !this.pub();
+    const demo = live && !this.pub();
     note.hidden = !demo;
     note.textContent = demo ? tr('Set up or open your own wallet to connect (the demo wallet can browse only).') : '';
     this.open(false);
@@ -187,6 +196,11 @@ export class AppMarket {
   /** Load the market page (again when asked, or when the network changed). */
   open(force) {
     const url = this.url();
+    if (!url) {
+      // leave nothing from another network connected
+      if (this.loaded) { this.loaded = ''; this.siteOrigin = ''; this.frame.src = 'about:blank'; }
+      return;
+    }
     if (!force && this.loaded && new URL(this.loaded).origin === new URL(url).origin) return;
     if (this.pending.size) return;
     this.loaded = url;
