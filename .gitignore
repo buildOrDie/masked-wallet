@@ -4,3 +4,6 @@ node_modules/
 
 # RGB engine with swaps, built by engine/build.sh
 vendor/rgb-lib-wasm/
+
+# the phone app's web files, built by scripts/build-mobile.mjs
+dist/

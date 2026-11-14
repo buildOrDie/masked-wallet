@@ -1,0 +1,59 @@
+# Builds the MASKED Android app (Capacitor) on GitHub's machines: the RGB engine with swaps (engine/build.sh),
+# the wallet's web files, then the APK.
+# Actions → "Android app" → Run workflow, then download the "masked-android" artifact and install the APK.
+# Signed release builds (for Google Play) need four repository secrets: ANDROID_KEYSTORE_BASE64,
+# ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD. Without them only the debug APK is built.
+name: Android app
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - run: cargo install wasm-pack@0.14.0
+      - run: npm ci
+      - name: RGB engine with swaps
+        run: bash engine/build.sh
+      - name: Wallet files and Android project
+        run: npm run build:android
+      - name: Debug APK
+        working-directory: android
+        run: ./gradlew --no-daemon assembleDebug
+      - name: Signed release (when the signing secrets are set)
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
+        env:
+          MASKED_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          MASKED_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          MASKED_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        working-directory: android
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/masked.keystore"
+          MASKED_KEYSTORE="$RUNNER_TEMP/masked.keystore" ./gradlew --no-daemon assembleRelease bundleRelease
+          rm -f "$RUNNER_TEMP/masked.keystore"
+      - name: Name the files after the version
+        run: |
+          v=$(node -p "require('./package.json').version")
+          mkdir -p out
+          cp android/app/build/outputs/apk/debug/app-debug.apk "out/masked-$v-debug.apk"
+          [ -f android/app/build/outputs/apk/release/app-release.apk ] && cp android/app/build/outputs/apk/release/app-release.apk "out/masked-$v.apk" || true
+          [ -f android/app/build/outputs/bundle/release/app-release.aab ] && cp android/app/build/outputs/bundle/release/app-release.aab "out/masked-$v.aab" || true
+          sha256sum out/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: masked-android
+          path: out/

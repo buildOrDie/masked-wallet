@@ -1,0 +1,15 @@
+{
+  "appId": "com.maskedwallet.app",
+  "appName": "MASKED",
+  "webDir": "dist/mobile",
+  "backgroundColor": "#0a0a0b",
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": true
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  }
+}
