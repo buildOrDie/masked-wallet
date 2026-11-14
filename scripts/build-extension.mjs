@@ -14,6 +14,8 @@ await build({...common,entryPoints:[resolve(root,'src/main.mjs')],outfile:resolv
 await build({...common,entryPoints:[resolve(root,'src/scan/scan-worker.mjs')],outfile:resolve(out,'scan-worker.js')});
 for(const [name,source] of [['background.js','background'],['content.js','content'],['inpage.js','inpage']])await build({...common,entryPoints:[resolve(root,`src/provider/${source}.js`)],outfile:resolve(out,name)});
 await writeFile(resolve(out,'manifest.json'),await readFile(resolve(root,'src/manifest.json')));
+// the side panel's page: the same as masked.html (Chrome refuses a side panel path with a ?query that isn't a file)
+await cp(resolve(out,'masked.html'),resolve(out,'panel.html'));
 console.log('Extension built at '+out);
 
 // RGB: the wallet lazily imports this packaged ESM runtime when RGB is turned on. The engine is rgb-lib-wasm

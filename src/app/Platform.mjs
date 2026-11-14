@@ -30,7 +30,9 @@ export class Platform {
   get hasSession() { return typeof chrome !== 'undefined' && !!chrome.storage?.session; }
 
   /** The side panel is offered in the popup (not in the panel itself, nor in an approval window). */
-  get canOpenSidePanel() { return this.hasExt && !!chrome.sidePanel?.open && !new URLSearchParams(location.search).has('panel') && !this.requestId; }
+  /** The side panel opens panel.html (the same page: Chrome wants the panel's file to exist without a ?query). */
+  get isPanel() { return /\/panel\.html$/.test(location.pathname) || new URLSearchParams(location.search).has('panel'); }
+  get canOpenSidePanel() { return this.hasExt && !!chrome.sidePanel?.open && !this.isPanel && !this.requestId; }
 
   async openSidePanel() {
     const w = await chrome.windows.getCurrent();

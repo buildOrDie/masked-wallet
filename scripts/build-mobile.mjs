@@ -10,7 +10,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const out = resolve(root, 'dist/mobile');
 await rm(out, { recursive: true, force: true });
 execFileSync(process.execPath, [resolve(root, 'scripts/build-extension.mjs'), out], { stdio: 'inherit' });
-for (const f of ['background.js', 'content.js', 'inpage.js', 'manifest.json', '_locales']) await rm(resolve(out, f), { recursive: true, force: true });
+for (const f of ['background.js', 'content.js', 'inpage.js', 'manifest.json', '_locales', 'panel.html']) await rm(resolve(out, f), { recursive: true, force: true });
 // the app opens index.html
 await rename(resolve(out, 'masked.html'), resolve(out, 'index.html'));
 const html = await readFile(resolve(out, 'index.html'), 'utf8');
