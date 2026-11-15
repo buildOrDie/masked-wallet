@@ -4,8 +4,7 @@
   "webDir": "dist/mobile",
   "backgroundColor": "#0a0a0b",
   "android": {
-    "allowMixedContent": false,
-    "captureInput": true
+    "allowMixedContent": false
   },
   "plugins": {
     "CapacitorHttp": {
