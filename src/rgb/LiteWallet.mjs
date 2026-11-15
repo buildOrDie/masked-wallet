@@ -428,7 +428,7 @@ export class LiteWallet {
     const short = feeFor(1) + seal + 546n - tokenSats;
     const { all, confirmed } = await this.btcCoins();
     const pay = short > 0n ? payCoinsFor(confirmed, all, short, feeFor(2) - feeFor(1)) : { coins: [] };
-    if (!pay) throw new Error(`Your RGB wallet needs about ${short.toLocaleString('en-US')} sats in bitcoin for this. Tap Add to RGB balance on Home.`);
+    if (!pay) throw new Error(`Your RGB wallet needs about ${short.toLocaleString('en-US')} sats in bitcoin for this. Tap Add from Bitcoin under RGB balance on Home.`);
     const infos = await Promise.all([...froms, ...pay.coins].map((c) => this.outpointInfo(c.outpoint)));
     const sis = infos.slice(0, froms.length), fis = infos.slice(froms.length);
     const fee = BigInt(Math.ceil(rate * txVbytes(infos.map((f) => f.script), [OPRET_SCRIPT, sealScript, own])));
@@ -538,7 +538,7 @@ export class LiteWallet {
     const { all, confirmed } = await this.btcCoins();
     // the four-step format takes one bitcoin input: a confirmed coin, or change from this wallet's last trade
     const coin = buyerCoinFor(confirmed, need) || buyerCoinFor(all, need);
-    if (!coin) throw new Error(`Your RGB wallet needs one bitcoin output over ${need.toLocaleString('en-US')} sats. Tap Add to RGB balance on Home.`);
+    if (!coin) throw new Error(`Your RGB wallet needs one bitcoin output over ${need.toLocaleString('en-US')} sats. Tap Add from Bitcoin under RGB balance on Home.`);
     // an invoice for exactly this amount; no asset ID (the engine only takes known ones), the token is checked at signing
     const r = await this.onchainReceive({ assetId: null, amount: Number(o.amount), durationSeconds: 86400, witness: true });
     const session = {
@@ -664,7 +664,7 @@ export class LiteWallet {
     const perInput = feeFor(2) - feeFor(1);
     const { all, confirmed } = await this.btcCoins();
     const pay = payCoinsFor(confirmed, all, feeFor(1) + BigInt(INSTANT_SEAL_SATS) + 546n, perInput);
-    if (!pay) throw new Error(`Your RGB wallet needs about ${(feeFor(1) + BigInt(INSTANT_SEAL_SATS) + 546n).toLocaleString('en-US')} sats in bitcoin for the network fee. Tap Add to RGB balance on Home.`);
+    if (!pay) throw new Error(`Your RGB wallet needs about ${(feeFor(1) + BigInt(INSTANT_SEAL_SATS) + 546n).toLocaleString('en-US')} sats in bitcoin for the network fee. Tap Add from Bitcoin under RGB balance on Home.`);
     const [si, ...fis] = await Promise.all([this.outpointInfo(from.outpoint), ...pay.coins.map((c) => this.outpointInfo(c.outpoint))]);
     const r = await this.onchainReceive({ assetId, amount: Number(amount), durationSeconds: 86400, witness: true });
     const seal = this.lib.WasmWallet.witnessSealScript(r.invoice);
@@ -994,7 +994,7 @@ export class LiteWallet {
     // confirmed coins first; change from this wallet's last trade too, and several coins if one isn't enough
     const { all, confirmed } = await this.btcCoins();
     const pay = payCoinsFor(confirmed, all, base + feeFor([P2TR_SCRIPT]), perInput);
-    if (!pay) throw new Error(`Your RGB wallet needs ${(base + feeFor([P2TR_SCRIPT])).toLocaleString('en-US')} sats in bitcoin for this. Tap Add to RGB balance on Home.`);
+    if (!pay) throw new Error(`Your RGB wallet needs ${(base + feeFor([P2TR_SCRIPT])).toLocaleString('en-US')} sats in bitcoin for this. Tap Add from Bitcoin under RGB balance on Home.`);
     const bis = await Promise.all(pay.coins.map((c) => this.outpointInfo(c.outpoint)));
     const r = await this.onchainReceive({ assetId: null, amount: Number(o.amount), durationSeconds: 86400, witness: true });
     const seal = this.lib.WasmWallet.witnessSealScript(r.invoice);

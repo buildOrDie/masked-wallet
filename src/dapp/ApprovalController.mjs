@@ -323,7 +323,7 @@ export class ApprovalController {
       if (short && a.prep) {
         a.prep = { ...a.prep, topUp: { sats: short + TOP_UP_MARGIN, have: app.rgb?.freeBtc?.().settled || 0 } };
         text = 'Your RGB balance is too low for this purchase. Add to it below, wait for one block, then try again.';
-      } else if (/^rgb/.test(a.method) && /Tap Add (BTC for RGB|to RGB balance)/.test(text) && app.rgb && !app.rgb.isMain) {
+      } else if (/^rgb/.test(a.method) && /Tap Add (BTC for RGB|to RGB balance|from Bitcoin)/.test(text) && app.rgb && !app.rgb.isMain) {
         // short of bitcoin for RGB's fee on a test network: top up from Public now, so the next try works
         app.rgb.fundedAt = 0;
         if (await app.rgb.autoFund().catch(() => false)) text = 'MASKED added test BTC to RGB from your Public balance, for the network fee. Wait for one block (about 10 minutes), then try again.';
