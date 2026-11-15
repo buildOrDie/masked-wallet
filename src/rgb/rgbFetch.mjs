@@ -24,10 +24,9 @@ export async function rgbFetch(input, init) {
   await slot();
   try {
     for (let i = 0; ; i++) {
-      // a Request body can be read once: send a copy each time
-      const req = typeof Request !== 'undefined' && input instanceof Request ? input.clone() : input;
+      const [url, opts] = await unpack(input, init);
       let r;
-      try { r = await globalThis.fetch(req, init); } catch (e) {
+      try { r = await globalThis.fetch(url, opts); } catch (e) {
         console.warn('[RGB] request failed', /** @type {any} */ (input)?.url || String(input), e?.name, e?.message || e);
         throw e;
       }
@@ -35,6 +34,24 @@ export async function rgbFetch(input, init) {
       return r;
     }
   } finally { release(); }
+}
+
+/**
+ * The engine hands fetch a Request object. Passed on as an address plus options with the body already read: the
+ * phone app's native HTTP (CapacitorHttp) takes a Request's body from request.body, which old Android WebViews
+ * don't have (Chrome < 105), so every POST went out empty there: the RGB transfer server's server.info check failed
+ * and buying said "No valid transport endpoint found". Read fresh each time (a body can be read once), so a retry
+ * sends it again.
+ * @param {RequestInfo | URL} input @param {RequestInit} [init] @returns {Promise<[string | URL, RequestInit | undefined]>}
+ */
+export async function unpack(input, init) {
+  if (typeof Request === 'undefined' || !(input instanceof Request)) return [input, init];
+  const req = input.clone();
+  const method = (init?.method || req.method || 'GET').toUpperCase();
+  const body = init?.body ?? (method === 'GET' || method === 'HEAD' ? undefined : await req.arrayBuffer());
+  const headers = new Headers(req.headers);
+  if (init?.headers) for (const [k, v] of new Headers(init.headers)) headers.set(k, v);
+  return [req.url, { ...(init || {}), method, headers, body, signal: init?.signal ?? req.signal }];
 }
 
 /** For tests: how many requests are in flight. */

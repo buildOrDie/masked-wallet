@@ -24,3 +24,18 @@ test('a 502 from the block server is retried too', async () => {
   globalThis.fetch = async () => new Response('', { status: ++n < 2 ? 502 : 200 });
   assert.equal((await rgbFetch('https://mempool.space/signet/api/z')).status, 200);
 });
+
+test('a Request from the engine is passed on as an address with its body already read (old Android WebViews)', async () => {
+  const { rgbFetch } = await import('../src/rgb/rgbFetch.mjs');
+  const seen = [];
+  const keep = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => { seen.push({ url, method: opts?.method, body: opts?.body ? new TextDecoder().decode(opts.body) : null, type: opts?.headers?.get('content-type') }); return new Response('{}'); };
+  try {
+    const body = JSON.stringify({ jsonrpc: '2.0', id: '1', method: 'server.info', params: null });
+    await rgbFetch(new Request('https://scan.example/rgb-proxy-v1/json-rpc', { method: 'POST', body, headers: { 'content-type': 'application/json' } }));
+    await rgbFetch(new Request('https://mempool.space/signet/api/block-height/0'));
+    assert.equal(typeof seen[0].url, 'string');
+    assert.equal(seen[0].method, 'POST'); assert.equal(seen[0].body, body); assert.equal(seen[0].type, 'application/json');
+    assert.equal(seen[1].method, 'GET'); assert.equal(seen[1].body, null);
+  } finally { globalThis.fetch = keep; }
+});
