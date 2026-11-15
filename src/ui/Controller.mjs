@@ -149,6 +149,8 @@ export class Controller {
     if (d.acctHide !== undefined) { app.accounts.hide(account.keys.rootFp, Number(d.acctHide)); f.acctMenu = '-1'; this.render(); return true; }
     if (d.acctUnhide !== undefined) { app.accounts.hide(account.keys.rootFp, Number(d.acctUnhide), false); f.acctMenu = '-1'; this.render(); return true; }
     if (d.side) { app.side.set(d.side); this.render(); return true; }
+    if (d.updateLater !== undefined) { app.update?.later(); return true; }
+    if (d.updateCheck !== undefined) { this.toast('Checking…'); app.update?.check(true).then((up) => this.toast(up ? `MASKED ${up.version} is out` : 'You have the latest version')); return true; }
     if (d.lang) { setLang(d.lang); try { localStorage.setItem('masked.lang-hint', '1'); } catch { /* */ } this.render(); return true; }
     if (d.copy != null) {
       this.toast((await copyText(d.copy)) ? 'Copied' : 'Copy failed — select and copy manually');

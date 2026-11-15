@@ -43,8 +43,15 @@ export class HomeView extends View {
       : '';
     const usd = (s) => fees.usdOf(s);
     const leafRow = LeafView.homeRow(app, side);
+    // the phone app: a newer version is out (it isn't on Google Play, so this is how people hear of it)
+    const up = app.update?.available();
+    const updateRow = up
+      ? `<div class="hint update-hint"><b>MASKED ${esc(up.version)} is out</b><span>Install it over this one: your wallet stays.</span>
+        <span class="lang-btns"><a class="btn primary sm" href="${esc(up.page)}" target="_blank" rel="noopener">Update</a><button class="btn ghost sm" data-update-later>Later</button></span></div>`
+      : '';
     return `
     ${HomeView.langHint()}
+    ${updateRow}
     ${w.source === 'example' ? '<div class="testnet-note warn">Demo wallet — keys are public. Create your own in Settings.</div>' : this.netBanner()}
     <section class="hero ${shd ? 'sh' : ''}">
       <p class="hero-label">${shd ? `${I.shieldPlain} Shielded balance` : 'Public balance'}</p>

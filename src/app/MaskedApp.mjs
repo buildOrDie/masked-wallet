@@ -23,6 +23,7 @@ import { ApprovalController } from '../dapp/ApprovalController.mjs';
 import { PsbtSigner } from '../dapp/PsbtSigner.mjs';
 import { SiteBridge } from '../dapp/SiteBridge.mjs';
 import { AppMarket } from '../dapp/AppMarket.mjs';
+import { AppUpdate } from './AppUpdate.mjs';
 import { Account } from '../wallet/Account.mjs';
 import { CoinStore } from '../wallet/CoinStore.mjs';
 import { InscriptionIndex } from '../wallet/InscriptionIndex.mjs';
@@ -85,6 +86,7 @@ export class MaskedApp {
     this.approvals = new ApprovalController(this);
     this.sites = new SiteBridge(this);
     this.market = new AppMarket(this); // the phone app's Market tab
+    this.update = new AppUpdate(this); // the phone app: is a newer version out?
 
     // screens
     this.lock = new LockController(this);
@@ -225,6 +227,7 @@ export class MaskedApp {
     if (platform.isApp || (!platform.hasExt && matchMedia('(max-width: 560px)').matches)) document.documentElement.classList.add('app');
     // Android back button: go back to the wallet home, and leave the app from there
     this.market.attach();
+    setTimeout(() => { this.update.check().catch(() => {}); }, 8000);
     if (platform.isApp) window.Capacitor.Plugins?.App?.addListener?.('backButton', () => {
       // an approval from the in-app market: Back is a no, and the market carries on
       if (state.view === 'approve' && this.market.pending.size && state.lockState === 'open') { this.approvals.reject(); return; }

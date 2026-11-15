@@ -57,6 +57,7 @@ export class SettingsView extends View {
         </div></details>
     </section>
     ${RgbSettings.render(app)}
+    ${app.update?.on ? (() => { const up = app.update.available({ ignoreLater: true }); return `<section class="card menu"><div class="menu-row"><span>${I.wallet}<b>Version ${esc(app.update.version)}</b></span>${up ? `<a class="small" href="${esc(up.page)}" target="_blank" rel="noopener">${esc(up.version)} is out: update ›</a>` : '<button class="btn ghost sm" data-update-check>Check for updates</button>'}</div></section>`; })() : ''}
     ${this.security(hasVault)}
     ${this.statusLine('wallet')}
     ${this.sites()}
