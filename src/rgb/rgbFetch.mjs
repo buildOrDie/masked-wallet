@@ -48,8 +48,11 @@ export async function unpack(input, init) {
   if (typeof Request === 'undefined' || !(input instanceof Request)) return [input, init];
   const req = input.clone();
   const method = (init?.method || req.method || 'GET').toUpperCase();
-  const body = init?.body ?? (method === 'GET' || method === 'HEAD' ? undefined : await req.arrayBuffer());
+  // CapacitorHttp sends a Uint8Array as is (an ArrayBuffer would go out as "{}"), and a multipart upload only as FormData
+  const multipart = /^multipart\/form-data/i.test(req.headers.get('content-type') || '');
+  const body = init?.body ?? (method === 'GET' || method === 'HEAD' ? undefined : multipart ? await req.formData() : new Uint8Array(await req.arrayBuffer()));
   const headers = new Headers(req.headers);
+  if (multipart && body instanceof FormData) headers.delete('content-type'); // the new body sets its own boundary
   if (init?.headers) for (const [k, v] of new Headers(init.headers)) headers.set(k, v);
   return [req.url, { ...(init || {}), method, headers, body, signal: init?.signal ?? req.signal }];
 }

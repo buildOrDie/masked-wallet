@@ -29,13 +29,17 @@ test('a Request from the engine is passed on as an address with its body already
   const { rgbFetch } = await import('../src/rgb/rgbFetch.mjs');
   const seen = [];
   const keep = globalThis.fetch;
-  globalThis.fetch = async (url, opts) => { seen.push({ url, method: opts?.method, body: opts?.body ? new TextDecoder().decode(opts.body) : null, type: opts?.headers?.get('content-type') }); return new Response('{}'); };
+  globalThis.fetch = async (url, opts) => { seen.push({ url, method: opts?.method, body: opts?.body instanceof FormData ? 'form:' + opts.body.get('file') : opts?.body ? new TextDecoder().decode(opts.body) : null, isBytes: opts?.body instanceof Uint8Array, type: opts?.headers?.get('content-type') }); return new Response('{}'); };
   try {
     const body = JSON.stringify({ jsonrpc: '2.0', id: '1', method: 'server.info', params: null });
     await rgbFetch(new Request('https://scan.example/rgb-proxy-v1/json-rpc', { method: 'POST', body, headers: { 'content-type': 'application/json' } }));
     await rgbFetch(new Request('https://mempool.space/signet/api/block-height/0'));
     assert.equal(typeof seen[0].url, 'string');
     assert.equal(seen[0].method, 'POST'); assert.equal(seen[0].body, body); assert.equal(seen[0].type, 'application/json');
+    assert.ok(seen[0].isBytes, 'a Uint8Array (CapacitorHttp sends an ArrayBuffer as "{}")');
     assert.equal(seen[1].method, 'GET'); assert.equal(seen[1].body, null);
+    const fd = new FormData(); fd.append('file', 'consignment-bytes');
+    await rgbFetch(new Request('https://scan.example/rgb-proxy/json-rpc', { method: 'POST', body: fd }));
+    assert.equal(seen[2].body, 'form:consignment-bytes', 'a multipart upload stays a form');
   } finally { globalThis.fetch = keep; }
 });
