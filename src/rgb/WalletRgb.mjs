@@ -41,7 +41,7 @@ export function rgbError(error, profile = profileOf('utexo')) {
     return `RGB is still setting up. Wait for one block (about 10 minutes), then try again. (${text})`;
   }
   if (/insufficient|not enough/i.test(text)) {
-    if (profile.id === 'mainnet') return `Not enough confirmed BTC in RGB for the network fee. Tap Add BTC for RGB on Home, wait for a block, then try again. (${text})`;
+    if (profile.id === 'mainnet') return `Not enough confirmed bitcoin in your RGB balance for the network fee. Tap Add to RGB balance on Home, wait for a block, then try again. (${text})`;
     return profile.id === 'utexo'
       ? `Not enough test BTC for this. Get some with /getbtc at the Utexo faucet, then Refresh. (${text})`
       : `Not enough confirmed test BTC for RGB. Tap Add test BTC on Home, wait for a block, then try again. (${text})`;
@@ -337,6 +337,15 @@ export class WalletRgb {
     return { settled, pending: Math.max(0, sum('future') - settled) };
   }
   amount(a, n) { return fromBase(n, a?.precision || 0); }
+  /** Bitcoin in the RGB balance that can pay for things (not holding tokens): settled and waiting, in sats. */
+  freeBtc() { const v = this.data?.btc?.vanilla || {}; const settled = Number(v.settled || 0); return { settled, pending: Math.max(0, Number(v.future || 0) - settled) }; }
+  /** What keeps "Move everything" from running: open invoices, sends not finished, Instant listings. '' when nothing. */
+  moveAllBlocked() {
+    if (this.invoices().some((x) => this.invoiceStatus(x).key === 'waiting')) return 'You have an open RGB invoice. Cancel it or let it be paid first (it holds one of the outputs).';
+    if (Object.keys(this.data?.transfers || {}).some((id) => this.unsent(id).length)) return 'A token transfer is still waiting for the other wallet. Let it finish or cancel it first.';
+    if (Object.values(this.service?.instantStore?.().all() || {}).some((e) => e?.role === 'seller' && ['moving', 'cancelling'].includes(e.stage))) return 'An Instant listing is moving its tokens. Wait for that transaction\'s block first.';
+    return '';
+  }
   /** Ask each transfer server in the pending send whether it answers and speaks our protocol. */
   async checkProxies() {
     const p = this.pending;
@@ -568,7 +577,7 @@ export class WalletRgb {
     try { return await fn(); } catch (e) {
       const text = typeof e === 'string' ? e : e?.message || '';
       // short of bitcoin for the fee (MASKED's own check): on a test network, top up from Public first
-      if (/Tap Add BTC for RGB/.test(text) && !this.isMain) {
+      if (/Tap Add (BTC for RGB|to RGB balance)/.test(text) && !this.isMain) {
         this.fundedAt = 0; // asked for now, not on the 20-minute timer
         if (await this.autoFund()) throw new Error('MASKED added test BTC to RGB from your Public balance, for the network fee. Wait for one block (about 10 minutes), then tap again.');
         throw e;
@@ -576,7 +585,7 @@ export class WalletRgb {
       if (!NEEDS_OUTPUTS.test(text)) throw e;
       if (this.btc().settled < 1500) {
         if (!this.isMain && await this.autoFund()) throw new Error('MASKED added test BTC to RGB from your Public balance. Wait for one block (about 10 minutes), then tap again.');
-        throw new Error(this.isMain ? 'Add BTC for RGB first: tap Add BTC for RGB on Home, then wait for a block.' : 'Add test BTC first: tap Add test BTC on Home, then wait for a block.');
+        throw new Error('Your RGB balance is empty: tap Add to RGB balance on Home, then wait for a block.');
       }
       this.message = 'Setting up RGB…'; this.app.render();
       await this.service.createUtxos(this.fee());
@@ -707,6 +716,30 @@ export class WalletRgb {
         });
       }
       case 'refresh': return this.run(() => this.refresh(true));
+      case 'withdraw': this.withdraw = { open: true }; this.message = ''; return app.render();
+      case 'withdrawClose': this.withdraw = null; this.message = ''; return app.render();
+      case 'withdrawGo': {
+        const to = app.account?.pubAddr?.();
+        if (!to || !this.payoutScript()) { this.message = 'Your Bitcoin balance is on another network than RGB. Switch the wallet to the same network first.'; return app.render(); }
+        const all = arg === 'all';
+        let sats = 0;
+        if (!all) {
+          const el = /** @type {HTMLInputElement|null} */ (document.getElementById('rgbWdAmt'));
+          sats = Math.floor(Number(String(el?.value || '').replace(/[,\s]/g, '')));
+          if (!(sats >= 546)) { this.message = 'Enter at least 546 sats.'; return app.render(); }
+          if (sats > this.freeBtc().settled) { this.message = `Your RGB balance has ${this.freeBtc().settled.toLocaleString('en-US')} sats free to move (confirmed, not holding tokens).`; return app.render(); }
+        } else {
+          const why = this.moveAllBlocked();
+          if (why) { this.message = why; return app.render(); }
+        }
+        return this.run(async () => {
+          this.message = 'Moving…'; app.render();
+          const txid = await this.service.sendBtcOut({ address: to, sats, all, fee: this.fee() });
+          this.withdraw = null;
+          await this.refresh();
+          app.toast(`Moved ${all ? 'your RGB balance' : `${sats.toLocaleString('en-US')} sats`} to your Bitcoin balance (${String(txid).slice(0, 10)}…). It shows after one block.`, 6000);
+        });
+      }
       case 'fund': {
         if (!this.data?.address) return;
         f.sendMode = 'send'; f.sendFrom = 'public'; f.sendTo = this.data.address; f.sendAmount = RGB_FUND_BTC;

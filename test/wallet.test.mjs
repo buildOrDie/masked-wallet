@@ -221,16 +221,18 @@ test('Home on Signet: a "Try RGB tokens" card, then RGB tokens in the same rows 
   assert.match(html, /RGB tokens/);
   assert.match(html, /class="tok-line" data-rgb="token" data-rgb-arg="rgb:tusd"/);
   assert.match(html, /1,234\.5/, 'amount in token units, not base units');
-  assert.match(html, /Add test BTC for RGB/, 'low test BTC: one tap to fund from Public');
-  assert.match(html, /Test BTC for fees/, 'RGB\'s own BTC and address are on Home');
-  assert.match(html, /data-copy="tb1qrgbfunding"/);
+  assert.match(html, /Add to your RGB balance/, 'low RGB balance: one tap to add from the Bitcoin balance');
+  assert.match(html, /RGB balance/, 'the RGB balance is on Home, by name');
+  assert.match(html, /data-rgb="fund"[^>]*>.*Add from Bitcoin/s);
+  assert.match(html, /data-rgb="withdraw"[^>]*>.*Move to Bitcoin/s);
+  assert.doesNotMatch(html, /data-copy="tb1qrgbfunding"/, 'its address is not on Home (Settings → RGB has it)');
   assert.doesNotMatch(html, /Prepare RGB outputs|password/i, 'no manual setup steps');
   assert.equal(app.account.pubAddr(), address);
   app.state.net = 'main';
   // mainnet: only an opt-in beta card, nothing opens until it is switched on
   const main = app.ui.views.home.render();
   assert.match(main, /data-rgb="beta"[^>]*>.*RGB tokens \(beta\)/s);
-  assert.doesNotMatch(main, /Test BTC for fees|data-rgb="fund"/);
+  assert.doesNotMatch(main, /RGB balance|data-rgb="fund"/);
   assert.equal(app.rgb.available, false);
   assert.equal(app.rgb.profile.id, 'mainnet');
 });
@@ -492,7 +494,57 @@ test('RGB outputs are made by themselves when a step needs them', async () => {
   assert.deepEqual(calls, [['utxos', '1']]); // Signet: 1 sat/vB
   await assert.rejects(app.rgb.withOutputs(async () => { throw 'InsufficientAllocationSlots'; }), /Wait for one block/);
   app.rgb.data.btc.vanilla.settled = 0;
-  await assert.rejects(app.rgb.withOutputs(async () => { throw 'InsufficientAllocationSlots'; }), /Add test BTC first/);
+  await assert.rejects(app.rgb.withOutputs(async () => { throw 'InsufficientAllocationSlots'; }), /RGB balance is empty/);
+});
+
+test('RGB balance: move bitcoin back to the Bitcoin balance (an amount, or everything not holding tokens)', async () => {
+  const app = rgbApp();
+  rgbReady(app, { btc: { vanilla: { settled: 40000, future: 40000 }, colored: { settled: 2000, future: 2000 } } });
+  const sent = [];
+  Object.assign(app.rgb.service, { sendBtcOut: async (o) => { sent.push(o); return 'cd'.repeat(32); }, snapshot: async () => app.rgb.data });
+  app.rgb.refresh = async () => {};
+  const input = { value: '25,000' };
+  globalThis.document = { getElementById: (id) => (id === 'rgbWdAmt' ? input : null) };
+  try {
+    await app.rgb.action('withdraw');
+    assert.match(app.ui.views.home.render(), /40,000 free to move/);
+    await app.rgb.action('withdrawGo');
+    assert.deepEqual(sent[0], { address: app.account.pubAddr(), sats: 25000, all: false, fee: '1' });
+    assert.equal(app.rgb.withdraw, null, 'the form closes once sent');
+    // more than is free: refused, nothing sent
+    input.value = '50000'; await app.rgb.action('withdraw'); await app.rgb.action('withdrawGo');
+    assert.equal(sent.length, 1); assert.match(app.rgb.message, /40,000 sats free to move/);
+    // everything: refused while an invoice is open, then sent
+    app.rgb.invoices = () => [{ recipientId: 'r1' }]; app.rgb.invoiceStatus = () => ({ key: 'waiting' });
+    await app.rgb.action('withdrawGo', 'all');
+    assert.equal(sent.length, 1); assert.match(app.rgb.message, /open RGB invoice/);
+    app.rgb.invoiceStatus = () => ({ key: 'paid' });
+    await app.rgb.action('withdrawGo', 'all');
+    assert.deepEqual(sent[1], { address: app.account.pubAddr(), sats: 0, all: true, fee: '1' });
+  } finally { delete globalThis.document; }
+});
+
+test('Buying with too little in the RGB balance: the purchase screen offers to add exactly what it needs', async () => {
+  const { topUpFor, shortfallOf } = await import('../src/dapp/ApprovalController.mjs');
+  assert.equal(shortfallOf('Your RGB wallet needs one bitcoin output over 26,320 sats. Tap Add to RGB balance on Home.'), 26320);
+  assert.equal(shortfallOf('Your RGB wallet needs 12,000 sats in bitcoin for this.'), 12000);
+  assert.equal(shortfallOf('Something else'), 0);
+  const r = { freeBtc: () => ({ settled: 5000, pending: 0 }) };
+  assert.deepEqual(topUpFor(r, 20000), { sats: 21000, have: 5000 });
+  assert.equal(topUpFor({ freeBtc: () => ({ settled: 50000 }) }, 20000), null);
+  // the button: from the Bitcoin balance to the RGB balance, once
+  const app = rgbApp();
+  rgbReady(app);
+  const sends = [];
+  app.builder = { send: async (o) => { sends.push(o); return { hex: '00', txid: 'ef'.repeat(32), spent: [] }; } };
+  app.broadcast = async () => {}; app.afterBroadcast = async () => {};
+  app.approvals.active = { method: 'rgbInstantBuy', prep: { price: 20000, topUp: { sats: 21000, have: 0 } } };
+  await app.approvals.topUp();
+  assert.deepEqual(sends, [{ from: 'public', to: 'tb1qrgbfunding', amount: 21000, rate: app.feeRate() }]);
+  assert.equal(app.approvals.active.prep.topUp.sent, 'ef'.repeat(32));
+  await app.approvals.topUp();
+  assert.equal(sends.length, 1, 'not twice');
+  assert.match(app.state.status.approve[0], /ready after one block/);
 });
 
 test('RGB actions refuse Mainnet and a locked wallet', async () => {

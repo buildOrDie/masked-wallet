@@ -15,6 +15,19 @@ export const NEEDS_PREP = ['sendBitcoin', 'inscribeTransfer', 'shareTrade', 'fun
 const SWAP_METHODS = ['rgbSwapAvailable', 'rgbListAssets', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantBuy', 'rgbInstantCancel'];
 const RGB_METHODS = ['rgbInvoice', 'rgbPay', ...SWAP_METHODS];
 const SWAP_SIZE_VB = 320;
+/** Kept on top of a purchase's own cost when topping up the RGB balance (the exact fee depends on the coins). */
+const TOP_UP_MARGIN = 1000;
+const BUYS = ['rgbBuyPrepare', 'rgbInstantBuy'];
+/** A purchase the RGB balance can't pay: how much to add from the Bitcoin balance (null when it can). */
+export function topUpFor(r, cost) {
+  const have = r.freeBtc ? r.freeBtc().settled : 0;
+  return have >= cost + TOP_UP_MARGIN ? null : { sats: cost + TOP_UP_MARGIN, have };
+}
+/** The engine's "needs N sats" for a purchase, as a number (0 when the text says something else). */
+export function shortfallOf(text) {
+  const m = /RGB wallet needs (?:about |one bitcoin output over |one confirmed bitcoin output over )?([\d,]+) sats/i.exec(String(text || ''));
+  return m ? Number(m[1].replace(/,/g, '')) : 0;
+}
 const hostOf = (u) => { try { return new URL(proxyUrl(u)).host; } catch { return String(u); } };
 
 export class ApprovalController {
@@ -213,7 +226,8 @@ export class ApprovalController {
       const base = { asset, assetId: o.assetId, shown, price: Number(o.priceSats), newToken: !asset };
       if (m === 'rgbBuyPrepare') {
         const rate = P.feeRate || Number(r.fee());
-        return { ...base, fee: Math.ceil(rate * SWAP_SIZE_VB), rate };
+        const fee = Math.ceil(rate * SWAP_SIZE_VB);
+        return { ...base, fee, rate, topUp: topUpFor(r, base.price + fee) };
       }
       if (m === 'rgbInstantList' || m === 'rgbInstantBuy' || m === 'rgbInstantCancel') {
         if (!r.service.canPresign) throw new Error('This MASKED version can\'t do Instant listings yet. Update MASKED.');
@@ -221,7 +235,7 @@ export class ApprovalController {
         // usual sizes (one coin of yours, taproot); the wallet works out the exact fee from the real coins
         const vb = m === 'rgbInstantBuy' ? instantBuyVbytes(1, true) : instantMoveVbytes(1);
         const fee = Math.ceil(rate * vb);
-        if (m === 'rgbInstantBuy') return { ...base, fee, rate, vb, seal: INSTANT_SEAL_SATS };
+        if (m === 'rgbInstantBuy') return { ...base, fee, rate, vb, seal: INSTANT_SEAL_SATS, topUp: topUpFor(r, base.price + fee + INSTANT_SEAL_SATS) };
         if (m === 'rgbInstantList') {
           if (!asset) throw new Error('You don\'t hold this token in RGB.');
           // asked again for a listing whose tokens are moving (Finish listing): no new transaction, just the signing
@@ -277,6 +291,23 @@ export class ApprovalController {
     this.app.platform.message({ type: 'resolveRequest', id: a.id, ...payload }).finally(() => { if (!this.app.platform.local) setTimeout(() => window.close(), 150); });
   }
 
+  /** The purchase screen's "Add to RGB balance": exactly what the purchase needs, from the Bitcoin balance. */
+  async topUp() {
+    const app = this.app, state = this.state, a = this.active, r = app.rgb, t = a?.prep?.topUp;
+    if (!t || t.sent || !r?.data?.address) return;
+    state.busy = true; app.render();
+    try {
+      const b = await app.builder.send({ from: 'public', to: r.data.address, amount: t.sats, rate: app.feeRate() });
+      await app.broadcast(b.hex);
+      await app.afterBroadcast?.(b.spent, [b.txid]);
+      r.fundedAt = Date.now();
+      a.prep = { ...a.prep, topUp: { ...t, sent: b.txid } };
+      state.status.approve = [`Added ${t.sats.toLocaleString('en-US')} sats to your RGB balance. It's ready after one block (about 10 minutes). Then try again.`, 'ok'];
+    } catch (e) {
+      state.status.approve = [friendly(String(e?.message || e)) || 'Could not add to the RGB balance.', 'err'];
+    } finally { state.busy = false; app.render(); }
+  }
+
   reject() { this.finish({ error: { code: 4001, message: 'User rejected the request.' } }); }
 
   async approve() {
@@ -287,8 +318,13 @@ export class ApprovalController {
     } catch (e) {
       // the RGB engine throws plain strings, not Error objects: show them too, never an empty line
       let text = /^rgb/.test(a.method) ? rgbError(e, app.rgb?.profile) : String(e?.message || e || '');
-      // short of bitcoin for RGB's fee on a test network: top up from Public now, so the next try works
-      if (/^rgb/.test(a.method) && /Tap Add BTC for RGB/.test(text) && app.rgb && !app.rgb.isMain) {
+      // a purchase the RGB balance can't pay: offer to add exactly what it needs (one tap, shown on this screen)
+      const short = BUYS.includes(a.method) ? shortfallOf(text) : 0;
+      if (short && a.prep) {
+        a.prep = { ...a.prep, topUp: { sats: short + TOP_UP_MARGIN, have: app.rgb?.freeBtc?.().settled || 0 } };
+        text = 'Your RGB balance is too low for this purchase. Add to it below, wait for one block, then try again.';
+      } else if (/^rgb/.test(a.method) && /Tap Add (BTC for RGB|to RGB balance)/.test(text) && app.rgb && !app.rgb.isMain) {
+        // short of bitcoin for RGB's fee on a test network: top up from Public now, so the next try works
         app.rgb.fundedAt = 0;
         if (await app.rgb.autoFund().catch(() => false)) text = 'MASKED added test BTC to RGB from your Public balance, for the network fee. Wait for one block (about 10 minutes), then try again.';
       }

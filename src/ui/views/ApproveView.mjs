@@ -186,10 +186,12 @@ export class ApproveView extends View {
       rgbBuyPrepare: 'MASKED holds one of your bitcoin outputs for this purchase and makes an invoice for the tokens. Nothing is paid yet: you sign once the seller has prepared the swap.',
       rgbSalePrepare: 'MASKED prepares one transaction: your tokens to the buyer, the buyer\'s bitcoin to you. Nothing is sent until both of you have signed.',
       rgbBuySign: 'MASKED checked the seller\'s tokens and every output of the transaction. Your bitcoin and the tokens move together in one transaction, or not at all.',
-      rgbSaleComplete: 'This signs and broadcasts the swap the buyer already signed. Your tokens go to the buyer and the bitcoin comes to your RGB wallet.',
+      rgbSaleComplete: 'This signs and broadcasts the swap the buyer already signed. Your tokens go to the buyer and the bitcoin comes to your Bitcoin balance.',
       rgbInstantBuy: 'An Instant listing: the seller signed it in advance. MASKED checks the seller\'s signature, the tokens and every output, then pays and broadcasts in one transaction. The tokens show after one confirmation. If someone else buys it first, nothing is paid.',
     }[m];
-    return `${hero}<div class="kv">${rowKV('Token', tok)}${rows}${rowKV('Network', esc(this.app.rgb.profile.label))}</div>
+    const top = buying && b?.topUp ? `<div class="info warn"><b>Your RGB balance is too low for this.</b> Buying RGB tokens is paid from your RGB balance (${sats(b.topUp.have || 0)} free now). Add ${sats(b.topUp.sats)} from your Bitcoin balance: one transaction, ready after one block (about 10 minutes). Then come back and buy.</div>
+      <button class="btn ghost wide" data-ap-topup ${b.topUp.sent || this.state.busy ? 'disabled' : ''}>${b.topUp.sent ? 'Added. Ready after one block' : `Add ${sats(b.topUp.sats)} to RGB balance`}</button>` : '';
+    return `${hero}<div class="kv">${rowKV('Token', tok)}${rows}${rowKV('Network', esc(this.app.rgb.profile.label))}</div>${top}
     ${b?.newToken && buying ? '<p class="info">You don\'t hold this token yet. Check its asset ID with the issuer: anyone can give a token any name.</p>' : ''}
     <p class="info">${next}</p>${this.rgbWait(a)}${this.error(a)}`;
   }

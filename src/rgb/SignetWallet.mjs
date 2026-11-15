@@ -105,6 +105,8 @@ export class SignetWallet {
       return fn(wallet);
     });
   }
+  /** Bitcoin from the RGB balance to an address; tokens stay (see LiteWallet.sendBtcOut). */
+  sendBtcOut({ address, sats, all, fee }) { return this.mutate(wallet => wallet.sendBtcOut({ address, sats, all, feeRate: testFee(fee) })); }
   createUtxos(fee) { return this.mutate(wallet => wallet.createUtxos({ upTo: true, num: 4, size: 1000, feeRate: testFee(fee) })); }
   /** Issue a new test asset (NIA) to this wallet. Needs prepared RGB outputs. */
   issue(fields) {

@@ -3,7 +3,7 @@
 // page layout, the review card and the done screen.
 import { dayLabel, esc, fmtBtc, short } from '../../core/format.mjs';
 import { RGB_PROFILES } from '../../rgb/config.mjs';
-import { RGB_BLIND_MIN, RGB_EXPIRY, RGB_FUND_BTC, RGB_LOW_BTC } from '../../rgb/WalletRgb.mjs';
+import { RGB_BLIND_MIN, RGB_EXPIRY, RGB_LOW_BTC } from '../../rgb/WalletRgb.mjs';
 import { View } from '../View.mjs';
 import { I, addrChunks, btcLogo, head, qrSvg, rowKV, tokIcon } from '../html.mjs';
 
@@ -78,7 +78,6 @@ export class RgbHome {
     }
     const list = r.assets();
     const { settled, pending } = r.btc();
-    const t = r.isMain ? '' : 'test ';
     // with cloud backup on, Home only speaks up when the cloud could not save
     const cloudFail = r.cloudOn && r.cloud.error && r.service?.backupRequired;
     const backupDue = cloudFail
@@ -86,14 +85,22 @@ export class RgbHome {
       : r.isMain && !r.cloudOn && r.service?.backupRequired
         ? `<button class="hint hint-cta" data-rgb="backup" ${r.busy ? 'disabled' : ''}><span class="hint-ic">${I.check}</span><span><b>Save your RGB backup</b><span>${r.service?.everBackedUp ? 'Something changed since your last backup. Save a new one to keep it.' : 'Needed once before you use RGB. Your recovery phrase alone can\'t bring RGB tokens back.'}</span></span><span class="chev">›</span></button>`
         : '';
+    const unit = r.isMain ? 'BTC' : 'tBTC';
     const fund = settled + pending < RGB_LOW_BTC
-      ? `<button class="hint hint-cta" data-rgb="fund"><span class="hint-ic">${I.recv}</span><span><b>Add ${t}BTC for RGB</b><span>RGB pays its own network fees. Send ${RGB_FUND_BTC} from your Public balance.</span></span><span class="chev">›</span></button>`
+      ? `<button class="hint hint-cta" data-rgb="fund"><span class="hint-ic">${I.recv}</span><span><b>Add to your RGB balance</b><span>Buying RGB tokens and their network fees are paid from your RGB balance. Add some from your Bitcoin balance.</span></span><span class="chev">›</span></button>`
       : '';
-    // RGB's own test BTC (it pays RGB's network fees), with its address: tap to copy
-    const addr = r.data.address || '';
-    const feeRow = `<button class="tok-line rgb-fee" data-copy="${esc(addr)}" title="Copy RGB address">${btcLogo}
-        <span class="bal-txt"><b class="tk">${r.isMain ? 'RGB fees' : 'Test BTC for fees'}</b><span class="mono">${esc(short(addr, 6))} ${I.copy}</span></span>
-        <span class="bal-amt"><b>${fmtBtc(settled)}</b><span>${pending ? `<span class="pend-t">+${fmtBtc(pending)} waiting for a block</span>` : r.isMain ? 'BTC' : 'tBTC'}</span></span></button>`;
+    // the RGB balance: its own bitcoin (buying tokens, network fees). Moved to and from the Bitcoin balance in one tap;
+    // its address stays in Settings → RGB, for support
+    const free = r.freeBtc();
+    const wd = r.withdraw ? `<div class="card rgb-wd">
+        <p class="small">Moves bitcoin from your RGB balance to your Bitcoin balance. Bitcoin holding RGB tokens stays where it is.</p>
+        <label class="field"><span class="lbl">Amount in sats · ${free.settled.toLocaleString('en-US')} free to move</span><input id="rgbWdAmt" inputmode="numeric" autocomplete="off" placeholder="20000"></label>
+        <div class="row-btns"><button class="btn primary" data-rgb="withdrawGo" ${r.busy ? 'disabled' : ''}>Move</button><button class="btn ghost" data-rgb="withdrawGo" data-rgb-arg="all" ${r.busy ? 'disabled' : ''}>Move everything</button><button class="btn ghost" data-rgb="withdrawClose">Cancel</button></div>
+        <p class="muted small">Move everything also empties the small RGB outputs no token uses. RGB makes new ones from its balance the next time it needs them.</p>${msg(r)}</div>` : '';
+    const feeRow = `<div class="tok-line rgb-fee">${btcLogo}
+        <span class="bal-txt"><b class="tk">RGB balance</b><span>For buying RGB tokens and network fees</span></span>
+        <span class="bal-amt"><b>${fmtBtc(settled)}</b><span>${pending ? `<span class="pend-t">+${fmtBtc(pending)} waiting for a block</span>` : unit}</span></span></div>
+      <div class="rgb-bal-act"><button class="btn ghost sm" data-rgb="fund">${I.plus}<span>Add from Bitcoin</span></button><button class="btn ghost sm" data-rgb="${r.withdraw ? 'withdrawClose' : 'withdraw'}" ${settled + pending ? '' : 'disabled'}>${I.send}<span>Move to Bitcoin</span></button></div>${wd}`;
     return `<section class="home-toks">
       <div class="list-h"><b>RGB tokens${r.isMain ? ' <span class="badge">beta</span>' : ''}</b><button class="link small" data-rgb="refresh" ${r.busy ? 'disabled' : ''}>${r.busy ? 'Updating…' : r.data.cached ? 'Last saved · Refresh' : 'Refresh'}</button></div>
       ${backupDue}${fund}
@@ -403,9 +410,10 @@ export class RgbSettings {
       <div class="det-body">
         ${nets ? `<div class="field"><span class="lbl">Test network</span>${nets}</div>${RgbSettings.cloud(r)}` : `<p class="info warn">Beta on Bitcoin mainnet. RGB tokens can only be restored from an RGB backup, not from the recovery phrase alone. Keep amounts small.</p>${RgbSettings.cloud(r)}`}
         ${r.ready ? `
-        ${rowKV(r.isMain ? 'BTC for RGB fees' : 'Test BTC for fees', `${fmtBtc(settled)} ${r.isMain ? 'BTC' : 'tBTC'}${pending ? ` <span class="muted">+${fmtBtc(pending)} pending</span>` : ''}`)}
+        ${rowKV('RGB balance', `${fmtBtc(settled)} ${r.isMain ? 'BTC' : 'tBTC'}${pending ? ` <span class="muted">+${fmtBtc(pending)} pending</span>` : ''}`)}
+        <p class="muted small">Its own address, for support. To add to it, use Add from Bitcoin on Home.</p>
         <p class="addr mono small">${addrChunks(r.data?.address || '')}</p>
-        <button class="btn ghost sm" data-copy="${esc(r.data?.address || '')}">${I.copy}<span>Copy RGB address</span></button>
+        <button class="btn ghost sm" data-copy="${esc(r.data?.address || '')}">${I.copy}<span>Copy RGB balance address</span></button>
         <p class="muted small">${esc(r.profile.funding)}</p>
         ${Object.keys(r.data?.transfers || {}).some((id) => r.unsent(id).length) ? '<p class="info warn small">A transfer is waiting for the other wallet to accept it. Let it finish, or cancel it, before you restore this wallet anywhere else: a restored wallet can\'t finish a transfer that was already signed.</p>' : ''}
         <button class="btn ghost wide" data-rgb="backup" ${r.busy ? 'disabled' : ''}>Save RGB backup file</button>

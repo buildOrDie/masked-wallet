@@ -600,6 +600,12 @@ a.act, a.act:hover { text-decoration: none; color: inherit; }
 .rgb-fee .bal-txt b, .rgb-fee .bal-amt b { white-space: nowrap; }
 .rgb-fee .bal-txt b { overflow: hidden; text-overflow: ellipsis; }
 .rgb-fee .bal-amt { flex: none; }
+.rgb-fee { cursor: default; }
+.rgb-fee:hover { border-color: var(--line); }
+.rgb-bal-act { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.rgb-wd { display: grid; gap: 8px; padding: 12px 14px; }
+.rgb-wd .row-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.rgb-wd .row-btns .btn { flex: 1 1 auto; }
 .h-cancel { margin: -4px 0 8px auto; display: block; }
 .lang-row { gap: 10px; }
 .lang-row .seg small { font-size: 10px; color: var(--btc-2); font-weight: 800; }
