@@ -79,7 +79,7 @@ test('balances and assets in the shapes the screens read', async () => {
 test('prepare outputs, issue, receive: signs with its own keys and saves to IndexedDB', async () => {
   const { w, calls } = await open();
   assert.equal(await w.createUtxos({ upTo: true, num: 4, size: 1000, feeRate: 2 }), 4);
-  assert.deepEqual(calls.find((c) => c[0] === 'createUtxosBegin'), ['createUtxosBegin', true, 4, 1000, 2n, false]);
+  assert.deepEqual(calls.find((c) => c[0] === 'createUtxosBegin'), ['createUtxosBegin', true, 4, 1000, 2n, false], 'an explicit size is kept');
   assert.deepEqual(calls.find((c) => c[0] === 'createUtxosEnd'), ['createUtxosEnd', 'signed-psbt-u', false]);
   // "up to 4" makes none when outputs with room already exist; a send may still need one for its change: make 2
   const real = w.w.createUtxosBegin.bind(w.w);

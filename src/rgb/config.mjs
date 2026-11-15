@@ -116,3 +116,6 @@ export function fromBase(n, precision) {
   const whole = s.slice(0, s.length - precision) || '0', frac = precision ? s.slice(-precision).replace(/0+$/, '') : '';
   return Number(whole).toLocaleString('en-US') + (frac ? '.' + frac : '');
 }
+
+/** Bitcoin on each output MASKED makes ready for RGB tokens: 330 sats, the smallest a Taproot output can be (UniSat uses the same). */
+export const RGB_UTXO_SATS = 330;

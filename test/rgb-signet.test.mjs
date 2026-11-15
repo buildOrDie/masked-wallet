@@ -75,7 +75,7 @@ test('backup includes both keys and RGB state, then restore precedes unlock', as
 test('transactions mark the backup as out of date before SDK mutation (a reminder, not a block)', async () => {
   const f = fixture(); await open(f); f.service.backupSaved(); await f.service.createUtxos('2');
   assert.equal(f.storage.getItem(RGB_DIRTY_KEY), '1');
-  assert.deepEqual(f.calls.at(-1), ['utxos', { upTo: true, num: 4, size: 1000, feeRate: 2 }]);
+  assert.deepEqual(f.calls.at(-1), ['utxos', { upTo: true, num: 4, size: 330, feeRate: 2 }]);
 });
 test('snapshot is sequential, supports bigint and notices newly received state', async () => {
   const f = fixture(); await open(f); f.service.backupSaved(); await f.service.snapshot();

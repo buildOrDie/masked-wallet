@@ -1,4 +1,4 @@
-import { RGB_PROFILES, dirtyKey, baseUnits, testFee, newAsset } from './config.mjs';
+import { RGB_PROFILES, dirtyKey, baseUnits, testFee, newAsset, RGB_UTXO_SATS } from './config.mjs';
 import { decryptRgb, encryptRgb } from './backup.mjs';
 import { b64, unb64 } from './bytes.mjs';
 
@@ -107,7 +107,7 @@ export class SignetWallet {
   }
   /** Bitcoin from the RGB balance to an address; tokens stay (see LiteWallet.sendBtcOut). */
   sendBtcOut({ address, sats, all, fee }) { return this.mutate(wallet => wallet.sendBtcOut({ address, sats, all, feeRate: testFee(fee) })); }
-  createUtxos(fee) { return this.mutate(wallet => wallet.createUtxos({ upTo: true, num: 4, size: 1000, feeRate: testFee(fee) })); }
+  createUtxos(fee) { return this.mutate(wallet => wallet.createUtxos({ upTo: true, num: 4, size: RGB_UTXO_SATS, feeRate: testFee(fee) })); }
   /** Issue a new test asset (NIA) to this wallet. Needs prepared RGB outputs. */
   issue(fields) {
     const params = newAsset(fields);

@@ -7,6 +7,7 @@ import * as btc from '@scure/btc-signer';
 import { hex, base64 } from '@scure/base';
 import { isInvoiceV1, readInvoiceV1, invoiceIdOf, pickEndpoint, newSenderKey, sharedKeys, deliverConsignment, endpointUrl, rpc, PROXY_V1 } from './proxyV1.mjs';
 import { SEAL_SATS, SEAL_OUTPUT, SWAP_SIZE_VB, b64, buyerOutputs, outpointOf, completionBlocker, readOffer, buyerCoinFor, offerable, payoutFor, changedTerms, unb64, exactCoinFor, freeSellerCoinFor, sendCoinsFor, instantAmounts, INSTANT_SEAL_OUTPUT, INSTANT_SEAL_SATS, payCoinsFor, txVbytes, OPRET_SCRIPT, P2TR_SCRIPT } from './swap.mjs';
+import { RGB_UTXO_SATS } from './config.mjs';
 
 /** rgb-lib names for our network ids. Utexo's custom Signet uses Signet rules too. */
 const NETWORKS = { mainnet: 'Mainnet', signet: 'Signet', utexo: 'Signet', testnet: 'Testnet', testnet4: 'Testnet4', regtest: 'Regtest' };
@@ -223,7 +224,7 @@ export class LiteWallet {
   sign(psbt) { return this.wallet.signPsbt(psbt); }
 
   /** Make outputs that can hold RGB assets (one Bitcoin transaction). */
-  async createUtxos({ upTo = true, num: n = 4, size = 1000, feeRate }) {
+  async createUtxos({ upTo = true, num: n = 4, size = LiteWallet.UTXO_SATS, feeRate }) {
     const online = this.requireOnline();
     const begin = (u, k) => this.wallet.createUtxosBegin(online, u, k, size, BigInt(Math.round(feeRate)), false);
     let psbt;
@@ -263,6 +264,7 @@ export class LiteWallet {
   /** Sats the sender puts in the new output when paying a witness invoice (above dust, so it relays). */
   /** BTC on the receiver's new output for a "No BTC needed" invoice: the Taproot dust limit, the least Bitcoin allows. */
   static WITNESS_SATS = 330;
+  static UTXO_SATS = RGB_UTXO_SATS;
   /** The engine's margin between a send's expiry and its invoice's (rgb-lib INVOICE_EXPIRATION_MARGIN_SECS). */
   static INVOICE_MARGIN_SECS = 600;
 
@@ -789,7 +791,7 @@ export class LiteWallet {
       const text = String(err?.message || err);
       if (!/insufficient ?allocation|allocation ?slots/i.test(text)) throw err;
       onStep('Making new RGB outputs for the rest of your tokens…');
-      try { await this.createUtxos({ upTo: true, num: 4, size: 1000, feeRate }); } catch (e2) {
+      try { await this.createUtxos({ upTo: true, num: 4, size: LiteWallet.UTXO_SATS, feeRate }); } catch (e2) {
         throw new Error(`No free RGB output for the rest of your tokens: ${String(e2?.message || e2).slice(0, 80)}`);
       }
       throw new Error('MASKED made free RGB outputs for the rest of your tokens. List again in about 10 minutes, after one block.');
