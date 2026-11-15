@@ -484,6 +484,8 @@ html.app #toast { bottom: calc(90px + env(safe-area-inset-bottom)); }
 .market-note { margin: 0; padding: 8px 14px; font-size: 12px; color: var(--warn); background: rgba(245,185,74,.08); border-bottom: 1px solid var(--line); }
 .market iframe { flex: 1; width: 100%; border: 0; background: #000; }
 .market-under { min-height: 40vh; }
+.update-bar { display: block; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin-top: 2px; }
+.update-bar i { display: block; height: 100%; background: var(--btc); transition: width .3s; }
 .market-bar[hidden], .market iframe[hidden], .market-soon[hidden] { display: none; }
 .market-soon { margin: auto 16px; padding: 22px 18px; display: grid; gap: 12px; text-align: center; background: var(--card); border: 1px solid var(--line); border-radius: var(--r); }
 .market-soon h2 { margin: 0; font-size: 18px; }

@@ -19,6 +19,18 @@ export class HomeView extends View {
     return `<div class="hint lang-hint" translate="no"><b>切换到中文？</b><span>MASKED 有中文版（测试中）。也可以随时在设置里更改。</span>
       <span class="lang-btns"><button class="btn primary sm" data-lang="zh-CN">使用中文</button><button class="btn ghost sm" data-lang="en">Keep English</button></span></div>`;
   }
+  /** The phone app: a newer version is out. Updates in the app when it can, else through the install page. */
+  static updateCard(app, up) {
+    const c = app.update.card(up);
+    const page = `<a class="btn ${c.update && !up.inApp ? 'primary' : 'ghost'} sm" href="${esc(up.page)}" target="_blank" rel="noopener">${c.update && !up.inApp ? 'Update' : 'Install page'}</a>`;
+    const btns = c.busy ? ''
+      : c.allow ? `<button class="btn primary sm" data-update-allow>Allow</button><button class="btn ghost sm" data-update-later>Later</button>`
+        : c.update ? `${up.inApp ? '<button class="btn primary sm" data-update-install>Update</button>' : page}<button class="btn ghost sm" data-update-later>Later</button>`
+          : c.retry ? `<button class="btn primary sm" data-update-install>Try again</button>${page}` : c.page ? page : '';
+    const bar = c.busy ? `<span class="update-bar" role="progressbar" aria-valuenow="${Math.round((app.update.progress || 0) * 100)}" aria-valuemin="0" aria-valuemax="100"><i style="width:${Math.round((app.update.progress || 0) * 100)}%"></i></span>` : '';
+    return `<div class="hint update-hint"><b>MASKED ${esc(up.version)} is out</b><span>${esc(c.note)}</span>${bar}${btns ? `<span class="lang-btns">${btns}</span>` : ''}</div>`;
+  }
+
   render() {
     const { app, account, unit } = this;
     const w = account.keys;
@@ -45,10 +57,7 @@ export class HomeView extends View {
     const leafRow = LeafView.homeRow(app, side);
     // the phone app: a newer version is out (it isn't on Google Play, so this is how people hear of it)
     const up = app.update?.available();
-    const updateRow = up
-      ? `<div class="hint update-hint"><b>MASKED ${esc(up.version)} is out</b><span>Install it over this one: your wallet stays.</span>
-        <span class="lang-btns"><a class="btn primary sm" href="${esc(up.page)}" target="_blank" rel="noopener">Update</a><button class="btn ghost sm" data-update-later>Later</button></span></div>`
-      : '';
+    const updateRow = up ? HomeView.updateCard(app, up) : '';
     return `
     ${HomeView.langHint()}
     ${updateRow}

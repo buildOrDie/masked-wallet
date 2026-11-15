@@ -7,6 +7,8 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        // in-app updates (the app isn't on Google Play): UpdaterPlugin
+        registerPlugin(UpdaterPlugin.class);
         super.onCreate(savedInstanceState);
         // a wallet's screens (the recovery phrase, balances) stay out of screenshots, screen recordings and the
         // recent-apps preview
