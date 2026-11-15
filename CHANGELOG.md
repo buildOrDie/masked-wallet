@@ -4,6 +4,7 @@ Newest first. Every version is on the [Releases](../../releases) page; the Andro
 
 | Version | What changed |
 |---|---|
+| 2.29.22 | Buy several Instant listings at once (a sweep): one approval, one transaction each, cheapest first (`rgb.buyInstantMany`) |
 | 2.29.21 | 简体中文 for the RGB balance, buying with too little in it, the Android update notice and the Market tab |
 | 2.29.20 | RGB balance you can add to and move back |
 | 2.29.19 | No in-app installer (Play Protect blocked 2.29.18) |

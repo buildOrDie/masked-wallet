@@ -239,6 +239,7 @@ The seller's wallet signs the sale once; anyone's MASKED can then buy it in one 
 |---|---|---|---|
 | `listInstant` | seller | `{ offerId, offer, market, token, feeRate? }` | `{ stage: 'ready', psbt, consignment, templateTxid, sellerOutpoint }`, or `{ stage: 'moving', txid }` |
 | `buyInstant` | buyer | `{ offerId, network, offer, listing: { psbt, consignment, templateTxid }, feeRate? }` | `{ txid }` (broadcast) |
+| `buyInstantMany` *(2.29.22+)* | buyer | `{ items: [{ offerId, offer, listing }], network, feeRate? }`: 1 to 20 Instant listings of one token, cheapest first | `{ results: [{ offerId, txid } \| { offerId, error }] }`: one approval, one transaction each; a listing someone else bought first is skipped (nothing paid), and the rest stop if the RGB balance runs out |
 | `cancelInstant` | seller | `{ offerId, offer, feeRate? }` | `{ stage, txid }` |
 
 How it works:

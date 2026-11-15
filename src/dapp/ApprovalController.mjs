@@ -11,13 +11,13 @@ import { toBase, fromBase } from '../rgb/config.mjs';
 import { proxyUrl, rgbError } from '../rgb/WalletRgb.mjs';
 
 /** Methods whose approve button waits for a prepared transaction. */
-export const NEEDS_PREP = ['sendBitcoin', 'inscribeTransfer', 'shareTrade', 'fundTrade', 'moveToTrade', 'returnToShielded', 'cancelShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbInvoice', 'rgbPay', 'rgbSwapAvailable', 'rgbListAssets', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantBuy', 'rgbInstantCancel'];
-const SWAP_METHODS = ['rgbSwapAvailable', 'rgbListAssets', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantBuy', 'rgbInstantCancel'];
+export const NEEDS_PREP = ['sendBitcoin', 'inscribeTransfer', 'shareTrade', 'fundTrade', 'moveToTrade', 'returnToShielded', 'cancelShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbInvoice', 'rgbPay', 'rgbSwapAvailable', 'rgbListAssets', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel'];
+const SWAP_METHODS = ['rgbSwapAvailable', 'rgbListAssets', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel'];
 const RGB_METHODS = ['rgbInvoice', 'rgbPay', ...SWAP_METHODS];
 const SWAP_SIZE_VB = 320;
 /** Kept on top of a purchase's own cost when topping up the RGB balance (the exact fee depends on the coins). */
 const TOP_UP_MARGIN = 1000;
-const BUYS = ['rgbBuyPrepare', 'rgbInstantBuy'];
+const BUYS = ['rgbBuyPrepare', 'rgbInstantBuy', 'rgbInstantBuyMany'];
 /** A purchase the RGB balance can't pay: how much to add from the Bitcoin balance (null when it can). */
 export function topUpFor(r, cost) {
   const have = r.freeBtc ? r.freeBtc().settled : 0;
@@ -217,6 +217,20 @@ export class ApprovalController {
       if (m === 'rgbSwapAvailable') {
         const asset = r.find(P.assetId);
         return { asset, assetId: P.assetId };
+      }
+      if (m === 'rgbInstantBuyMany') {
+        if (!r.service.canPresign) throw new Error('This MASKED version can\'t do Instant listings yet. Update MASKED.');
+        const items = P.items || [], first = items[0]?.offer || {};
+        const net = r.isMain ? 'mainnet' : 'signet';
+        if (P.network && !String(P.network).toLowerCase().startsWith(net)) throw new Error(`The site is on ${P.network}, your RGB wallet is on ${r.profile.label}.`);
+        const asset = r.find(first.assetId);
+        const total = items.reduce((t, x) => t + Number(x.offer.amount), 0);
+        const price = items.reduce((t, x) => t + Number(x.offer.priceSats), 0);
+        const units = items.map((x) => Number(x.offer.priceSats) / (Number(x.offer.amount) / 10 ** (asset?.precision || 0))); // sats per whole token
+        const rate = P.feeRate || Number(r.fee());
+        const vb = instantBuyVbytes(1, true), fee = Math.ceil(rate * vb) * items.length, seal = INSTANT_SEAL_SATS * items.length;
+        const shown = asset ? `${r.amount(asset, total)} ${asset.ticker}` : `${total.toLocaleString('en-US')} units`;
+        return { asset, assetId: first.assetId, shown, price, newToken: !asset, fee, rate, vb, seal, n: items.length, lo: Math.min(...units), hi: Math.max(...units), topUp: topUpFor(r, price + fee + seal) };
       }
       const o = P.offer || {};
       const net = r.isMain ? 'mainnet' : 'signet';
@@ -481,6 +495,26 @@ export class ApprovalController {
         const out = await r.service.instantBuy({ ...P, feeRate: P.feeRate || Number(r.fee()), onStep: step });
         later(r);
         return out;
+      });
+      case 'rgbInstantBuyMany': step('Waiting for RGB…'); return this.rgbBusy(async () => {
+        prepared(''); const r = app.rgb, P = a.params, n = P.items.length;
+        const feeRate = P.feeRate || Number(r.fee());
+        const results = [];
+        for (let k = 0; k < n; k++) {
+          const x = P.items[k];
+          try {
+            const out = await r.service.instantBuy({ ...x, network: P.network, feeRate, onStep: (t) => step(`${k + 1} of ${n}: ${t}`) });
+            results.push({ offerId: x.offerId, txid: out.txid });
+          } catch (e) {
+            const error = rgbError(e, r.profile);
+            results.push({ offerId: x.offerId, error });
+            // out of bitcoin: the rest would fail the same way, so they're left (nothing paid for them)
+            if (shortfallOf(error) || /Not enough bitcoin|RGB balance/i.test(error)) { for (const y of P.items.slice(k + 1)) results.push({ offerId: y.offerId, error: 'Not bought: the RGB balance ran out.' }); break; }
+          }
+        }
+        later(r);
+        if (!results.some((x) => x.txid)) throw new Error(results[0]?.error || 'Nothing was bought.');
+        return { results };
       });
       case 'rgbInstantCancel': return this.rgbBusy(async () => {
         prepared(''); const r = app.rgb, P = a.params;

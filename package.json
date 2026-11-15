@@ -1,6 +1,6 @@
 {
   "name": "masked-wallet",
-  "version": "2.29.21",
+  "version": "2.29.22",
   "private": true,
   "type": "module",
   "description": "MASKED: open-source Bitcoin wallet for Chrome with a Shielded balance (BIP 352 silent payments), BRC-20 / BRC2.0 and a UniSat-compatible window.masked provider",
@@ -10,7 +10,7 @@
     "build:ios": "node scripts/build-mobile.mjs && npx cap sync ios",
     "lint": "eslint \"src/**/*.mjs\" \"test/**/*.mjs\" \"scripts/**/*.mjs\"",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node test/test.mjs && node test/fast.test.mjs && node test/trade.test.mjs && node --test test/wallet.test.mjs test/offline.test.mjs test/airdrop.test.mjs test/accounts.test.mjs test/leaf.test.mjs test/audit.test.mjs test/security.test.mjs test/ecash.test.mjs test/ordinals.test.mjs test/i18n.test.mjs test/rgb-signet.test.mjs test/rgb-lite.test.mjs test/rgb-dapp.test.mjs test/rgb-swap.test.mjs test/rgb-instant.test.mjs test/rgb-proxy-v1.test.mjs test/rgb-engine-v1.test.mjs test/rgb-fetch.test.mjs test/esplora-pool.test.mjs test/esplora-own.test.mjs test/ord-checker-down.test.mjs test/app-market.test.mjs test/http-transport.test.mjs test/polyfills.test.mjs test/copy.test.mjs test/app-update.test.mjs",
+    "test": "node test/test.mjs && node test/fast.test.mjs && node test/trade.test.mjs && node --test test/wallet.test.mjs test/offline.test.mjs test/airdrop.test.mjs test/accounts.test.mjs test/leaf.test.mjs test/audit.test.mjs test/security.test.mjs test/ecash.test.mjs test/ordinals.test.mjs test/i18n.test.mjs test/rgb-signet.test.mjs test/rgb-lite.test.mjs test/rgb-dapp.test.mjs test/rgb-swap.test.mjs test/rgb-instant.test.mjs test/rgb-proxy-v1.test.mjs test/rgb-engine-v1.test.mjs test/rgb-fetch.test.mjs test/esplora-pool.test.mjs test/esplora-own.test.mjs test/ord-checker-down.test.mjs test/app-market.test.mjs test/http-transport.test.mjs test/polyfills.test.mjs test/copy.test.mjs test/app-update.test.mjs test/rgb-sweep.test.mjs",
     "check": "npm run lint && npm run typecheck && npm test"
   },
   "dependencies": {

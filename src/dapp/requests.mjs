@@ -67,6 +67,20 @@ function swapParams(method, p) {
   }
   return out;
 }
+/** A sweep: 1 to MAX_SWEEP Instant listings of one token, each checked like a single Instant buy. */
+export const MAX_SWEEP = 20;
+function sweepParams(p) {
+  const items = Array.isArray(p.items) ? p.items : null;
+  if (!items || !items.length) throw err(4000, 'items (the Instant listings to buy) is required.');
+  if (items.length > MAX_SWEEP) throw err(4000, `At most ${MAX_SWEEP} listings at once.`);
+  const out = items.map((x) => swapParams('rgbInstantBuy', { ...(x || {}), network: p.network }));
+  const ids = new Set(out.map((x) => x.offerId));
+  if (ids.size !== out.length) throw err(4000, 'The same listing is in the list twice.');
+  if (new Set(out.map((x) => x.offer.assetId)).size !== 1) throw err(4000, 'A sweep buys one token: every listing must be for the same asset.');
+  const res = { items: out.map(({ network: _n, ...x }) => x), network: p.network == null ? undefined : String(p.network).slice(0, 20) };
+  if (p.feeRate != null) { const f = Number(p.feeRate); if (!(f >= 1 && f <= 500)) throw err(4000, 'feeRate must be between 1 and 500 sat/vB.'); res.feeRate = f; }
+  return res;
+}
 const checkAmount = (a) => { if (!/^\d+(\.\d+)?$/.test(String(a || '')) || /^0+(\.0+)?$/.test(String(a))) throw err(4000, 'amount must be a positive number.'); return String(a); };
 /** What a site sees of private trading: the trade address and the Shielded totals. */
 export const tradeView = (t) => ({ address: t.address, publicKey: t.publicKey, index: t.index, features: t.features || [], shielded: { sats: t.shielded?.sats || 0, tokens: (t.shielded?.tokens || []).map((x) => ({ ticker: x.tick, amount: String(x.amt) })), transfers: t.shielded?.transfers || [] } });
@@ -253,6 +267,11 @@ export function makeHandler({ getPublic, getTrade, getSites, setSites, openAppro
       case 'rgbInstantList': case 'rgbInstantBuy': case 'rgbInstantCancel': {
         needConnected();
         return openApproval(origin, method, swapParams(method, params));
+      }
+      // several Instant listings of one token, one approval (a sweep): bought one after another
+      case 'rgbInstantBuyMany': {
+        needConnected();
+        return openApproval(origin, method, sweepParams(params));
       }
       // ---- ecash (Cashu) ----
       case 'cashuGetLockKey': {
