@@ -39,6 +39,4 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- in-app updates: opens Android's installer for a new MASKED downloaded from maskedwallet.com (UpdaterPlugin) -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 </manifest>

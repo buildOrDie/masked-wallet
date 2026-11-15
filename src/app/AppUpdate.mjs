@@ -54,7 +54,12 @@ export class AppUpdate {
     return { version: s.latest, page: s.page || new URL('/install', this.url).href, apk: s.apk || '', sha256: s.sha256 || '', inApp: this.canInApp(s) };
   }
 
-  /** The app's own updater (UpdaterPlugin, Android): download, check the SHA-256, open "update this app?". */
+  /**
+   * An in-app updater (a native plugin that downloads the APK, checks its SHA-256 and opens Android's installer).
+   * 2.29.18 had one, and Google Play Protect blocked that version as harmful: an app that downloads and installs
+   * apps looks like malware to it. 2.29.19 took it out, so Update opens the install page; this stays in case a
+   * reviewed updater comes back.
+   */
   plugin() { return globalThis.Capacitor?.Plugins?.MaskedUpdater || null; }
   canInApp(s = this.saved()) { return !!(this.plugin() && s.apk && /^[0-9a-f]{64}$/.test(s.sha256 || '')); }
 

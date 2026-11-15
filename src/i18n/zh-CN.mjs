@@ -12,7 +12,6 @@ export const ZH_CN = {
   'Launchpad': '发射台',
   'Install page': '安装页面',
   'Allow': '允许',
-  'Try again': '重试',
   'Android is asking to update MASKED: tap Update there. Your wallet stays.': 'Android 正在询问是否更新 MASKED:请点"更新"。钱包会保留。',
   'Android asks once to let MASKED install its updates. Turn on “Allow from this source”, come back, then tap Update again.': 'Android 会询问一次是否允许 MASKED 安装更新。请打开"允许来自此来源",返回后再点"更新"。',
   'Install it over this one: your wallet stays.': '直接覆盖安装:钱包会保留。',
