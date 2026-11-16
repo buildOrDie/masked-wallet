@@ -186,6 +186,7 @@ export class SignetWallet {
   }
   get canPresign() { return !!this.wallet?.canPresign; }
   instantList(p) { return this.mutate((w) => w.instantList(p, this.instantStore())); }
+  instantListLots(p) { return this.mutate((w) => w.instantListLots(p, this.instantStore())); }
   instantBuy(p) { return this.mutate((w) => w.instantBuy(p, this.instantStore())); }
   instantCancel(p) { return this.mutate((w) => w.instantCancel(p, this.instantStore())); }
   /** After a refresh: sign settled listings, notice sales and cancels, hand bought transfers to the wallet. */
@@ -198,7 +199,7 @@ export class SignetWallet {
     });
   }
   /** This wallet's Instant listings: [{ offerId, stage, txid, … }]. */
-  instantListings() { return Object.entries(this.instantStore().all()).filter(([, e]) => e?.role === 'seller').map(([id, e]) => ({ offerId: id, stage: e.outdated && e.stage === 'ready' ? 'outdated' : e.stage, assetId: e.assetId, amount: e.amount, priceSats: e.priceSats, txid: e.soldTxid || e.cancelTxid || e.moveTxid || null, at: e.at, waiting: e.stage === 'moving' ? e.waiting || '' : '' })); }
+  instantListings() { return Object.entries(this.instantStore().all()).filter(([, e]) => e?.role === 'seller').map(([id, e]) => ({ offerId: id, stage: e.outdated && e.stage === 'ready' ? 'outdated' : e.stage, assetId: e.assetId, amount: e.amount, priceSats: e.priceSats, txid: e.soldTxid || e.cancelTxid || e.moveTxid || null, at: e.at, waiting: e.stage === 'moving' ? e.waiting || '' : '', ...(e.lotOf ? { lotOf: e.lotOf, lots: e.lots || null } : {}) })); }
   get canSwap() { return !!this.wallet?.canSwap; }
   offerableAmount(p) { return this.exclusive(() => this.requireWallet().offerableAmount(p)); }
   assetList() { return this.exclusive(() => this.requireWallet().assetList()); }

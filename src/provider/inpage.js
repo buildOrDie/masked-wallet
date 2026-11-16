@@ -101,6 +101,7 @@
       // Instant listings: signed once, bought with the seller offline (docs/PROVIDER.md)
       /** seller: { offerId, offer, market, token, feeRate? } → { stage: 'ready', psbt, consignment, templateTxid, sellerOutpoint } or { stage: 'moving', txid } */
       listInstant: (o = {}) => request('rgbInstantList', o),
+      listInstantLots: (o = {}) => request('rgbInstantListLots', o),
       /** buyer: { offerId, network, offer, listing, feeRate? } → { txid } (broadcast) */
       buyInstant: (o = {}) => request('rgbInstantBuy', o),
       /** buyer, several at once: { items: [{ offerId, offer, listing }], network, feeRate? } → { results: [{ offerId, txid } | { offerId, error }] }. One approval; one transaction each, cheapest first */

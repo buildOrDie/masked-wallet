@@ -315,7 +315,7 @@ export class LiteWallet {
     }
     await this.save();
     if (!r) throw new Error('Could not make a fresh RGB invoice. Try again.');
-    return { invoice: String(r?.invoice ?? ''), recipientId: String(r?.recipientId ?? ''), expirationTimestamp: r?.expirationTimestamp ?? null };
+    return { invoice: String(r?.invoice ?? ''), recipientId: String(r?.recipientId ?? ''), expirationTimestamp: r?.expirationTimestamp ?? null, batchTransferIdx: r?.batchTransferIdx ?? null };
   }
 
   async decodeRGBInvoice({ invoice }) {
@@ -765,7 +765,7 @@ export class LiteWallet {
     this.requirePresign();
     const o = readOffer({ assetId, amount, priceSats }, offerId);
     const prev = store.get(o.offerId);
-    if (prev?.stage === 'moving' && prev.coin) {
+    if (prev?.stage === 'moving' && (prev.coin || prev.lotOf)) {
       // asked again while the tokens move (the market's "Finish listing"): look now instead of waiting for a refresh
       onStep('Checking whether your tokens arrived on their own output…');
       await this.wallet.sync(this.requireOnline());
@@ -807,7 +807,10 @@ export class LiteWallet {
   async instantSign(offerId, e, store) {
     const online = this.requireOnline();
     const unspents = plain(this.wallet.listUnspents(false)) || [];
-    const mine = e.coin ? unspents.filter((u) => `${String(u.utxo?.outpoint?.txid).toLowerCase()}:${u.utxo?.outpoint?.vout}` === e.coin) : unspents;
+    const opOf = (u) => `${String(u.utxo?.outpoint?.txid).toLowerCase()}:${u.utxo?.outpoint?.vout}`;
+    // a lot: one of the outputs its split made, not one another lot of the split already took
+    const mine = e.coin ? unspents.filter((u) => opOf(u) === e.coin)
+      : e.lotOf ? unspents.filter((u) => String(u.utxo?.outpoint?.txid).toLowerCase() === e.lotOf) : unspents;
     const coin = exactCoinFor(mine, e.assetId, e.amount, e.coin ? new Set() : this.reserved);
     if (!coin) return this.instantView(offerId, e); // the move hasn't settled yet
     const payout = await this.payoutScript();
@@ -819,11 +822,94 @@ export class LiteWallet {
     return this.instantView(offerId, next);
   }
   /**
+   * Seller: list in lots. One transaction splits the tokens onto one output per lot (each sent to a fresh invoice of
+   * this wallet); after it confirms, each lot is signed as its own Instant listing and handed to the market, so buyers
+   * take as many lots as they want and the rest stays listed. `lots`: [{ offerId, token, amount, priceSats }].
+   */
+  async instantListLots({ assetId, lots, feeRate, market = '', onStep = (_t) => {} }, store) {
+    this.requirePresign();
+    const list = (lots || []).map((l) => ({ ...readOffer({ assetId, amount: l.amount, priceSats: l.priceSats }, l.offerId), token: String(l.token || '') }));
+    if (list.length < 2) throw new Error('A listing in lots needs at least 2 lots.');
+    // asked again (the market's "Finish listing"): the split already went out
+    const prev = list.map((l) => store.get(l.offerId)).filter(Boolean);
+    if (prev.length) {
+      const split = prev.find((e) => e.lotOf)?.lotOf || '';
+      if (split) {
+        onStep('Checking whether your lots arrived…');
+        await this.wallet.sync(this.requireOnline());
+        try { await this.wallet.refresh(this.requireOnline(), null, [], false); } catch { /* signed below if they settled anyway */ }
+      }
+      const views = [];
+      for (const l of list) {
+        const e = store.get(l.offerId);
+        views.push(e?.stage === 'moving' ? await this.instantSign(l.offerId, e, store) : e ? this.instantView(l.offerId, e) : { offerId: l.offerId, stage: 'missing' });
+      }
+      return { stage: views.every((v) => v.stage === 'ready') ? 'ready' : 'moving', txid: split || null, lots: views };
+    }
+    const total = list.reduce((t, l) => t + BigInt(l.amount), 0n);
+    onStep(`Checking your tokens on ${hostOf(this.indexer)}…`);
+    await this.wallet.sync(this.requireOnline());
+    const pick = sendCoinsFor(plain(this.wallet.listUnspents(false)) || [], assetId, total, this.reserved);
+    if (!pick.coins) throw new Error(pick.held > 0n ? 'Not that much of this token is settled and free in this wallet yet. Wait for incoming transfers to settle, or list less.' : 'None of this token is settled and free in this wallet yet.');
+    onStep(`Making ${list.length} invoices of your own for the lots…`);
+    // a lot's invoice stays open a week: this wallet takes in its own lots the next time it's open
+    const invs = [];
+    for (const l of list) invs.push(await this.onchainReceive({ assetId, amount: Number(l.amount), durationSeconds: 7 * 86400, witness: true }));
+    onStep(`Splitting your tokens into ${list.length} lots…`);
+    let txid;
+    try { txid = await this.sendToOwn(assetId, list.map((l, k) => ({ amount: l.amount, invoice: invs[k].invoice })), feeRate); } catch (err) {
+      // nothing went out: cancel the invoices made for it, so they don't sit open
+      for (const inv of invs) if (inv.batchTransferIdx != null) { try { await this.wallet.failTransfers(this.requireOnline(), inv.batchTransferIdx, false, true); } catch { /* they expire anyway */ } }
+      await this.save().catch(() => {});
+      const text = String(err?.message || err);
+      if (/insufficient ?allocation|allocation ?slots|NoAvailableUtxos|InsufficientBitcoins/i.test(text)) {
+        onStep('Making new RGB outputs for the lots…');
+        try { await this.createUtxos({ upTo: true, num: 4, size: LiteWallet.UTXO_SATS, feeRate }); } catch (e2) {
+          throw new Error(`Your RGB balance needs bitcoin for the lots' outputs: ${String(e2?.message || e2).slice(0, 80)}. Tap Add from Bitcoin under RGB balance on Home.`);
+        }
+        throw new Error('MASKED made free RGB outputs for this. List again in about 10 minutes, after one block.');
+      }
+      throw err;
+    }
+    const at = Date.now();
+    for (const l of list) store.set(l.offerId, { role: 'seller', assetId: l.assetId, amount: String(l.amount), priceSats: String(l.priceSats), market: String(market), token: l.token, at, stage: 'moving', moveTxid: txid, lotOf: String(txid).toLowerCase(), lots: list.length });
+    await this.save();
+    return { stage: 'moving', txid, lots: list.map((l) => ({ offerId: l.offerId, stage: 'moving' })) };
+  }
+  /** Send tokens to invoices of this wallet in one transaction (the split into lots): its txid. */
+  async sendToOwn(assetId, parts, feeRate) {
+    const online = this.requireOnline();
+    const fee = BigInt(Math.max(1, Math.round(Number(feeRate) || 1)));
+    const ds = await Promise.all(parts.map((p) => this.decodeRGBInvoice({ invoice: p.invoice })));
+    let psbt;
+    if (this.engineV1) {
+      const now = Math.floor(Date.now() / 1000);
+      const soonest = Math.min(...ds.map((d) => Number(d.expirationTimestamp) || now + 86400));
+      const recips = ds.map((d, k) => ({ recipientId: d.recipientId, witnessData: { amountSat: String(LiteWallet.WITNESS_SATS), blinding: null }, assignment: { Fungible: Number(parts[k].amount) }, transportEndpoints: d.transportEndpoints, publicKey: d.publicKey, encryption: d.encryption, expirationTimestamp: Number(d.expirationTimestamp) || null }));
+      const begin = await this.wallet.sendBegin(online, { [assetId]: recips }, true, fee, 1, soonest - LiteWallet.INVOICE_MARGIN_SECS - 120, this.transport, null, false);
+      psbt = typeof begin === 'string' ? begin : begin?.psbt;
+    } else {
+      const recips = ds.map((d, k) => ({ recipientId: d.recipientId, witnessData: { amountSat: String(LiteWallet.WITNESS_SATS), blinding: null }, assignment: { Fungible: Number(parts[k].amount) }, transportEndpoints: d.transportEndpoints.length ? d.transportEndpoints : [this.transport] }));
+      psbt = await this.wallet.sendBegin(online, { [assetId]: recips }, true, fee, 1);
+    }
+    const r = plain(await this.wallet.sendEnd(online, this.sign(psbt), false));
+    await this.save();
+    const txid = String(r?.txid || this.lib.WasmWallet.psbtTxid(psbt));
+    return txid;
+  }
+  /**
    * Why a listing's tokens aren't on their own output yet, in words: the move not in a block yet, the token proof not
    * taken in yet, or the output holding something else than the listing.
    */
   async moveStatus(e) {
     try {
+      if (e.lotOf && !e.coin) {
+        let confirmed = null;
+        try { confirmed = !!(await (await this.esplora(`/tx/${e.lotOf}`)).json())?.status?.confirmed; } catch { confirmed = null; }
+        if (confirmed === null) return 'The split transaction isn\'t on the block server yet.';
+        if (!confirmed) return 'The split into lots is waiting for its first block (about 10 minutes on Signet).';
+        return 'The split is in a block. Each lot is signed once its tokens settle: keep MASKED open a minute, or tap Refresh in MASKED → RGB.';
+      }
       const [txid, vout] = String(e.coin).split(':');
       let confirmed = null;
       try { confirmed = !!(await (await this.esplora(`/tx/${txid}`)).json())?.status?.confirmed; } catch { confirmed = null; }

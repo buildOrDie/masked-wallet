@@ -2,7 +2,7 @@
 // loads the request from the background, prepares what the screen shows (fees, PSBT breakdown, the
 // transactions to sign), and on approval signs, broadcasts and answers the background.
 import { friendly } from '../core/format.mjs';
-import { instantBuyVbytes, instantMoveVbytes, INSTANT_SEAL_SATS } from '../rgb/swap.mjs';
+import { instantBuyVbytes, instantMoveVbytes, INSTANT_SEAL_SATS, txVbytes, P2TR_SCRIPT, OPRET_SCRIPT } from '../rgb/swap.mjs';
 import { UNISAT_NET } from '../bitcoin/networks.mjs';
 import { signMessageBip322, signMessageEcdsa } from '../bitcoin/messages.mjs';
 import { TRADE_SITES } from '../trade/TradeAccount.mjs';
@@ -11,8 +11,8 @@ import { toBase, fromBase } from '../rgb/config.mjs';
 import { proxyUrl, rgbError } from '../rgb/WalletRgb.mjs';
 
 /** Methods whose approve button waits for a prepared transaction. */
-export const NEEDS_PREP = ['sendBitcoin', 'inscribeTransfer', 'shareTrade', 'fundTrade', 'moveToTrade', 'returnToShielded', 'cancelShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbInvoice', 'rgbPay', 'rgbSwapAvailable', 'rgbListAssets', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel'];
-const SWAP_METHODS = ['rgbSwapAvailable', 'rgbListAssets', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel'];
+export const NEEDS_PREP = ['sendBitcoin', 'inscribeTransfer', 'shareTrade', 'fundTrade', 'moveToTrade', 'returnToShielded', 'cancelShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbInvoice', 'rgbPay', 'rgbSwapAvailable', 'rgbListAssets', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantListLots', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel'];
+const SWAP_METHODS = ['rgbSwapAvailable', 'rgbListAssets', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantListLots', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel'];
 const RGB_METHODS = ['rgbInvoice', 'rgbPay', ...SWAP_METHODS];
 const SWAP_SIZE_VB = 320;
 /** Kept on top of a purchase's own cost when topping up the RGB balance (the exact fee depends on the coins). */
@@ -217,6 +217,24 @@ export class ApprovalController {
       if (m === 'rgbSwapAvailable') {
         const asset = r.find(P.assetId);
         return { asset, assetId: P.assetId };
+      }
+      if (m === 'rgbInstantListLots') {
+        if (!r.service.canPresign || typeof r.service.instantListLots !== 'function') throw new Error('This MASKED version can\'t list in lots yet. Update MASKED.');
+        const net = r.isMain ? 'mainnet' : 'signet';
+        if (P.network && !String(P.network).toLowerCase().startsWith(net)) throw new Error(`The site is on ${P.network}, your RGB wallet is on ${r.profile.label}.`);
+        const asset = r.find(P.assetId);
+        if (!asset) throw new Error('You don\'t hold this token in RGB.');
+        const lots = P.lots || [];
+        const total = lots.reduce((t, x) => t + Number(x.amount), 0);
+        const price = lots.reduce((t, x) => t + Number(x.priceSats), 0);
+        if (total > r.bal(asset).spendable) throw new Error(`You can list up to ${r.amount(asset, r.bal(asset).spendable)} ${asset.ticker}.`);
+        let host = ''; try { host = new URL(P.market).host; } catch { throw new Error('The market address is not valid.'); }
+        const rate = P.feeRate || Number(r.fee());
+        // the split: a token output and a bitcoin coin in; the commitment, one output per lot and the change out
+        const vb = Math.ceil(txVbytes([P2TR_SCRIPT, P2TR_SCRIPT], [OPRET_SCRIPT, ...Array(lots.length).fill(P2TR_SCRIPT), P2TR_SCRIPT, P2TR_SCRIPT]));
+        const each = lots.map((x) => ({ shown: r.amount(asset, Number(x.amount)), price: Number(x.priceSats) }));
+        const same = each.every((x) => x.shown === each[0].shown && x.price === each[0].price);
+        return { asset, assetId: P.assetId, shown: `${r.amount(asset, total)} ${asset.ticker}`, price, n: lots.length, each, same, market: host, rate, vb, fee: Math.ceil(rate * vb), seal: INSTANT_SEAL_SATS * lots.length };
       }
       if (m === 'rgbInstantBuyMany') {
         if (!r.service.canPresign) throw new Error('This MASKED version can\'t do Instant listings yet. Update MASKED.');
@@ -486,6 +504,14 @@ export class ApprovalController {
         prepared(''); const r = app.rgb, P = a.params, o = P.offer;
         await this.rgbBackedUp(r);
         const out = await r.service.instantList({ offerId: P.offerId, assetId: o.assetId, amount: o.amount, priceSats: o.priceSats, feeRate: P.feeRate || Number(r.fee()), market: P.market, token: P.token, onStep: step });
+        await this.rgbBackedUp(r).catch(() => {});
+        later(r);
+        return out;
+      });
+      case 'rgbInstantListLots': step('Waiting for RGB…'); return this.rgbBusy(async () => {
+        prepared(''); const r = app.rgb, P = a.params;
+        await this.rgbBackedUp(r);
+        const out = await r.service.instantListLots({ assetId: P.assetId, lots: P.lots, feeRate: P.feeRate || Number(r.fee()), market: P.market, onStep: step });
         await this.rgbBackedUp(r).catch(() => {});
         later(r);
         return out;

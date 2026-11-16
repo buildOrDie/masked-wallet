@@ -67,6 +67,28 @@ function swapParams(method, p) {
   }
   return out;
 }
+/** A listing in lots: 2 to MAX_LOTS Instant listings of one token, made from one split. */
+export const MAX_LOTS = 10;
+export function lotsParams(p) {
+  const assetId = optAssetId(p.assetId);
+  if (!assetId) throw err(4000, 'assetId is required.');
+  const lots = Array.isArray(p.lots) ? p.lots : null;
+  if (!lots || lots.length < 2 || lots.length > MAX_LOTS) throw err(4000, `lots: 2 to ${MAX_LOTS} lots, each { offerId, token, amount, priceSats }.`);
+  const out = lots.map((l) => {
+    const offerId = String(l?.offerId ?? '');
+    if (!/^[A-Za-z0-9_.:-]{1,100}$/.test(offerId)) throw err(4000, 'Each lot needs a short offerId.');
+    if (!/^[0-9a-f]{32,128}$/.test(String(l?.token || ''))) throw err(4000, 'Each lot needs its seller token from the market.');
+    const amount = String(l?.amount ?? ''), priceSats = String(l?.priceSats ?? '');
+    if (!/^\d{1,20}$/.test(amount) || !/^\d{1,16}$/.test(priceSats) || BigInt(amount) <= 0n || BigInt(priceSats) <= 0n) throw err(4000, 'Each lot needs amount and priceSats as whole numbers above 0.');
+    return { offerId, token: String(l.token), amount, priceSats };
+  });
+  if (new Set(out.map((x) => x.offerId)).size !== out.length) throw err(4000, 'The same lot is in the list twice.');
+  let u; try { u = new URL(String(p.market || '')); } catch { throw err(4000, 'market must be the market\'s address.'); }
+  if (!(u.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(u.hostname))) throw err(4000, 'market must be an https address.');
+  const res = { assetId, lots: out, market: u.origin + u.pathname.replace(/\/+$/, ''), network: p.network == null ? undefined : String(p.network).slice(0, 20) };
+  if (p.feeRate != null) { const f = Number(p.feeRate); if (!(f >= 1 && f <= 500)) throw err(4000, 'feeRate must be between 1 and 500 sat/vB.'); res.feeRate = f; }
+  return res;
+}
 /** A sweep: 1 to MAX_SWEEP Instant listings of one token, each checked like a single Instant buy. */
 export const MAX_SWEEP = 20;
 function sweepParams(p) {
@@ -267,6 +289,11 @@ export function makeHandler({ getPublic, getTrade, getSites, setSites, openAppro
       case 'rgbInstantList': case 'rgbInstantBuy': case 'rgbInstantCancel': {
         needConnected();
         return openApproval(origin, method, swapParams(method, params));
+      }
+      // one listing in lots: one transaction splits the tokens, then each lot is its own Instant listing
+      case 'rgbInstantListLots': {
+        needConnected();
+        return openApproval(origin, method, lotsParams(params));
       }
       // several Instant listings of one token, one approval (a sweep): bought one after another
       case 'rgbInstantBuyMany': {

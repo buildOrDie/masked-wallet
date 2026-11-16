@@ -239,6 +239,7 @@ The seller's wallet signs the sale once; anyone's MASKED can then buy it in one 
 |---|---|---|---|
 | `listInstant` | seller | `{ offerId, offer, market, token, feeRate? }` | `{ stage: 'ready', psbt, consignment, templateTxid, sellerOutpoint }`, or `{ stage: 'moving', txid }` |
 | `buyInstant` | buyer | `{ offerId, network, offer, listing: { psbt, consignment, templateTxid }, feeRate? }` | `{ txid }` (broadcast) |
+| `listInstantLots` *(2.29.23+)* | seller | `{ assetId, lots: [{ offerId, token, amount, priceSats }], market, network?, feeRate? }`: 2 to 10 lots of one token, each already an offer on `market` (its seller token) | `{ stage: 'moving', txid, lots: [{ offerId, stage }] }`: one transaction splits the tokens onto one output per lot; after it confirms, the wallet signs each lot as its own Instant listing and sends it to `market` the next time it's open. Asked again, it signs the lots that settled (`stage: 'ready'` once all are) |
 | `buyInstantMany` *(2.29.22+)* | buyer | `{ items: [{ offerId, offer, listing }], network, feeRate? }`: 1 to 20 Instant listings of one token, cheapest first | `{ results: [{ offerId, txid } \| { offerId, error }] }`: one approval, one transaction each; a listing someone else bought first is skipped (nothing paid), and the rest stop if the RGB balance runs out |
 | `cancelInstant` | seller | `{ offerId, offer, feeRate? }` | `{ stage, txid }` |
 

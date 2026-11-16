@@ -430,3 +430,62 @@ test('buyer: buying again after a purchase that never reached the network makes 
   const again = await b.w.instantBuy({ offerId: offer.offerId, network: 'Signet', offer, listing, feeRate: 2 }, b.store);
   assert.equal(again.txid, r.txid); assert.equal(chain.posted.length, 1);
 });
+
+test('seller: list in lots: one split to invoices of this wallet, then each lot signed on its own output', async () => {
+  const chain = fakeChain();
+  const rgb = [unspent('b', 0, [tok(1000)])];
+  const lib = fakeLib();
+  lib.WasmInvoice = class { constructor(i) { this.i = i; } invoiceData() { return { recipientId: `rid-${this.i}`, network: 'signet', transportEndpoints: [] }; } free() {} };
+  const s = wallet({ name: 'seller', lib, chain, rgb });
+  const sent = [];
+  s.w.w.sendBegin = async (online, map, donation, fee, minConf) => { sent.push({ map, donation, fee: String(fee), minConf }); return 'psbt-split'; };
+  const failed = [];
+  s.w.w.failTransfers = async (o, idx) => { failed.push(idx); };
+  const lots = [0, 1, 2, 3].map((i) => ({ offerId: `swlot${i}0123456`, token: 'ab'.repeat(24), amount: '250', priceSats: '5000' }));
+  const v = await s.w.instantListLots({ assetId: ASSET, lots, feeRate: 3, market: 'https://maskedwallet.com' }, s.store);
+  assert.equal(v.stage, 'moving'); assert.equal(v.lots.length, 4);
+  assert.equal(sent.length, 1, 'one transaction for all the lots');
+  const recips = sent[0].map[ASSET];
+  assert.equal(recips.length, 4);
+  assert.ok(recips.every((r) => r.assignment.Fungible === 250 && r.witnessData.amountSat === '330'));
+  assert.equal(sent[0].donation, true, 'broadcast at once, no waiting for its own acceptance');
+  assert.equal(new Set(recips.map((r) => r.recipientId)).size, 4, 'a fresh invoice per lot');
+  for (const l of lots) { const e = s.mem[l.offerId]; assert.equal(e.stage, 'moving'); assert.equal(e.lotOf, T('5')); assert.equal(e.token, l.token); }
+  // asked again (Finish listing) before the split settled: no second split
+  s.w.w.refresh = async () => ({});
+  assert.equal((await s.w.instantListLots({ assetId: ASSET, lots, feeRate: 3, market: 'https://maskedwallet.com' }, s.store)).stage, 'moving');
+  assert.equal(sent.length, 1);
+  // the split settled: four outputs of 250 (and the change of nothing): each lot takes its own
+  rgb.splice(0, rgb.length, unspent('5', 1, [tok(250)]), unspent('5', 2, [tok(250)]), unspent('5', 3, [tok(250)]), unspent('5', 4, [tok(250)]), unspent('9', 0, [tok(250)]));
+  const changes = await s.w.instantProgress(s.store, s.store.all());
+  assert.equal(changes.filter((c) => c.stage === 'ready').length, 4);
+  const coins = lots.map((l) => s.mem[l.offerId].coin);
+  assert.equal(new Set(coins).size, 4, 'four different outputs');
+  assert.ok(coins.every((c) => c.startsWith(`${T('5')}:`)), 'only outputs of the split, never another output holding the same amount');
+  assert.equal(failed.length, 0);
+});
+
+test('seller: a split into lots that fails cancels the invoices it made', async () => {
+  const chain = fakeChain();
+  const s = wallet({ name: 'seller', lib: fakeLib(), chain, rgb: [unspent('b', 0, [tok(1000)])] });
+  s.w.w.sendBegin = async () => { throw new Error('the block server is down'); };
+  const failed = [];
+  s.w.w.failTransfers = async (o, idx) => { failed.push(idx); };
+  const lots = [0, 1].map((i) => ({ offerId: `swlot${i}0123456`, token: 'ab'.repeat(24), amount: '500', priceSats: '5000' }));
+  await assert.rejects(s.w.instantListLots({ assetId: ASSET, lots, feeRate: 3, market: 'https://maskedwallet.com' }, s.store), /block server is down/);
+  assert.deepEqual(failed, [1, 2]);
+  assert.equal(Object.keys(s.mem).length, 0, 'nothing listed');
+  await assert.rejects(s.w.instantListLots({ assetId: ASSET, lots: lots.map((l) => ({ ...l, amount: '600' })), feeRate: 3 }, s.store), /settled and free/);
+});
+
+test('requests: list in lots: 2 to 10 lots of one token, each with its market token', async () => {
+  const { lotsParams, MAX_LOTS } = await import('../src/dapp/requests.mjs');
+  const lot = (i) => ({ offerId: `swlot${i}`, token: 'ab'.repeat(24), amount: '100', priceSats: '1000' });
+  const ok = lotsParams({ assetId: ASSET, lots: [lot(1), lot(2)], market: 'https://maskedwallet.com/', feeRate: 2 });
+  assert.equal(ok.lots.length, 2); assert.equal(ok.market, 'https://maskedwallet.com'); assert.equal(ok.feeRate, 2);
+  assert.throws(() => lotsParams({ assetId: ASSET, lots: [lot(1)], market: 'https://m.com' }), /2 to/);
+  assert.throws(() => lotsParams({ assetId: ASSET, lots: Array.from({ length: MAX_LOTS + 1 }, (_, i) => lot(i)), market: 'https://m.com' }), /2 to/);
+  assert.throws(() => lotsParams({ assetId: ASSET, lots: [lot(1), lot(1)], market: 'https://m.com' }), /twice/);
+  assert.throws(() => lotsParams({ assetId: ASSET, lots: [lot(1), { ...lot(2), amount: '0' }], market: 'https://m.com' }), /above 0/);
+  assert.throws(() => lotsParams({ assetId: ASSET, lots: [lot(1), lot(2)], market: 'http://evil.example' }), /https/);
+});

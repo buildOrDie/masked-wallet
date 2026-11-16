@@ -487,6 +487,9 @@ export class WalletRgb {
     if (!this.service?.canPresign) return;
     let changes = [];
     try { changes = await this.service.instantProgress(); } catch { return; }
+    // several listings signed at once (lots): one message for them all
+    const readyN = changes.filter((c) => c.stage === 'ready').length;
+    let live = 0, refused = 0, unsent = 0;
     for (const c of changes) {
       if (c.stage === 'sold') this.app.toast(this.service.instantStore().get(c.offerId)?.payoutPublic ? 'Instant listing sold. The bitcoin is in your Public balance once the transaction confirms.' : 'Instant listing sold. The bitcoin is in your RGB wallet once the transaction confirms.');
       if (c.stage === 'ready') {
@@ -494,12 +497,18 @@ export class WalletRgb {
         const e = this.service.instantStore().get(c.offerId);
         const ok = await publishInstant(e, c).catch(() => false);
         if (ok) this.service.instantStore().set(c.offerId, { ...e, published: true });
-        this.app.toast(ok === 'refused' ? `Instant listing signed, but the market refused it: ${lastRefusal}. Cancel it on the market and list again.`
-          : ok ? 'Instant listing is live: buyers can buy it now, even with MASKED closed.' : 'Instant listing signed. Open the market and tap Finish listing on it.');
+        if (ok === 'refused') refused++; else if (ok) live++; else unsent++;
+        if (readyN === 1) {
+          this.app.toast(ok === 'refused' ? `Instant listing signed, but the market refused it: ${lastRefusal}. Cancel it on the market and list again.`
+            : ok ? 'Instant listing is live: buyers can buy it now, even with MASKED closed.' : 'Instant listing signed. Open the market and tap Finish listing on it.');
+        }
       }
       if (c.stage === 'cancelled') this.app.toast('Listing cancelled. Your tokens moved to a new output.');
       if (c.stage === 'purchase-failed') this.app.toast(`An Instant purchase didn't go through, and nothing was paid: ${c.why}`);
       if (c.stage === 'outdated') this.app.toast('An Instant listing was signed by an older MASKED and can\'t sell. Cancel it on the market, then list again.');
+    }
+    if (readyN > 1) {
+      this.app.toast([live && `${live} Instant listings are live: buyers can buy them now, even with MASKED closed.`, unsent && `${unsent} signed: open the market and tap Finish listing on them.`, refused && `${refused} refused by the market (${lastRefusal}).`].filter(Boolean).join(' '));
     }
     await this.publishPending().catch(() => {});
     if (changes.length && this.isMain && this.cloudOn) this.cloudSave().catch(() => {});

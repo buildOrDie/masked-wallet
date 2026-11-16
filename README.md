@@ -65,6 +65,8 @@ To check a download is genuine, compare its SHA-256 with the one on the release 
 
 ## What's new
 
+- **2.29.23**: **sell in lots**: split a sale into up to 10 Instant listings in one transaction; buyers take as many as they want, the rest stays listed.
+- **2.29.22**: buy several Instant listings at once (a sweep).
 - **2.29.20**: an **RGB balance** on Home that you can add to and move back to Bitcoin (also moves the small leftover RGB outputs). Buying with too little in it now offers to add exactly what's needed.
 - **2.29.19**: the Android app no longer installs its own updates (Google Play Protect blocks apps that do); it opens the download page instead.
 - **2.29.12–2.29.17**: the **Android app**: a Market tab with MASKED's RGB market and Launchpad, and fixes for older phones (copy, paste, RGB, buying).
