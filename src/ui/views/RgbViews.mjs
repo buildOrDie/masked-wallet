@@ -102,7 +102,7 @@ export class RgbHome {
         <p class="muted small">Move everything also empties the small RGB outputs no token uses. RGB makes new ones from its balance the next time it needs them.</p>${msg(r)}</div>` : '';
     const feeRow = `<div class="tok-line rgb-fee">${btcLogo}
         <span class="bal-txt"><b class="tk">RGB balance</b><span>For buying RGB tokens and network fees</span></span>
-        <span class="bal-amt"><b>${fmtBtc(settled)}</b><span>${pending ? `<span class="pend-t">+${fmtBtc(pending)} waiting for a block</span>` : unit}</span></span></div>
+        <span class="bal-amt"><b>${fmtBtc(settled)}</b><span>${pending ? `<span class="pend-t" title="Waiting for a block">+${fmtBtc(pending)} pending</span>` : unit}</span></span></div>
       <div class="rgb-bal-act"><button class="btn ghost sm" data-rgb="fund">${I.plus}<span>Add from Bitcoin</span></button><button class="btn ghost sm" data-rgb="${r.withdraw ? 'withdrawClose' : 'withdraw'}" ${settled + pending ? '' : 'disabled'}>${I.send}<span>Move to Bitcoin</span></button></div>${wd}`;
     return `<section class="home-toks">
       <div class="list-h"><b>RGB tokens${r.isMain ? ' <span class="badge">beta</span>' : ''}</b><button class="link small" data-rgb="refresh" ${r.busy ? 'disabled' : ''}>${r.busy ? 'Updating…' : r.data.cached ? 'Last saved · Refresh' : 'Refresh'}</button></div>

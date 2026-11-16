@@ -1062,7 +1062,16 @@ export class LiteWallet {
         try { confirmed = !!(await (await this.esplora(`/tx/${e.lotOf}`)).json())?.status?.confirmed; } catch { confirmed = null; }
         if (confirmed === null) return 'The split transaction isn\'t on the block server yet.';
         if (!confirmed) return 'The split into lots is waiting for its first block (about 10 minutes on Signet).';
-        return 'The split is in a block. Each lot is signed once its tokens settle: keep MASKED open a minute, or tap Refresh in MASKED → RGB.';
+        // what this wallet sees on the split's outputs, so a lot that doesn't sign says why
+        const outs = (plain(this.wallet.listUnspents(false)) || []).filter((u) => String(u.utxo?.outpoint?.txid).toLowerCase() === e.lotOf);
+        const mine = outs.map((u) => {
+          const al = (u.rgbAllocations || []).filter((a) => a.assetId === e.assetId);
+          const amt = al.map((a) => String(a.assignment?.Fungible ?? a.amount ?? '?')).join('+') || 'nothing';
+          const taken = this.reserved.has(`${String(u.utxo.outpoint.txid).toLowerCase()}:${u.utxo.outpoint.vout}`);
+          return `output ${u.utxo.outpoint.vout}: ${amt}${al.some((a) => !a.settled) ? ' (not settled yet)' : ''}${taken ? ' (another lot)' : ''}`;
+        });
+        if (!outs.length) return 'The split is in a block, but this wallet doesn\'t see its outputs yet. Tap Refresh in MASKED → RGB, then Finish listing.';
+        return `The split is in a block. This wallet sees ${mine.join('; ')}. A lot is signed once an output holds exactly ${e.amount}, settled: keep MASKED open a minute, or tap Refresh in MASKED → RGB.`;
       }
       const [txid, vout] = String(e.coin).split(':');
       let confirmed = null;
