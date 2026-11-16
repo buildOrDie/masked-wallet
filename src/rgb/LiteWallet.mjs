@@ -1496,7 +1496,12 @@ export class LiteWallet {
     // confirmed coins first; change from this wallet's last trade too, and several coins if one isn't enough
     const { all, confirmed } = await this.btcCoins();
     const pay = payCoinsFor(confirmed, all, base + feeFor([P2TR_SCRIPT]), perInput);
-    if (!pay) throw new Error(`Your RGB wallet needs ${(base + feeFor([P2TR_SCRIPT])).toLocaleString('en-US')} sats in bitcoin for this. Tap Add from Bitcoin under RGB balance on Home.`);
+    if (!pay) {
+      // what the wallet saw, so a shortfall can be told from a coin it can't see yet
+      const seen = all.filter((c) => !c.is_spent).map((c) => Number(c.txout?.value ?? 0)).sort((a, b) => b - a);
+      const held = this.justSpent().size;
+      throw new Error(`Your RGB wallet needs ${(base + feeFor([P2TR_SCRIPT])).toLocaleString('en-US')} sats in bitcoin for this. Tap Add from Bitcoin under RGB balance on Home. (It sees ${seen.length ? `${seen.length} coin${seen.length === 1 ? '' : 's'}: ${seen.slice(0, 5).map((v) => v.toLocaleString('en-US')).join(', ')} sats` : 'no coin'}, ${confirmed.length} confirmed${held ? `; ${held} just spent by this wallet` : ''}.)`);
+    }
     const bis = await Promise.all(pay.coins.map((c) => this.outpointInfo(c.outpoint)));
     const r = await this.onchainReceive({ assetId: null, amount: Number(o.amount), durationSeconds: 86400, witness: true });
     const seal = this.lib.WasmWallet.witnessSealScript(r.invoice);
