@@ -607,3 +607,16 @@ test('backup: Instant listings go with the RGB backup; loading it adds the other
   assert.equal(store.get('theirs').stage, 'moving');
   assert.equal(store.get('bad'), null);
 });
+
+test('repair from the chain: outputs another copy spent are found, and marked spent only when asked', async () => {
+  const chain = fakeChain();
+  const rgb = [unspent('a', 0, [tok(1000)]), unspent('b', 1, [tok(500)])];
+  const s = wallet({ name: 'seller', lib: fakeLib(), chain, rgb });
+  s.w.w.refresh = async () => ({});
+  chain.spends[`${T('b')}:1`] = { spent: true, txid: T('e') };
+  const found = await s.w.repairFromChain();
+  assert.deepEqual(found, [{ outpoint: `${T('b')}:1`, assets: [{ assetId: ASSET, amount: '500' }] }]);
+  assert.equal(s.log.filter((x) => x[0] === 'spent').length, 0, 'only looked');
+  await s.w.repairFromChain({ fix: true });
+  assert.deepEqual(s.log.filter((x) => x[0] === 'spent'), [['spent', `${T('b')}:1`]]);
+});

@@ -117,6 +117,8 @@ export class SignetWallet {
       return fn(wallet);
     });
   }
+  /** Outputs this wallet counts that the chain shows spent; `fix` marks them spent (see LiteWallet.repairFromChain). */
+  repairFromChain(o = {}) { return this.mutate((w) => w.repairFromChain(o)); }
   /** Bitcoin from the RGB balance to an address; tokens stay (see LiteWallet.sendBtcOut). */
   sendBtcOut({ address, sats, all, fee }) { return this.mutate(wallet => wallet.sendBtcOut({ address, sats, all, feeRate: testFee(fee) })); }
   createUtxos(fee) { return this.mutate(wallet => wallet.createUtxos({ upTo: true, num: 4, size: RGB_UTXO_SATS, feeRate: testFee(fee) })); }

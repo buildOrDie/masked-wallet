@@ -1018,6 +1018,20 @@ export class WalletRgb {
         this.cloud = { ...this.cloud, error: '', conflict: 0 };
         app.toast('Loaded the newer RGB backup: this browser is up to date');
       });
+      // Settings → RGB → Check against the chain: first look, then (a second tap) mark the spent outputs as spent
+      case 'repairCheck': return this.run(async () => {
+        const gone = await this.service.repairFromChain({ fix: false });
+        this.repair = { gone, at: Date.now() };
+        if (!gone.length) app.toast('Every RGB output this wallet counts is unspent on chain: nothing to repair');
+      });
+      case 'repairFix': return this.run(async () => {
+        const gone = await this.service.repairFromChain({ fix: true });
+        this.repair = null;
+        await this.refresh().catch(() => {});
+        if (this.cloudOn) await this.cloudSave({ replace: true }).catch(() => false);
+        app.toast(gone.length ? `Marked ${gone.length} spent output${gone.length > 1 ? 's' : ''}: balances now count only what this wallet can move` : 'Nothing to repair');
+      });
+      case 'repairCancel': this.repair = null; return app.render();
       case 'cloudReplace': return this.run(async () => { if (await this.cloudSave({ replace: true })) app.toast('This browser\'s RGB state is now the cloud backup'); });
       case 'betaOff': return this.run(async () => { await this.close(); try { localStorage.setItem(RGB_BETA_KEY, '0'); } catch { /* */ } app.toast('RGB beta is off. Your RGB wallet stays saved in this browser.'); });
       default: return undefined;

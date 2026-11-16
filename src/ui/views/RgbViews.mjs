@@ -421,6 +421,7 @@ export class RgbSettings {
         ${Object.keys(r.data?.transfers || {}).some((id) => r.unsent(id).length) ? '<p class="info warn small">A transfer is waiting for the other wallet to accept it. Let it finish, or cancel it, before you restore this wallet anywhere else: a restored wallet can\'t finish a transfer that was already signed.</p>' : ''}
         <button class="btn ghost wide" data-rgb="backup" ${r.busy ? 'disabled' : ''}>Save RGB backup file</button>
         <p class="muted small">${r.fileAt ? `Last file: ${ago(r.fileAt)}. ` : 'No backup file saved from this browser yet. '}${r.cloudOn ? (r.cloud.error || r.service?.backupRequired ? 'Changes since the last cloud backup are not saved anywhere yet.' : 'The cloud backup has every change.') : r.service?.backupRequired ? 'Changed since your last RGB backup.' : 'Backup up to date.'} Restoring needs this same MASKED wallet.</p>
+        ${RgbSettings.repair(r)}
         ${RgbSettings.instant(r)}
         <button class="btn ghost wide" data-rgb="off" ${r.busy ? 'disabled' : ''}>Turn off RGB for now</button>
         ${r.isMain ? `<button class="btn ghost wide" data-rgb="betaOff" ${r.busy ? 'disabled' : ''}>Switch off RGB beta</button>` : ''}` : `
@@ -430,6 +431,18 @@ export class RgbSettings {
       </div></details></section>`;
   }
   /** Settings → RGB → Instant listings: each one's state (signed listings are bought with MASKED closed). */
+  /** Check against the chain: outputs this wallet counts that another copy of it already spent. */
+  static repair(r) {
+    const g = r.repair?.gone;
+    if (!g || !g.length) return `<button class="btn ghost wide" data-rgb="repairCheck" ${r.busy ? 'disabled' : ''}>Check RGB against the chain</button>`;
+    const sums = new Map();
+    for (const x of g) for (const a of x.assets) sums.set(a.assetId, (sums.get(a.assetId) || 0) + Number(a.amount));
+    const list = [...sums].map(([id, n]) => { const a = r.find(id); return a ? `${r.amount(a, n)} ${esc(a.ticker)}` : `${n.toLocaleString('en-US')} units`; }).join(', ');
+    return `<div class="cloud-box rgb-ask"><b>${g.length} output${g.length > 1 ? 's' : ''} already spent on chain</b>
+      <p class="muted small">This wallet still counts ${esc(list)} on them, but another copy of this wallet (same recovery phrase) already moved those tokens. Only that copy can use them. If it's gone, mark these outputs spent here so the balance shows what this wallet can really move. If that copy still exists, load its backup instead.</p>
+      <button class="btn primary wide" data-rgb="repairFix" ${r.busy ? 'disabled' : ''}>Mark them spent</button>
+      <button class="btn ghost wide" data-rgb="repairCancel">Not now</button></div>`;
+  }
   static instant(r) {
     let list = [];
     try { list = r.service?.instantListings?.() || []; } catch { list = []; }

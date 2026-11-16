@@ -686,6 +686,32 @@ export class LiteWallet {
     if (!gone.length) return;
     throw new Error(`This RGB wallet is behind the chain for this token: it still counts ${gone.length === 1 ? 'an output' : `${gone.length} outputs`} the network shows as already spent (${gone.slice(0, 2).map((o) => `${o.slice(0, 10)}…:${o.split(':')[1]}`).join(', ')}). Nothing was sent. Open MASKED → RGB, tap Refresh and wait a minute, then try again.`);
   }
+  /**
+   * Repair from the chain: every output this wallet counts as holding tokens, checked on the block server. Returns
+   * the ones already spent there ({ outpoint, assets: [{ assetId, amount }] }); with `fix`, marks them spent so the
+   * balance only counts tokens this copy can really move (the ones moved by another copy of this wallet stay with it).
+   */
+  async repairFromChain({ fix = false } = {}) {
+    if (typeof this.wallet?.listUnspents !== 'function') return [];
+    await this.wallet.sync(this.requireOnline());
+    try { await this.wallet.refresh(this.requireOnline(), null, [], false); } catch { /* checked below */ }
+    const held = (plain(this.wallet.listUnspents(false)) || []).filter((u) => u.utxo?.exists !== false && (u.rgbAllocations || []).some((a) => a.settled));
+    const gone = [];
+    for (const u of held.slice(0, 100)) {
+      const op = `${String(u.utxo.outpoint.txid).toLowerCase()}:${u.utxo.outpoint.vout}`;
+      let spent = false;
+      try { spent = !!(await (await this.esplora(`/tx/${u.utxo.outpoint.txid}/outspend/${u.utxo.outpoint.vout}`)).json())?.spent; } catch { continue; }
+      if (!spent) continue;
+      gone.push({ outpoint: op, assets: (u.rgbAllocations || []).filter((a) => a.settled).map((a) => ({ assetId: a.assetId, amount: String(a.assignment?.Fungible ?? a.amount ?? 0) })) });
+    }
+    if (fix && gone.length) {
+      if (typeof this.wallet.markOutpointSpent !== 'function') throw new Error('This MASKED build can\'t repair RGB from the chain. Update MASKED.');
+      for (const g of gone) this.wallet.markOutpointSpent(g.outpoint);
+      this.reserve([...this.reserved].filter((x) => !gone.some((g) => g.outpoint === x)));
+      await this.save();
+    }
+    return gone;
+  }
   /** Move the tokens of a listing onto an output of their own (or a listed output back, when cancelling). */
   async instantMove(assetId, amount, from, feeRate, onStep = (_t) => {}) {
     const online = this.requireOnline();
