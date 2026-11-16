@@ -558,3 +558,19 @@ test('seller: lots on outputs the engine\'s send can\'t spend: split step by ste
   assert.equal(s.log.filter((x) => x[0] === 'colorSwap').length, 2);
   assert.ok(changes.some((c) => c.offerId === lots[0].offerId && c.stage === 'ready'));
 });
+
+test('seller: an Instant listing bigger than any one output joins several outputs in its move', async () => {
+  const chain = fakeChain();
+  const fee = `${T('c')}:2`;
+  for (const c of ['a', 'b', 'd']) chain.outs[`${T(c)}:0`] = { sats: 330, script: '5120rgb', tx: 'aa' };
+  chain.outs[fee] = { sats: 5000, script: '5120btc', tx: 'bb' };
+  const rgb = [unspent('a', 0, [tok(1000)]), unspent('b', 0, [tok(1000)]), unspent('d', 0, [tok(1000)])];
+  const s = wallet({ name: 'seller', lib: fakeLib(), chain, rgb, coins: [{ outpoint: fee, txout: { value: 5000 }, is_spent: false }] });
+  const v = await s.w.instantList({ offerId: 'sw0123456789ab', assetId: ASSET, amount: '2500', priceSats: '20000', feeRate: 2 }, s.store);
+  assert.equal(v.stage, 'moving');
+  const cs = s.log.find((x) => x[0] === 'colorSwap');
+  assert.equal(cs[1].filter((op) => op.endsWith(':0') && !op.startsWith(T('c'))).length, 3, 'all three token outputs go in, with the fee coin');
+  assert.equal(cs[2], '2500');
+  const { offerable } = await import('../src/rgb/swap.mjs');
+  assert.deepEqual(offerable(rgb, ASSET), { total: '3000', max: '1000' }, 'Instant can list the total; a four-step swap one output');
+});

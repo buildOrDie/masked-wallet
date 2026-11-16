@@ -513,7 +513,7 @@ export class LiteWallet {
     const unspents = (plain(this.wallet.listUnspents(false)) || []).filter((u) => { const o = u.utxo?.outpoint; return !o || !this.reserved.has(`${String(o.txid).toLowerCase()}:${o.vout}`); });
     const { nia, ifa } = await this.listAssets();
     // instant: amounts that sit alone on an output, so an Instant listing of exactly that is live at once (no move)
-    return [...nia, ...ifa].map((a) => ({ assetId: a.assetId, ticker: a.ticker, name: a.name, precision: a.precision, spendable: String(a.balance.spendable), max: offerable(unspents, a.assetId).max, instant: instantAmounts(unspents, a.assetId) }))
+    return [...nia, ...ifa].map((a) => ({ assetId: a.assetId, ticker: a.ticker, name: a.name, precision: a.precision, spendable: String(a.balance.spendable), max: offerable(unspents, a.assetId).max, maxInstant: offerable(unspents, a.assetId).total, instant: instantAmounts(unspents, a.assetId) }))
       .filter((a) => BigInt(a.spendable) > 0n || BigInt(a.max) > 0n);
   }
 
@@ -690,21 +690,24 @@ export class LiteWallet {
   async instantMove(assetId, amount, from, feeRate, onStep = (_t) => {}) {
     const online = this.requireOnline();
     const rate = Math.max(1, Number(feeRate) || 1);
-    const feeFor = (n) => BigInt(Math.ceil(rate * txVbytes([P2TR_SCRIPT, ...Array(n).fill(P2TR_SCRIPT)], [OPRET_SCRIPT, P2TR_SCRIPT, P2TR_SCRIPT])));
+    // `from`: one output holding the tokens, or several (tokens spread over outputs are joined in the same move)
+    const froms = Array.isArray(from) ? from : [from];
+    const feeFor = (n) => BigInt(Math.ceil(rate * txVbytes([...Array(froms.length).fill(P2TR_SCRIPT), ...Array(n).fill(P2TR_SCRIPT)], [OPRET_SCRIPT, P2TR_SCRIPT, P2TR_SCRIPT])));
     const perInput = feeFor(2) - feeFor(1);
     const { all, confirmed } = await this.btcCoins();
     const pay = payCoinsFor(confirmed, all, feeFor(1) + BigInt(INSTANT_SEAL_SATS) + 546n, perInput);
     if (!pay) throw new Error(`Your RGB wallet needs about ${(feeFor(1) + BigInt(INSTANT_SEAL_SATS) + 546n).toLocaleString('en-US')} sats in bitcoin for the network fee. Tap Add from Bitcoin under RGB balance on Home.`);
-    const [si, ...fis] = await Promise.all([this.outpointInfo(from.outpoint), ...pay.coins.map((c) => this.outpointInfo(c.outpoint))]);
+    const infos = await Promise.all([...froms, ...pay.coins].map((c) => this.outpointInfo(c.outpoint)));
+    const sis = infos.slice(0, froms.length), fis = infos.slice(froms.length);
     const r = await this.onchainReceive({ assetId, amount: Number(amount), durationSeconds: 86400, witness: true });
     const seal = this.lib.WasmWallet.witnessSealScript(r.invoice);
     // the real size, from the real scripts
     const own = await this.ownScript();
-    const totalFee = BigInt(Math.ceil(rate * txVbytes([si.script, ...fis.map((f) => f.script)], [OPRET_SCRIPT, seal, own])));
-    const change = BigInt(si.sats) + fis.reduce((t, f) => t + BigInt(f.sats), 0n) - BigInt(INSTANT_SEAL_SATS) - totalFee;
+    const totalFee = BigInt(Math.ceil(rate * txVbytes(infos.map((f) => f.script), [OPRET_SCRIPT, seal, own])));
+    const change = infos.reduce((t, f) => t + BigInt(f.sats), 0n) - BigInt(INSTANT_SEAL_SATS) - totalFee;
     if (change < 546n) throw new Error('Not enough bitcoin for the network fee.');
     const unsigned = this.lib.WasmWallet.newSwapPsbt(
-      [{ outpoint: from.outpoint, sats: si.sats, script: si.script, tx: si.tx }, ...pay.coins.map((c, k) => ({ outpoint: c.outpoint, sats: fis[k].sats, script: fis[k].script, tx: fis[k].tx }))],
+      [...froms.map((c, k) => ({ outpoint: c.outpoint, sats: sis[k].sats, script: sis[k].script, tx: sis[k].tx })), ...pay.coins.map((c, k) => ({ outpoint: c.outpoint, sats: fis[k].sats, script: fis[k].script, tx: fis[k].tx }))],
       [{ script: seal, sats: INSTANT_SEAL_SATS }, { script: own, sats: Number(change) }],
     );
     const psbt = this.engineV1
@@ -819,8 +822,9 @@ export class LiteWallet {
     const base = { role: 'seller', assetId: o.assetId, amount: String(o.amount), priceSats: String(o.priceSats), market: String(market), token: String(token), at: Date.now() };
     const exact = exactCoinFor(unspents, o.assetId, o.amount, this.reserved);
     if (exact) { onStep('Signing the listing…'); return this.instantSign(o.offerId, { ...base, stage: 'moving' }, store); }
-    const from = freeSellerCoinFor(unspents, o.assetId, o.amount, this.reserved);
-    if (!from) throw new Error('No settled RGB output of this wallet holds that much of the token. Wait for incoming transfers to settle.');
+    // one output holding enough, or else several joined in the move
+    const from = freeSellerCoinFor(unspents, o.assetId, o.amount, this.reserved) || sendCoinsFor(unspents, o.assetId, o.amount, this.reserved).coins;
+    if (!from) throw new Error('Not that much of this token is settled and free in this wallet. Wait for incoming transfers to settle, or list less.');
     onStep('Moving the tokens to an output of their own…');
     let moved;
     try { moved = await this.instantMove(o.assetId, o.amount, from, feeRate, onStep); } catch (err) {
@@ -953,7 +957,7 @@ export class LiteWallet {
       await this.save();
       return [];
     }
-    const from = freeSellerCoinFor(unspents, e.assetId, e.amount, busy);
+    const from = freeSellerCoinFor(unspents, e.assetId, e.amount, busy) || sendCoinsFor(unspents, e.assetId, e.amount, busy).coins;
     if (!from) {
       const why = 'Waiting for the previous lot\'s move to confirm: the rest of the tokens are free again after one block.';
       if (e.waiting !== why) store.set(id, { ...e, waiting: why, waitingAt: Date.now() });
