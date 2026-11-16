@@ -274,3 +274,26 @@ test('RGB loads: the states they replace are kept (the last few, newest first), 
   for (let k = 1; k <= 4; k++) s2.keepBeforeLoad({ format: 'x', ciphertext: `t${k}` });
   assert.deepEqual([0, 1].map((i) => s2.beforeLoad(i).ciphertext), ['t4', 't3']);
 });
+
+test('Instant records: a full browser storage never stops listings; finished entries lose their signed data, then go', async () => {
+  const storage = new MemoryStorage();
+  const service = new SignetWallet({ loadSdk: async () => ({}), storage });
+  const key = `${service.vaultKey}.swaps.instant`;
+  // a storage that holds 3,000 characters for this key
+  const set = storage.setItem.bind(storage);
+  storage.setItem = (k, v) => { if (k === key && String(v).length > 3000) throw new Error('QuotaExceededError: exceeded the quota'); set(k, v); };
+  const store = service.instantStore();
+  const big = 'x'.repeat(900);
+  const now = Date.now();
+  store.set('sold1', { role: 'seller', stage: 'sold', at: now - 3, psbt: big, consignment: big });
+  assert.equal(store.get('sold1').consignment, undefined, 'a sold listing keeps no signed data');
+  for (const k of ['o1', 'o2']) store.set(k, { role: 'seller', stage: 'ready', at: now, coin: `${k}:1`, psbt: 'p', consignment: big });
+  store.set('c1', { role: 'seller', stage: 'cancelled', at: now - 2 });
+  // one more open listing that doesn't fit: the finished ones go first, then the largest transfer data
+  store.set('o3', { role: 'seller', stage: 'ready', at: now + 1, coin: 'o3:1', psbt: 'p', consignment: big });
+  const all = store.all();
+  assert.equal(all.o3.stage, 'ready', 'the newest listing is kept whole');
+  assert.ok(!all.sold1 && !all.c1, 'finished entries went first');
+  assert.ok(Object.values(all).filter((x) => x.resign).length >= 1, 'then an open listing\'s data (signed again if asked)');
+  assert.ok(JSON.stringify(all).length <= 3000);
+});

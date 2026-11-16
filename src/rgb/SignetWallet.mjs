@@ -235,12 +235,38 @@ export class SignetWallet {
   instantStore() {
     const key = `${this.vaultKey}.swaps.instant`;
     const read = () => { try { return JSON.parse(this.storage.getItem(key) || '{}'); } catch { return {}; } };
-    const write = (m) => this.storage.setItem(key, JSON.stringify(m));
     const finished = (x) => ['sold', 'cancelled'].includes(x?.stage) || (x?.role === 'buyer' && (x?.posted || x?.failed));
+    // Browser storage holds a few MB. A signed listing's transfer data can be large, so only what's still needed is
+    // kept: a sold, cancelled or settled entry loses its signed data at once; when storage is still full, finished
+    // entries go (oldest first), then the transfer data of open listings (the market has a copy; MASKED signs again
+    // if asked). Before, a full storage ("exceeded the quota") stopped every listing.
+    const slim = (x) => {
+      if (!x || typeof x !== 'object') return x;
+      const y = { ...x };
+      if (finished(y) || y.stage === 'cancelling') { delete y.psbt; delete y.consignment; delete y.completed; delete y.moveHex; if (y.role === 'buyer' && y.posted) delete y.txHex; }
+      if (y.stage === 'ready') delete y.moveHex;
+      return y;
+    };
+    const write = (m, saving = '') => {
+      for (const k of Object.keys(m)) m[k] = slim(m[k]);
+      const put = () => this.storage.setItem(key, JSON.stringify(m));
+      try { return put(); } catch (e) { if (!/quota|exceeded/i.test(String(e?.message || e?.name || e))) throw e; }
+      // still full: finished entries, oldest first
+      for (const [k] of Object.entries(m).filter(([, x]) => finished(x)).sort((a, b) => (a[1]?.at || 0) - (b[1]?.at || 0))) {
+        delete m[k];
+        try { return put(); } catch { /* next */ }
+      }
+      // then the transfer data of open listings, oldest first, never the one being saved (signed again if asked)
+      for (const [k, x] of Object.entries(m).filter(([k2, x]) => x?.consignment && k2 !== saving).sort((a, b) => (a[1]?.at || 0) - (b[1]?.at || 0))) {
+        m[k] = { ...x, consignment: undefined, psbt: undefined, stage: x.stage === 'ready' ? 'moving' : x.stage, resign: true };
+        try { return put(); } catch { /* next */ }
+      }
+      return put();
+    };
     return {
       all: read,
       get: (id) => read()[String(id)] || null,
-      set: (id, v) => { const m = read(); m[String(id)] = v; for (const [k, x] of Object.entries(m)) if (finished(x) && Date.now() - (x?.at || 0) > 7 * 86400_000) delete m[k]; write(m); },
+      set: (id, v) => { const m = read(); m[String(id)] = v; for (const [k, x] of Object.entries(m)) if (finished(x) && Date.now() - (x?.at || 0) > 7 * 86400_000) delete m[k]; write(m, String(id)); },
       del: (id) => { const m = read(); delete m[String(id)]; write(m); },
     };
   }

@@ -680,6 +680,7 @@ test('lots all at once: each lot moves in a chain (the next from the previous ch
   s.w.w.sendEnd = async () => { const txid = moves.shift(); s.log.push(['sendEnd', txid]); return { txid }; };
   let own = [];
   s.w.w.setOwnUnconfirmed = (l) => { own = [...l]; };
+  s.w.w.setSwapChangeVout = (v) => { s.log.push(['changeVout', v]); };
   s.w.w.refresh = async () => { s.log.push(['refresh']); };
   const lots = ['a', 'b', 'c'].map((c) => ({ offerId: `sw${c.repeat(12)}`, token: 'ab'.repeat(24), amount: '500', priceSats: '5000' }));
   const r = await s.w.instantListLots({ assetId: ASSET, lots, feeRate: 2, market: 'https://maskedwallet.com' }, s.store);
@@ -691,6 +692,7 @@ test('lots all at once: each lot moves in a chain (the next from the previous ch
   assert.deepEqual(swaps[2][1], [`${T('8')}:2`]);
   assert.deepEqual(own.sort(), [T('5'), T('8'), T('9')].sort(), 'the engine is told these unconfirmed moves are this wallet\'s own');
   assert.ok(s.log.some((x) => x[0] === 'refresh'), 'it takes in its own moves before signing');
+  assert.deepEqual(s.log.filter((x) => x[0] === 'changeVout').map((x) => x[1]), [2, 2, 2], 'each move keeps the rest of the tokens on its own change output (where the next lot moves from)');
   assert.deepEqual(s.log.filter((x) => x[0] === 'presign').map((x) => x[1]), [`${T('5')}:1`, `${T('8')}:1`, `${T('9')}:1`], 'every lot signed on its own output');
   assert.equal(r.stage, 'ready');
   assert.deepEqual(r.lots.map((v) => v.stage), ['ready', 'ready', 'ready']);
@@ -709,6 +711,7 @@ test('lots all at once: a lot whose move fails is reported, the lots already mov
   const color = s.w.w.colorSwap;
   s.w.w.colorSwap = async (...a) => { if (++n === 2) throw new Error('mempool chain too long'); return color(...a); };
   s.w.w.setOwnUnconfirmed = () => {};
+  s.w.w.setSwapChangeVout = () => {};
   const lots = ['a', 'b'].map((c) => ({ offerId: `sw${c.repeat(12)}`, token: 'ab'.repeat(24), amount: '500', priceSats: '5000' }));
   const r = await s.w.instantListLots({ assetId: ASSET, lots, feeRate: 2 }, s.store);
   assert.deepEqual(r.lots.map((v) => v.stage), ['ready', 'failed']);
@@ -724,6 +727,7 @@ test('a single listing that needs a move is signed right after it, when the engi
   const s = wallet({ name: 'seller', lib: fakeLib(), chain, rgb: [unspent('b', 0, [tok(800)])], coins: [{ outpoint: fee, txout: { value: 5000 }, is_spent: false }] });
   let own = [];
   s.w.w.setOwnUnconfirmed = (l) => { own = [...l]; };
+  s.w.w.setSwapChangeVout = () => {};
   s.w.w.refresh = async () => {};
   const v = await s.w.instantList({ offerId: 'sw0123456789ab', assetId: ASSET, amount: '500', priceSats: '20000', feeRate: 2 }, s.store);
   assert.equal(v.stage, 'ready', 'on sale at once, no block to wait for');

@@ -11,10 +11,10 @@ index 884d686..e2896b5 100644
  rgb-strict-encoding = { version = "=1.0.5", default-features = false, features = [
      "bitcoin",
 diff --git a/bindings/wasm/src/lib.rs b/bindings/wasm/src/lib.rs
-index 51b6efd..f014856 100644
+index 51b6efd..f1cf597 100644
 --- a/bindings/wasm/src/lib.rs
 +++ b/bindings/wasm/src/lib.rs
-@@ -635,6 +635,175 @@ impl WasmWallet {
+@@ -635,6 +635,182 @@ impl WasmWallet {
          to_js(&result)
      }
  
@@ -117,6 +117,13 @@ index 51b6efd..f014856 100644
 +        Ok(())
 +    }
 +
++    /// For the next `colorSwap` only: put the asset change on output `vout` of its PSBT (this wallet's output, moved
++    /// to its RGB side if needed), not on a free RGB output elsewhere. `null` clears it.
++    #[wasm_bindgen(js_name = "setSwapChangeVout")]
++    pub fn set_swap_change_vout(&self, vout: Option<u32>) {
++        self.inner.borrow_mut().set_swap_change_vout(vout);
++    }
++
 +    /// A pre-signed listing was bought: mark its output spent (the caller checked it on chain).
 +    #[wasm_bindgen(js_name = "markOutpointSpent")]
 +    pub fn mark_outpoint_spent(&self, outpoint: &str) -> Result<bool, JsValue> {
@@ -190,7 +197,7 @@ index 51b6efd..f014856 100644
      /// Send RGB assets (end): broadcast a signed PSBT. Returns an OperationResult JS object.
      #[wasm_bindgen(js_name = "sendEnd")]
      pub async fn send_end(
-@@ -1074,6 +1243,22 @@ impl WasmWallet {
+@@ -1074,6 +1250,22 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -213,7 +220,7 @@ index 51b6efd..f014856 100644
      /// Check if the wallet needs a backup. Returns true if modified since last backup.
      #[wasm_bindgen(js_name = "backupInfo")]
      pub fn backup_info(&self) -> Result<bool, JsValue> {
-@@ -1217,7 +1402,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
+@@ -1217,7 +1409,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
  /// Works before the witness transaction is broadcast. Takes the raw consignment
  /// bytes (strict-encoded, not base64), the witness transaction ID, and the Bitcoin network.
  ///
@@ -223,7 +230,7 @@ index 51b6efd..f014856 100644
  #[wasm_bindgen(js_name = "validateConsignmentOffchain")]
  pub fn validate_consignment_offchain(
      consignment_bytes: &[u8],
-@@ -1235,3 +1421,43 @@ pub fn validate_consignment_offchain(
+@@ -1235,3 +1428,43 @@ pub fn validate_consignment_offchain(
      .map_err(|e| JsValue::from_str(&e.to_string()))?;
      to_js(&result)
  }
@@ -937,10 +944,10 @@ index c5c45b2..46cf640 100644
  pub(crate) mod offline;
  #[cfg(feature = "esplora")]
 diff --git a/src/wallet/offline.rs b/src/wallet/offline.rs
-index a3a9f46..0526273 100644
+index a3a9f46..bf0a61a 100644
 --- a/src/wallet/offline.rs
 +++ b/src/wallet/offline.rs
-@@ -1312,9 +1312,49 @@ pub struct Wallet {
+@@ -1312,9 +1312,51 @@ pub struct Wallet {
      pub(crate) rgb_stock: std::rc::Rc<std::cell::RefCell<Option<crate::utils::MemStock>>>,
      pub(crate) vss_client: Option<super::vss::VssBackupClient>,
      pub(crate) last_vss_backup_error: std::cell::RefCell<Option<String>>,
@@ -951,6 +958,8 @@ index a3a9f46..0526273 100644
 +    /// MASKED: transactions this wallet made and broadcast itself (listing and lot moves) whose outputs may be spent
 +    /// or listed before they confirm. See `Wallet::own_unconfirmed_ok`.
 +    pub(crate) own_unconfirmed: HashSet<String>,
++    /// MASKED: the next `color_swap` puts the asset change on this output of its PSBT (`set_swap_change_vout`).
++    pub(crate) swap_change_vout: Option<u32>,
  }
  
  impl Wallet {
@@ -990,7 +999,7 @@ index a3a9f46..0526273 100644
      /// Create a wallet and restore its latest durable IndexedDB snapshot, if one exists.
      ///
      /// The returned wallet is ready for use only after the IndexedDB read and snapshot
-@@ -1325,6 +1365,31 @@ impl Wallet {
+@@ -1325,6 +1367,31 @@ impl Wallet {
          let snapshot = super::idb_store::load_snapshot(&wallet.idb_key())
              .await
              .map_err(|details| Error::Persistence { details })?;
@@ -1022,17 +1031,18 @@ index a3a9f46..0526273 100644
          if let Some(snapshot) = snapshot {
              wallet.idb_loaded = Some((snapshot.writer, snapshot.sequence));
              wallet
-@@ -1475,6 +1540,9 @@ impl Wallet {
+@@ -1475,6 +1542,10 @@ impl Wallet {
              },
              vss_client: None,
              last_vss_backup_error: std::cell::RefCell::new(None),
 +            reserved_outpoints: HashSet::new(),
 +            presigned_receives: HashSet::new(),
 +            own_unconfirmed: HashSet::new(),
++            swap_change_vout: None,
          })
      }
  
-@@ -1690,8 +1758,10 @@ impl Wallet {
+@@ -1690,8 +1761,10 @@ impl Wallet {
              None => rgb_allocations.as_deref().unwrap(),
          };
  
@@ -1044,7 +1054,7 @@ index a3a9f46..0526273 100644
          allocatable.sort_by_key(|t| t.rgb_allocations.len() + t.pending_blinded as usize);
          match allocatable.first() {
              Some(mut selected) => {
-@@ -2618,7 +2688,7 @@ impl Wallet {
+@@ -2618,7 +2691,7 @@ impl Wallet {
          Ok(psbt.to_string())
      }
  
@@ -1053,18 +1063,19 @@ index a3a9f46..0526273 100644
          let sign_options = sign_options.unwrap_or_default();
          let [colored, vanilla] = &self.signers;
          self.bdk_wallet
-@@ -4215,6 +4285,9 @@ pub(crate) mod address_reuse_tests {
+@@ -4215,6 +4288,10 @@ pub(crate) mod address_reuse_tests {
              rgb_stock: std::rc::Rc::new(std::cell::RefCell::new(None)),
              vss_client: None,
              last_vss_backup_error: std::cell::RefCell::new(None),
 +            reserved_outpoints: HashSet::new(),
 +            presigned_receives: HashSet::new(),
 +            own_unconfirmed: HashSet::new(),
++            swap_change_vout: None,
          }
      }
  
 diff --git a/src/wallet/online.rs b/src/wallet/online.rs
-index ca96b4a..abd3a20 100644
+index ca96b4a..a21c347 100644
 --- a/src/wallet/online.rs
 +++ b/src/wallet/online.rs
 @@ -791,8 +791,9 @@ pub(crate) struct ConsignmentPayment<'c> {
@@ -1239,7 +1250,7 @@ index ca96b4a..abd3a20 100644
              let recipient_id = &recipient.recipient_id;
              let recipient_vk = verifying_key_from_bytes(&recipient.public_key)?;
              let derived = derive_shared(sender_sk, &recipient_vk)?;
-@@ -12074,3 +12130,682 @@ mod bfa_tests {
+@@ -12074,3 +12130,712 @@ mod bfa_tests {
          assert!(options(&format!(r#","evm_chains":{{"mainnet":{chain}}}"#)).is_err());
      }
  }
@@ -1397,11 +1408,40 @@ index ca96b4a..abd3a20 100644
 +            return Err(Error::Internal { details: s!("swap PSBT: the seal output does not pay the buyer's invoice") });
 +        }
 +
++        // MASKED: the asset change on an output of this PSBT (`set_swap_change_vout`, asked for this colouring
++        // only): a move keeps the rest of the tokens on its own change output instead of a free output elsewhere,
++        // so a chain of moves (lots) can go on from it at once, and no free RGB output is needed
++        let mut psbt = psbt;
++        let btc_change = match self.swap_change_vout.take() {
++            None => None,
++            Some(v) => {
++                let i = v as usize;
++                if v == 0 || v == seal_vout || i >= psbt.unsigned_tx.output.len() || psbt.unsigned_tx.output[i].script_pubkey.is_op_return() {
++                    return Err(Error::Internal { details: s!("swap PSBT: the change output asked for isn't one") });
++                }
++                let script = psbt.unsigned_tx.output[i].script_pubkey.clone();
++                if !self.bdk_wallet.is_mine(script.clone()) {
++                    return Err(Error::Internal { details: s!("swap PSBT: the change output asked for isn't this wallet's") });
++                }
++                // on this wallet's RGB (colored) side, where its RGB outputs are kept track of
++                if self.bdk_wallet.derivation_of_spk(script).map(|(k, _)| k) != Some(KeychainKind::External) {
++                    psbt.unsigned_tx.output[i].script_pubkey = self.get_new_address()?.script_pubkey();
++                    psbt.outputs[i] = Default::default();
++                }
++                Some(BtcChange { vout: v, amount: psbt.unsigned_tx.output[i].value.to_sat() })
++            }
++        };
 +        let psbt = self
-+            ._color_swap_psbt(psbt, &asset_id, amount, recipient, unspents, &mut runtime, min_confirmations, operation_sk.to_bytes().to_vec(), sender_transport_endpoint)
++            ._color_swap_psbt(psbt, &asset_id, amount, recipient, unspents, &mut runtime, min_confirmations, operation_sk.to_bytes().to_vec(), sender_transport_endpoint, btc_change)
 +            .await?;
 +        info!(self.logger, "Swap (begin) completed");
 +        Ok(psbt.to_string())
++    }
++
++    /// MASKED: for the next `color_swap` only, put the asset change on output `vout` of its PSBT (one of this
++    /// wallet's outputs, moved to its RGB side if needed) instead of on a free RGB output elsewhere.
++    pub fn set_swap_change_vout(&mut self, vout: Option<u32>) {
++        self.swap_change_vout = vout;
 +    }
 +
 +    /// Colour `psbt` for `amount` of `asset_id` to `recipient`, a witness seal (shared by `color_swap` and
@@ -1418,6 +1458,7 @@ index ca96b4a..abd3a20 100644
 +        min_confirmations: u8,
 +        operation_secret_key: Vec<u8>,
 +        sender_transport_endpoint: Option<String>,
++        btc_change: Option<BtcChange>,
 +    ) -> Result<Psbt, Error> {
 +        let asset_id = asset_id.to_string();
 +        let asset = self.database.check_asset_exists(asset_id.clone())?;
@@ -1482,7 +1523,7 @@ index ca96b4a..abd3a20 100644
 +                runtime,
 +                min_confirmations,
 +                invoice_expiration,
-+                None,
++                btc_change,
 +                &mut rejected,
 +                &mut reject_lists,
 +            )
@@ -1698,7 +1739,7 @@ index ca96b4a..abd3a20 100644
 +        };
 +        let operation_sk = crate::encryption::gen_ed25519();
 +        let mut psbt = self
-+            ._color_swap_psbt(psbt, &asset_id, amount, recipient, unspents, &mut runtime, min_confirmations, operation_sk.to_bytes().to_vec(), None)
++            ._color_swap_psbt(psbt, &asset_id, amount, recipient, unspents, &mut runtime, min_confirmations, operation_sk.to_bytes().to_vec(), None, None)
 +            .await?;
 +        let template_txid = psbt.unsigned_tx.compute_txid().to_string();
 +        let artifacts = self.transfer_artifacts.remove(&template_txid);

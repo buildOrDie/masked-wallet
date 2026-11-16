@@ -676,7 +676,7 @@ export class LiteWallet {
   get canPresign() { return typeof this.wallet.presignSale === 'function' && typeof this.lib.WasmWallet?.presignedBuyPsbt === 'function'; }
   requirePresign() { if (!this.canPresign) throw new Error('This MASKED build can\'t make Instant listings yet. Update MASKED.'); }
   /** The engine can spend and list outputs of this wallet's own unconfirmed moves (all lots signed at once). */
-  get canChainLots() { return this.canPresign && typeof this.wallet.setOwnUnconfirmed === 'function' && /** @type {any} */ (this).lotsChain !== false; }
+  get canChainLots() { return this.canPresign && typeof this.wallet.setOwnUnconfirmed === 'function' && typeof this.wallet.setSwapChangeVout === 'function' && /** @type {any} */ (this).lotsChain !== false; }
   /**
    * Tell the engine which unconfirmed transactions are this wallet's own moves (listing and lot moves in `store`, plus
    * `extra`): their outputs can be moved, listed or cancelled before they confirm. The engine checks each is a
@@ -810,6 +810,9 @@ export class LiteWallet {
       [...froms.map((c, k) => ({ outpoint: c.outpoint, sats: sis[k].sats, script: sis[k].script, tx: sis[k].tx })), ...pay.coins.map((c, k) => ({ outpoint: c.outpoint, sats: fis[k].sats, script: fis[k].script, tx: fis[k].tx }))],
       [{ script: seal, sats: INSTANT_SEAL_SATS }, { script: own, sats: Number(change) }],
     );
+    // the rest of the tokens stay on this move's own change output (an engine that can): no free RGB output needed,
+    // and the next lot of a chain moves from it at once
+    if (typeof this.wallet.setSwapChangeVout === 'function') this.wallet.setSwapChangeVout(SEAL_OUTPUT + 1);
     const psbt = this.engineV1
       ? await this.wallet.colorSwap(online, unsigned, assetId, BigInt(amount), r.invoice, SEAL_OUTPUT, BigInt(INSTANT_SEAL_SATS), 1, this.transport, null)
       : await this.wallet.colorSwap(online, unsigned, assetId, BigInt(amount), r.recipientId, SEAL_OUTPUT, BigInt(INSTANT_SEAL_SATS), [this.transport], 1);
@@ -1284,6 +1287,8 @@ export class LiteWallet {
       }
       if (e?.role !== 'seller') continue;
       try {
+        // signed data dropped to free browser storage: the market keeps the listing; signed again only when asked
+        if (e.stage === 'moving' && e.resign) continue;
         if (e.stage === 'moving') {
           let v;
           try { v = await this.instantSign(id, e, store); } catch (err) {
