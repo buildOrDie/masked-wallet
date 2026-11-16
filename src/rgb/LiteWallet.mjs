@@ -878,6 +878,15 @@ export class LiteWallet {
     this.spentNow([...froms.map((c) => c.outpoint), ...pay.coins.map((c) => c.outpoint)]);
     return { txid: id, txHex };
   }
+  /** Wait until the block server in use has `txid` (at most `ms`). */
+  async waitKnown(txid, ms = 15_000) {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+      if (await this.knowsTx(txid)) return true;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    return false;
+  }
   /**
    * Does a block server know this transaction (in the mempool or in a block)? Asks for the transaction itself:
    * electrs answers /status with {"confirmed":false} even for a transaction it has never seen.
@@ -1516,7 +1525,10 @@ export class LiteWallet {
       }
       throw err; // a network problem: kept, and sent again on the next refresh
     }
-    // the wallet learns at once that its coins are spent, so nothing else of it spends them again
+    // the wallet learns at once that its coins are spent, and the purchase's change: the next buy of a sweep can
+    // spend that change (it waits for the block server to have this purchase first, a few seconds; before, the next
+    // buy found no coin at all when the RGB balance had only one: "Bought 1 of 3")
+    await this.waitKnown(txid, 15_000);
     try { await this.wallet.sync(online); } catch { /* the next refresh */ }
     await this.instantPost(o.offerId, store);
     await this.save();
