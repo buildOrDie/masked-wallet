@@ -690,14 +690,15 @@ export class LiteWallet {
     const spentOnChain = async () => {
       const held = (plain(this.wallet.listUnspents(false)) || []).filter((u) => u.utxo?.exists !== false && (u.rgbAllocations || []).some((a) => a.assetId === assetId && a.settled));
       const own = this.ownTxids(extra), gone = [], mine = new Set();
+      /** @type {Record<string, string>} */ const spentBy = {};
       for (const u of held.slice(0, 40)) {
         const [txid, vout] = opOf(u).split(':');
         try {
           const sp = await (await this.esplora(`/tx/${txid}/outspend/${vout}`)).json();
-          if (sp?.spent) (sp.txid && own.has(String(sp.txid).toLowerCase()) ? mine.add(opOf(u)) : gone.push(opOf(u)));
+          if (sp?.spent) { if (sp.txid && own.has(String(sp.txid).toLowerCase())) mine.add(opOf(u)); else { gone.push(opOf(u)); spentBy[opOf(u)] = String(sp.txid || ''); } }
         } catch { /* the block server didn't answer: not counted */ }
       }
-      return { gone, mine };
+      return { gone, mine, spentBy };
     };
     onStep('Checking this wallet is up to date with the chain…');
     let r = await spentOnChain();
@@ -706,8 +707,8 @@ export class LiteWallet {
       try { await this.wallet.sync(this.requireOnline()); await this.wallet.refresh(this.requireOnline(), null, [], false); await this.save(); } catch { /* checked again below */ }
       r = await spentOnChain();
     }
-    const { gone, mine } = r;
-    if (gone.length) throw new Error(`This RGB wallet is behind the chain for this token: it still counts ${gone.length === 1 ? 'an output' : `${gone.length} outputs`} the network shows as already spent (${gone.slice(0, 2).map((o) => `${o.slice(0, 10)}…:${o.split(':')[1]}`).join(', ')}). Nothing was sent. Open MASKED → RGB, tap Refresh and wait a minute, then try again.`);
+    const { gone, mine, spentBy } = r;
+    if (gone.length) throw new Error(`This RGB wallet is behind the chain for this token: it still counts ${gone.length === 1 ? 'an output' : `${gone.length} outputs`} the network shows as already spent (${gone.slice(0, 2).map((o) => `${o.slice(0, 10)}…:${o.split(':')[1]}${spentBy[o] ? ` by ${spentBy[o].slice(0, 10)}…` : ''}`).join(', ')}). Nothing was sent. Open MASKED → RGB, tap Refresh and wait a minute, then try again. Still there: Settings → RGB → Check RGB against the chain.`);
     if (mine.size && !allowOwn) throw Object.assign(new Error('Your last move of this token is still waiting for its block. Try again after it confirms (about 10 minutes). Nothing was sent.'), { code: 'OWN_MOVE_PENDING' });
     return mine;
   }
