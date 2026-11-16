@@ -1281,4 +1281,9 @@ export const ZH_CN = {
   "This MASKED build can't repair RGB from the chain. Update MASKED.": "此版本的 MASKED 无法根据区块链修复 RGB。请更新 MASKED。",
   "This RGB wallet is behind the chain for this token: it still counts {0}": "此 RGB 钱包在该代币上落后于区块链：它仍计入 {0}",
   "This wallet still counts {0} on them, but another copy of this wallet (same recovery phrase) already moved those tokens. Only that copy can use them. If it's gone, mark these outputs spent here so the balance shows what this wallet can really move. If that copy still exists, load its backup instead.": "此钱包仍计入其中的 {0}，但此钱包的另一个副本（相同助记词）已经移走了这些代币，只有那个副本能使用它们。如果那个副本已不在，就在这里把这些输出标记为已花费，让余额显示此钱包真正能移动的数量。如果那个副本还在，请改为载入它的备份。",
+  "Earlier backups": "更早的备份",
+  "Earlier RGB backups": "更早的 RGB 备份",
+  "Load one only if this browser's RGB is wrong, for example after another copy of this wallet saved over it. Its tokens then replace this browser's RGB (this browser's current state is kept aside first), and it becomes the backup again.": "只有在此浏览器的 RGB 不正确时才载入，例如此钱包的另一个副本覆盖保存了它之后。它的代币会替换此浏览器的 RGB（此浏览器当前的状态会先另存），并重新成为备份。",
+  "The backup server keeps no earlier versions of this wallet's RGB backup": "备份服务器没有保存此钱包 RGB 备份的更早版本",
+  "That backup version isn't kept any more.": "该备份版本已不再保存。",
 };

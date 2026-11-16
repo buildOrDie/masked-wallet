@@ -1047,6 +1047,29 @@ export class WalletRgb {
         app.toast('Loaded the newer RGB backup: this browser is up to date');
       });
       // Settings → RGB → Check against the chain: first look, then (a second tap) mark the spent outputs as spent
+      // Settings → RGB → cloud backup → Earlier backups: the versions the server keeps, and loading one of them
+      case 'cloudList': return this.run(async () => {
+        const list = await this.cloudApi.list((await this.cloudKeysNow()).id);
+        this.cloudVersions = list;
+        if (!list.length) app.toast('The backup server keeps no earlier versions of this wallet\'s RGB backup');
+      });
+      case 'cloudVersionsClose': this.cloudVersions = null; return app.render();
+      case 'cloudLoadVersion': return this.run(async () => {
+        const keys = await this.cloudKeysNow();
+        const body = await this.cloudApi.get(keys.id, Number(arg));
+        if (!body) throw new Error('That backup version isn\'t kept any more.');
+        // an earlier version on purpose: no "newer than this browser" rule
+        const backup = await openCloud(keys, body, 0);
+        await this.close();
+        this.phase = 'opening'; app.render();
+        await this.open(await this.walletKey(), backup, { replace: true });
+        this.cloudMark(Number(body.version)); this.service.backupSaved();
+        this.cloud = { ...this.cloud, error: '', conflict: 0 };
+        this.cloudVersions = null;
+        // and it becomes the latest, so other copies load it and this copy's next save isn't refused
+        await this.cloudSave({ replace: true }).catch(() => false);
+        app.toast(`Loaded the RGB backup from ${new Date(Number(body.at || 0) || Date.now()).toLocaleString()}`);
+      });
       case 'repairCheck': return this.run(async () => {
         const gone = await this.service.repairFromChain({ fix: false });
         this.repair = { gone, at: Date.now() };

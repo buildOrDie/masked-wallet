@@ -125,6 +125,20 @@ export class RgbCloud {
     if (status !== 200) throw new CloudError(json?.error || `Backup server error (${status}).`, status);
     return Number(json?.version) || 0;
   }
+  /** Every stored version: [{ version, at, bytes }] newest first ([] when none, or a server that keeps no list). */
+  async list(id) {
+    const { status, json } = await this.call('GET', `${id}?list=1`);
+    if (status === 404) return [];
+    if (status !== 200) throw new CloudError(json?.error || `Backup server error (${status}).`, status);
+    return Array.isArray(json?.versions) ? json.versions : [];
+  }
+  /** One stored version's body, or null. */
+  async get(id, version) {
+    const { status, json } = await this.call('GET', `${id}?version=${Number(version)}`);
+    if (status === 404) return null;
+    if (status !== 200) throw new CloudError(json?.error || `Backup server error (${status}).`, status);
+    return json;
+  }
   async put(id, sealed) {
     const { status, json } = await this.call('PUT', id, sealed);
     if (status === 409) throw new CloudError('A newer RGB cloud backup was saved from another browser.', 409, Number(json?.latest) || 0);

@@ -431,6 +431,17 @@ export class RgbSettings {
       </div></details></section>`;
   }
   /** Settings → RGB → Instant listings: each one's state (signed listings are bought with MASKED closed). */
+  /** Earlier versions of the cloud backup the server keeps: load one (replaces this browser's RGB, kept aside first). */
+  static cloudVersions(r) {
+    const list = r.cloudVersions;
+    if (!list) return `<button class="btn ghost wide" data-rgb="cloudList" ${r.busy ? 'disabled' : ''}>Earlier backups</button>`;
+    if (!list.length) return '';
+    const when = (t) => (t ? new Date(t).toLocaleString() : '?');
+    return `<div class="cloud-box rgb-ask"><b>Earlier RGB backups</b>
+      <p class="muted small">Load one only if this browser's RGB is wrong, for example after another copy of this wallet saved over it. Its tokens then replace this browser's RGB (this browser's current state is kept aside first), and it becomes the backup again.</p>
+      ${list.slice(0, 20).map((v) => `<button class="btn ghost wide" data-rgb="cloudLoadVersion" data-rgb-arg="${Number(v.version)}" ${r.busy || Number(v.version) === r.cloudVersion ? 'disabled' : ''}>#${Number(v.version)} · ${esc(when(v.at))}${Number(v.version) === r.cloudVersion ? ' · this browser' : ''}</button>`).join('')}
+      <button class="btn ghost wide" data-rgb="cloudVersionsClose">Close</button></div>`;
+  }
   /** Check against the chain: outputs this wallet counts that another copy of it already spent. */
   static repair(r) {
     const g = r.repair?.gone;
@@ -471,6 +482,7 @@ export class RgbSettings {
           <button class="btn primary wide" data-rgb="cloudLoad" ${r.busy ? 'disabled' : ''}>Load the newer backup</button>
           <button class="btn ghost wide" data-rgb="cloudReplace" ${r.busy ? 'disabled' : ''}>Use this browser's RGB as the backup</button>`
           : `<button class="btn ghost wide" data-rgb="cloudRetry" ${r.busy ? 'disabled' : ''}>Try again</button>`}` : ''}
+      ${RgbSettings.cloudVersions(r)}
       <button class="btn ghost wide" data-rgb="cloudOff" ${r.busy ? 'disabled' : ''}>Switch off cloud backup</button></div>`;
   }
 }

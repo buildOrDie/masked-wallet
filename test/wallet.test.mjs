@@ -1112,3 +1112,17 @@ test('RGB: another copy saved newer RGB data: token moves stop before anything i
   localStorage.removeItem(`${app.rgb.profile.vaultKey}.cloud-version`);
   localStorage.removeItem('masked.rgb.mainnet-beta');
 });
+
+test('RGB cloud client: the latest version cheaply, the list of versions, one earlier version', async () => {
+  const { RgbCloud } = await import('../src/rgb/cloud.mjs');
+  const asked = [];
+  const answers = { '?head=1': [200, { version: 361, at: 5 }], '?list=1': [200, { versions: [{ version: 361, at: 5, bytes: 9 }, { version: 300, at: 1, bytes: 9 }] }], '?version=300': [200, { v: 1, version: 300 }], '?version=7': [404, {}] };
+  const c = new RgbCloud({ base: 'https://vault.test/', fetchFn: async (url) => { const q = String(url).slice(String(url).indexOf('?')); asked.push(q); const [s, j] = answers[q] || [404, {}]; return new Response(JSON.stringify(j), { status: s }); } });
+  assert.equal(await c.version('ab'), 361);
+  assert.deepEqual((await c.list('ab')).map((v) => v.version), [361, 300]);
+  assert.equal((await c.get('ab', 300)).version, 300);
+  assert.equal(await c.get('ab', 7), null);
+  // a server without ?head=1 that 404s on it: asked plainly
+  const old = new RgbCloud({ base: 'https://vault.test/', fetchFn: async (url) => new Response(JSON.stringify(/\?/.test(String(url)) ? {} : { v: 1, version: 42 }), { status: /\?/.test(String(url)) ? 404 : 200 }) });
+  assert.equal(await old.version('ab'), 42);
+});
