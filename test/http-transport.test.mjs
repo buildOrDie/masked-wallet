@@ -6,6 +6,8 @@ test('the app sends mempool.space and blockstream.info through the WebView, the 
   const calls = [];
   globalThis.fetch = async (input) => { calls.push(['native', String(input?.url || input)]); return new Response('ok'); };
   globalThis.CapacitorWebFetch = async (input) => { calls.push(['web', String(input?.url || input)]); return new Response('ok'); };
+  // a second copy of the module (the query makes it load fresh): eslint can't follow the query
+  // eslint-disable-next-line import/no-unresolved
   const { rawFetch, timedFetch } = await import('../src/net/http.mjs?app');
   await rawFetch('https://mempool.space/signet/api/block-height/0');
   await timedFetch(new Request('https://blockstream.info/api/block-height/0'));

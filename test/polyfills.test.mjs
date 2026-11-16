@@ -7,6 +7,7 @@ test('AbortSignal.timeout and .any are filled in when missing, and behave', asyn
   delete AbortSignal.timeout; delete AbortSignal.any;
   try {
     assert.equal(typeof AbortSignal.timeout, 'undefined', 'removed for the test');
+    // eslint-disable-next-line import/no-unresolved
     await import('../src/core/polyfills.mjs?old');
     const t = AbortSignal.timeout(20);
     assert.equal(t.aborted, false);
