@@ -14,6 +14,8 @@ const NETWORKS = { mainnet: 'Mainnet', signet: 'Signet', utexo: 'Signet', testne
 export const rgbNetwork = (n) => NETWORKS[String(n).toLowerCase()] || (() => { throw new Error(`Unknown RGB network: ${n}`); })();
 
 /** rgb-lib wants rpc(s):// transport endpoints; our config uses https:// like the SDK. */
+/** The moves an Instant store knows (listing and lot moves, cancels, sales): this wallet's own transactions. */
+const storeMoveTxids = (store) => { try { return Object.values(store?.all?.() || {}).flatMap((e) => [e?.moveTxid, e?.cancelTxid, e?.lotOf]).filter(Boolean).map(String); } catch { return []; } };
 export const rpcEndpoint = (url) => String(url).replace(/^https:\/\//i, 'rpcs://').replace(/^http:\/\//i, 'rpc://');
 
 const num = (x) => Number(x ?? 0);
@@ -661,32 +663,53 @@ export class LiteWallet {
     if (!r.ok) throw new Error(`Block server: ${(await r.text().catch(() => '')).slice(0, 160) || r.status}`);
     return r;
   }
+  /** Transactions this wallet made itself: its transfers (sends, receives, listing and lot moves), plus `extra`. */
+  ownTxids(extra = []) {
+    const own = new Set((extra || []).filter(Boolean).map((t) => String(t).toLowerCase()));
+    try {
+      const r = plain(this.wallet.listAssets([]) || {});
+      for (const a of [...(r.nia || []), ...(r.ifa || []), ...(r.uda || [])]) for (const t of plain(this.engineTransfers(a.assetId)) || []) if (t?.txid) own.add(String(t.txid).toLowerCase());
+    } catch { /* no list: every spend counts as another copy's */ }
+    return own;
+  }
   /**
    * Before tokens move (a listing, lots, a send): is this wallet up to date for them? Every output it counts as
-   * holding the token is checked on the block server; one already spent there means the wallet is behind the chain
-   * (it would build a transaction the network refuses, or the engine can't find the output). It refreshes once and
-   * checks again; still behind, it stops with what it found, before anything is signed.
+   * holding the token is checked on the block server. One spent there by a transaction this wallet didn't make means
+   * it is behind the chain (another copy of the wallet moved it): it refreshes once and checks again; still behind, it
+   * stops with what it found, before anything is signed.
+   * One spent by this wallet's own transaction (the previous lot's move, say) is only its own move waiting for its
+   * block: the engine still counts the output until then. `allowOwn` (MASKED picks the outputs itself: listings and
+   * lots) goes ahead without those outputs; otherwise (the engine picks) it waits for that block. Before, both were
+   * "behind the chain", which stopped the second lot of a split after the first lot's move.
+   * @param {string} assetId @param {(t: string) => void} [onStep] @param {{ allowOwn?: boolean, own?: string[] }} [o]
+   * @returns {Promise<Set<string>>} the outputs this wallet's own unconfirmed moves spent (never to be used)
    */
-  async requireInSync(assetId, onStep = (_t) => {}) {
-    if (typeof this.wallet?.listUnspents !== 'function') return; // an engine without the list (nothing to check)
+  async requireInSync(assetId, onStep = (_t) => {}, { allowOwn = false, own: extra = [] } = {}) {
+    if (typeof this.wallet?.listUnspents !== 'function') return new Set(); // an engine without the list (nothing to check)
     const opOf = (u) => `${String(u.utxo?.outpoint?.txid).toLowerCase()}:${u.utxo?.outpoint?.vout}`;
     const spentOnChain = async () => {
       const held = (plain(this.wallet.listUnspents(false)) || []).filter((u) => u.utxo?.exists !== false && (u.rgbAllocations || []).some((a) => a.assetId === assetId && a.settled));
-      const gone = [];
+      const own = this.ownTxids(extra), gone = [], mine = new Set();
       for (const u of held.slice(0, 40)) {
         const [txid, vout] = opOf(u).split(':');
-        try { const sp = await (await this.esplora(`/tx/${txid}/outspend/${vout}`)).json(); if (sp?.spent) gone.push(opOf(u)); } catch { /* the block server didn't answer: not counted */ }
+        try {
+          const sp = await (await this.esplora(`/tx/${txid}/outspend/${vout}`)).json();
+          if (sp?.spent) (sp.txid && own.has(String(sp.txid).toLowerCase()) ? mine.add(opOf(u)) : gone.push(opOf(u)));
+        } catch { /* the block server didn't answer: not counted */ }
       }
-      return gone;
+      return { gone, mine };
     };
     onStep('Checking this wallet is up to date with the chain…');
-    let gone = await spentOnChain();
-    if (!gone.length) return;
-    onStep('Catching up with the chain…');
-    try { await this.wallet.sync(this.requireOnline()); await this.wallet.refresh(this.requireOnline(), null, [], false); await this.save(); } catch { /* checked again below */ }
-    gone = await spentOnChain();
-    if (!gone.length) return;
-    throw new Error(`This RGB wallet is behind the chain for this token: it still counts ${gone.length === 1 ? 'an output' : `${gone.length} outputs`} the network shows as already spent (${gone.slice(0, 2).map((o) => `${o.slice(0, 10)}…:${o.split(':')[1]}`).join(', ')}). Nothing was sent. Open MASKED → RGB, tap Refresh and wait a minute, then try again.`);
+    let r = await spentOnChain();
+    if (r.gone.length || r.mine.size) {
+      onStep('Catching up with the chain…');
+      try { await this.wallet.sync(this.requireOnline()); await this.wallet.refresh(this.requireOnline(), null, [], false); await this.save(); } catch { /* checked again below */ }
+      r = await spentOnChain();
+    }
+    const { gone, mine } = r;
+    if (gone.length) throw new Error(`This RGB wallet is behind the chain for this token: it still counts ${gone.length === 1 ? 'an output' : `${gone.length} outputs`} the network shows as already spent (${gone.slice(0, 2).map((o) => `${o.slice(0, 10)}…:${o.split(':')[1]}`).join(', ')}). Nothing was sent. Open MASKED → RGB, tap Refresh and wait a minute, then try again.`);
+    if (mine.size && !allowOwn) throw Object.assign(new Error('Your last move of this token is still waiting for its block. Try again after it confirms (about 10 minutes). Nothing was sent.'), { code: 'OWN_MOVE_PENDING' });
+    return mine;
   }
   /**
    * Repair from the chain: every output this wallet counts as holding tokens, checked on the block server. Returns
@@ -700,11 +723,7 @@ export class LiteWallet {
     const held = (plain(this.wallet.listUnspents(false)) || []).filter((u) => u.utxo?.exists !== false && (u.rgbAllocations || []).some((a) => a.settled));
     // transactions this wallet made itself (its transfers, its listing and lot moves): an output one of them spends is
     // this wallet's own doing, already in its records once the engine catches up, never "another copy"
-    const own = new Set();
-    try {
-      const r = plain(this.wallet.listAssets([]) || {});
-      for (const a of [...(r.nia || []), ...(r.ifa || []), ...(r.uda || [])]) for (const t of plain(this.engineTransfers(a.assetId)) || []) if (t?.txid) own.add(String(t.txid).toLowerCase());
-    } catch { /* no list: every spend counts */ }
+    const own = this.ownTxids();
     const gone = [];
     for (const u of held.slice(0, 100)) {
       const op = `${String(u.utxo.outpoint.txid).toLowerCase()}:${u.utxo.outpoint.vout}`;
@@ -851,14 +870,16 @@ export class LiteWallet {
     if (prev && !['cancelled'].includes(prev.stage)) return this.instantView(o.offerId, prev);
     onStep(`Checking your tokens on ${hostOf(this.indexer)}…`);
     await this.wallet.sync(this.requireOnline());
-    await this.requireInSync(o.assetId, onStep);
+    const pendingSpent = await this.requireInSync(o.assetId, onStep, { allowOwn: true, own: storeMoveTxids(store) });
     const unspents = plain(this.wallet.listUnspents(false)) || [];
     // market and token: where this wallet sends the signed listing when it's signed later (after the move)
     const base = { role: 'seller', assetId: o.assetId, amount: String(o.amount), priceSats: String(o.priceSats), market: String(market), token: String(token), at: Date.now() };
-    const exact = exactCoinFor(unspents, o.assetId, o.amount, this.reserved);
+    // never an output this wallet's own unconfirmed move already spent
+    const avoid = new Set([...this.reserved, ...pendingSpent]);
+    const exact = exactCoinFor(unspents, o.assetId, o.amount, avoid);
     if (exact) { onStep('Signing the listing…'); return this.instantSign(o.offerId, { ...base, stage: 'moving' }, store); }
     // one output holding enough, or else several joined in the move
-    const from = freeSellerCoinFor(unspents, o.assetId, o.amount, this.reserved) || sendCoinsFor(unspents, o.assetId, o.amount, this.reserved).coins;
+    const from = freeSellerCoinFor(unspents, o.assetId, o.amount, avoid) || sendCoinsFor(unspents, o.assetId, o.amount, avoid).coins;
     if (!from) throw new Error('Not that much of this token is settled and free in this wallet. Wait for incoming transfers to settle, or list less.');
     onStep('Moving the tokens to an output of their own…');
     let moved;
@@ -933,8 +954,8 @@ export class LiteWallet {
     const total = list.reduce((t, l) => t + BigInt(l.amount), 0n);
     onStep(`Checking your tokens on ${hostOf(this.indexer)}…`);
     await this.wallet.sync(this.requireOnline());
-    await this.requireInSync(assetId, onStep);
-    const pick = sendCoinsFor(plain(this.wallet.listUnspents(false)) || [], assetId, total, this.reserved);
+    const pendingSpent = await this.requireInSync(assetId, onStep, { allowOwn: true, own: storeMoveTxids(store) });
+    const pick = sendCoinsFor(plain(this.wallet.listUnspents(false)) || [], assetId, total, new Set([...this.reserved, ...pendingSpent]));
     if (!pick.coins) throw new Error(pick.held > 0n ? 'Not that much of this token is settled and free in this wallet yet. Wait for incoming transfers to settle, or list less.' : 'None of this token is settled and free in this wallet yet.');
     const at = Date.now(), group = `g${at.toString(36)}`;
     const queue = async () => {
@@ -986,12 +1007,14 @@ export class LiteWallet {
     if (!queued.length) return [];
     const [id, e] = queued[0];
     // never move a lot while this wallet is behind the chain (another copy spent outputs it still counts)
-    try { await this.requireInSync(e.assetId); } catch (err) {
+    // (the previous lot's move, still waiting for its block, is this wallet's own: its spent output is just left out)
+    let pendingSpent;
+    try { pendingSpent = await this.requireInSync(e.assetId, undefined, { allowOwn: true, own: storeMoveTxids(store) }); } catch (err) {
       store.set(id, { ...e, waiting: String(err?.message || err).slice(0, 300), waitingAt: Date.now() });
       return [];
     }
-    // promised outputs (signed or moving listings) are never taken
-    const busy = new Set([...this.reserved, ...Object.values(store.all()).filter((x) => x?.role === 'seller' && ['moving', 'ready'].includes(x.stage) && x.coin).map((x) => String(x.coin))]);
+    // promised outputs (signed or moving listings) are never taken, nor outputs this wallet's unconfirmed moves spent
+    const busy = new Set([...this.reserved, ...pendingSpent, ...Object.values(store.all()).filter((x) => x?.role === 'seller' && ['moving', 'ready'].includes(x.stage) && x.coin).map((x) => String(x.coin))]);
     const unspents = plain(this.wallet.listUnspents(false)) || [];
     const exact = exactCoinFor(unspents, e.assetId, e.amount, busy);
     if (exact) {

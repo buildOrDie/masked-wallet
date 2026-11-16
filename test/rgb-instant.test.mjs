@@ -624,6 +624,22 @@ test('repair from the chain: outputs another copy spent are found, and marked sp
   assert.deepEqual(s.log.filter((x) => x[0] === 'spent'), [['spent', `${T('b')}:1`]]);
 });
 
+test('seller: the previous lot\'s own move (waiting for its block) isn\'t "behind the chain": the next lot goes ahead without its spent output', async () => {
+  const chain = fakeChain();
+  // the engine still counts the output lot 1's move spent (b:0, 500) next to the rest (c:2, 250, alone: lot 2)
+  const s = wallet({ name: 'seller', lib: fakeLib(), chain, rgb: [unspent('b', 0, [tok(500)]), unspent('c', 2, [tok(250)])] });
+  s.w.w.refresh = async () => ({});
+  s.store.set('lot1', { role: 'seller', assetId: ASSET, amount: '250', priceSats: '5000', stage: 'moving', lotGroup: 'g1', lotNo: 0, lots: 2, at: 1, moveTxid: T('m'), coin: `${T('m')}:1` });
+  s.store.set('lot2', { role: 'seller', assetId: ASSET, amount: '250', priceSats: '5000', stage: 'queued', lotGroup: 'g1', lotNo: 1, lots: 2, at: 1 });
+  chain.spends[`${T('b')}:0`] = { spent: true, txid: T('m') }; // spent by this wallet's own lot move
+  assert.deepEqual(await s.w.lotsAdvance(s.store, 'g1', 2), []);
+  assert.equal(s.mem.lot2.stage, 'moving', 'not stopped as "behind the chain"');
+  assert.equal(s.mem.lot2.coin, `${T('c')}:2`, 'the free output holding exactly the lot, never the spent one');
+  assert.doesNotMatch(String(s.mem.lot2.waiting || ''), /behind the chain/);
+  // a send (the engine picks the outputs): waits for that block instead of building on the spent output
+  await assert.rejects(s.w.requireInSync(ASSET, undefined, { own: [T('m')] }), (e) => e.code === 'OWN_MOVE_PENDING');
+});
+
 test('seller: a lot never moves while the wallet is behind the chain; it waits and says why', async () => {
   const chain = fakeChain();
   const s = wallet({ name: 'seller', lib: fakeLib(), chain, rgb: [unspent('b', 0, [tok(1000)])] });
