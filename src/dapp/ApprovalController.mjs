@@ -15,6 +15,9 @@ export const NEEDS_PREP = ['sendBitcoin', 'inscribeTransfer', 'shareTrade', 'fun
 const SWAP_METHODS = ['rgbSwapAvailable', 'rgbListAssets', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantListLots', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel'];
 const RGB_METHODS = ['rgbInvoice', 'rgbPay', ...SWAP_METHODS];
 const SWAP_SIZE_VB = 320;
+/** Steps that move this wallet's tokens: stopped while another copy of this wallet saved newer RGB data. */
+const MOVES_TOKENS = ['rgbPay', 'rgbSalePrepare', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantListLots', 'rgbInstantCancel'];
+export const RGB_CONFLICT_MSG = 'This wallet\'s RGB is also open in another copy of MASKED (another browser or profile, a second MASKED extension, or the phone app), and that copy saved newer RGB data. Moving tokens here could use outputs that copy already spent. Use RGB in that copy, or, if this one has your latest tokens, open Settings → RGB → cloud backup and make it the backup.';
 /** Kept on top of a purchase's own cost when topping up the RGB balance (the exact fee depends on the coins). */
 const TOP_UP_MARGIN = 1000;
 const BUYS = ['rgbBuyPrepare', 'rgbInstantBuy', 'rgbInstantBuyMany'];
@@ -168,6 +171,7 @@ export class ApprovalController {
       };
     });
     if (a.method === 'rgbPay') once(async () => {
+      if (r.cloud?.conflict) throw new Error(RGB_CONFLICT_MSG);
       let d;
       try { d = await r.service.decode(P.invoice); } catch { throw new Error('That is not a valid RGB invoice.'); }
       if (!/utxob:|wvout:/.test(String(d.recipientId || ''))) throw new Error('This is not an RGB invoice MASKED can pay.');
@@ -214,6 +218,7 @@ export class ApprovalController {
     once(async () => {
       if (m === 'rgbListAssets') return { list: r.assets().map((x) => ({ ticker: x.ticker, assetId: x.assetId })) };
       if (!r.service?.canSwap) throw new Error('This MASKED version can\'t swap RGB tokens yet. Update MASKED.');
+      if (MOVES_TOKENS.includes(m) && r.cloud?.conflict) throw new Error(RGB_CONFLICT_MSG);
       if (m === 'rgbSwapAvailable') {
         const asset = r.find(P.assetId);
         return { asset, assetId: P.assetId };

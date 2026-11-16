@@ -451,7 +451,8 @@ export class RgbSettings {
     return `<div class="cloud-box"><div class="cloud-h"><b>Cloud backup (encrypted)</b><span class="small ${r.cloud.error ? 'warn' : 'muted'}">${state}</span></div>
       <p class="muted small">Saved after every RGB change. It's encrypted in this browser with keys from your recovery phrase, then signed, so MASKED's server only stores data it can't read or change. A new browser with the same phrase restores it when you turn on RGB.</p>
       ${r.cloud.error ? `<p class="msg warn" role="status">${esc(r.cloud.error)}</p>
-        ${r.cloud.conflict ? `<p class="muted small">If this browser has your latest RGB tokens, make it the cloud backup. Otherwise use RGB in the other browser.</p>
+        ${r.cloud.conflict ? `<p class="muted small">Another copy of MASKED with this recovery phrase (another browser or profile, a second MASKED extension, or the phone app) saved newer RGB data. Moving tokens is paused here until this is settled. Usually the other copy is the up-to-date one: load its backup here. Only if this copy has your latest RGB tokens, make it the backup instead.</p>
+          <button class="btn primary wide" data-rgb="cloudLoad" ${r.busy ? 'disabled' : ''}>Load the newer backup</button>
           <button class="btn ghost wide" data-rgb="cloudReplace" ${r.busy ? 'disabled' : ''}>Use this browser's RGB as the backup</button>`
           : `<button class="btn ghost wide" data-rgb="cloudRetry" ${r.busy ? 'disabled' : ''}>Try again</button>`}` : ''}
       <button class="btn ghost wide" data-rgb="cloudOff" ${r.busy ? 'disabled' : ''}>Switch off cloud backup</button></div>`;

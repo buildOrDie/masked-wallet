@@ -872,6 +872,7 @@ export class WalletRgb {
         return this.run(async () => {
           this.message = 'Sending…'; app.render();
           if (!p.check?.ok) throw new Error('Check the transfer server first.');
+          if (this.cloud?.conflict) throw new Error('This wallet\'s RGB is also open in another copy of MASKED (another browser or profile, a second MASKED extension, or the phone app), and that copy saved newer RGB data. Use RGB there, or, if this one has your latest tokens, make it the backup in Settings → RGB → cloud backup.');
           if (!await app.platform.hasOrigins([proxyUrl(p.check.endpoint)])) {
             await this.checkProxies();
             throw new Error('Transfer server permission changed. Review the server and try again.');
@@ -956,6 +957,17 @@ export class WalletRgb {
         app.toast('Cloud backup is off and deleted from the server. Save backup files yourself.', 6000);
       });
       case 'cloudRetry': return this.run(async () => { this.cloud.last = 0; if (await this.cloudSave()) app.toast('Cloud backup saved'); });
+      // the other copy's newer cloud backup, into this browser (this copy's RGB state is replaced by it)
+      case 'cloudLoad': return this.run(async () => {
+        const found = await this.cloudFind();
+        if (!found) throw new Error('No RGB cloud backup was found.');
+        await this.close();
+        this.phase = 'opening'; app.render();
+        await this.open(await this.walletKey(), found.backup);
+        this.cloudMark(found.version); this.service.backupSaved();
+        this.cloud = { ...this.cloud, error: '', conflict: 0 };
+        app.toast('Loaded the newer RGB backup: this browser is up to date');
+      });
       case 'cloudReplace': return this.run(async () => { if (await this.cloudSave({ replace: true })) app.toast('This browser\'s RGB state is now the cloud backup'); });
       case 'betaOff': return this.run(async () => { await this.close(); try { localStorage.setItem(RGB_BETA_KEY, '0'); } catch { /* */ } app.toast('RGB beta is off. Your RGB wallet stays saved in this browser.'); });
       default: return undefined;

@@ -4,6 +4,7 @@ Newest first. Every version is on the [Releases](../../releases) page; the Andro
 
 | Version | What changed |
 |---|---|
+| 2.29.24 | Lots work with tokens from swaps (split one lot per block when needed); RGB pauses moving tokens while another copy of the wallet saved newer RGB data, with a button to load that backup; tokens only move when the wallet is up to date with the chain |
 | 2.29.23 | Sell in lots: one transaction splits your tokens into 2 to 10 lots, each its own Instant listing; buyers take as many as they want and the rest stays listed (`rgb.listInstantLots`) |
 | 2.29.22 | Buy several Instant listings at once (a sweep): one approval, one transaction each, cheapest first (`rgb.buyInstantMany`). New RGB outputs hold 330 sats instead of 1,000 |
 | 2.29.21 | 简体中文 for the RGB balance, buying with too little in it, the Android update notice and the Market tab |

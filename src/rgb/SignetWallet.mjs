@@ -199,7 +199,7 @@ export class SignetWallet {
     });
   }
   /** This wallet's Instant listings: [{ offerId, stage, txid, … }]. */
-  instantListings() { return Object.entries(this.instantStore().all()).filter(([, e]) => e?.role === 'seller').map(([id, e]) => ({ offerId: id, stage: e.outdated && e.stage === 'ready' ? 'outdated' : e.stage, assetId: e.assetId, amount: e.amount, priceSats: e.priceSats, txid: e.soldTxid || e.cancelTxid || e.moveTxid || null, at: e.at, waiting: e.stage === 'moving' ? e.waiting || '' : '', ...(e.lotOf ? { lotOf: e.lotOf, lots: e.lots || null } : {}) })); }
+  instantListings() { return Object.entries(this.instantStore().all()).filter(([, e]) => e?.role === 'seller').map(([id, e]) => ({ offerId: id, stage: e.outdated && e.stage === 'ready' ? 'outdated' : e.stage === 'queued' ? 'moving' : e.stage, assetId: e.assetId, amount: e.amount, priceSats: e.priceSats, txid: e.soldTxid || e.cancelTxid || e.moveTxid || null, at: e.at, waiting: ['moving', 'queued'].includes(e.stage) ? e.waiting || (e.stage === 'queued' ? 'Waiting for its turn: one lot moves per block.' : '') : '', ...(e.lotOf ? { lotOf: e.lotOf, lots: e.lots || null } : {}) })); }
   get canSwap() { return !!this.wallet?.canSwap; }
   offerableAmount(p) { return this.exclusive(() => this.requireWallet().offerableAmount(p)); }
   assetList() { return this.exclusive(() => this.requireWallet().assetList()); }

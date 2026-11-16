@@ -801,6 +801,15 @@ export class LiteWallet {
       const v = await this.instantSign(o.offerId, prev, store);
       return v.stage === 'ready' ? v : { ...v, waiting: await this.moveStatus(prev) };
     }
+    if (prev?.stage === 'queued' && prev.lotGroup) {
+      onStep('Checking your lots…');
+      await this.wallet.sync(this.requireOnline());
+      try { await this.wallet.refresh(this.requireOnline(), null, [], false); } catch { /* moved below if the tokens are free anyway */ }
+      await this.lotsAdvance(store, prev.lotGroup, feeRate || prev.feeRate || 1, onStep).catch(() => []);
+      const now = store.get(o.offerId);
+      if (now?.stage === 'moving' && now.coin && !now.moveTxid) return this.instantSign(o.offerId, now, store);
+      return { ...this.instantView(o.offerId, now), waiting: await this.moveStatus(now) };
+    }
     if (prev && !['cancelled'].includes(prev.stage)) return this.instantView(o.offerId, prev);
     onStep(`Checking your tokens on ${hostOf(this.indexer)}…`);
     await this.wallet.sync(this.requireOnline());
@@ -863,6 +872,13 @@ export class LiteWallet {
     const prev = list.map((l) => store.get(l.offerId)).filter(Boolean);
     if (prev.length) {
       const split = prev.find((e) => e.lotOf)?.lotOf || '';
+      const group = prev.find((e) => e.lotGroup)?.lotGroup || '';
+      if (group) {
+        onStep('Checking your lots…');
+        await this.wallet.sync(this.requireOnline());
+        try { await this.wallet.refresh(this.requireOnline(), null, [], false); } catch { /* moved below if the tokens are free anyway */ }
+        await this.lotsAdvance(store, group, feeRate || prev[0].feeRate || 1, onStep).catch(() => []);
+      }
       if (split) {
         onStep('Checking whether your lots arrived…');
         await this.wallet.sync(this.requireOnline());
@@ -881,6 +897,17 @@ export class LiteWallet {
     await this.requireInSync(assetId, onStep);
     const pick = sendCoinsFor(plain(this.wallet.listUnspents(false)) || [], assetId, total, this.reserved);
     if (!pick.coins) throw new Error(pick.held > 0n ? 'Not that much of this token is settled and free in this wallet yet. Wait for incoming transfers to settle, or list less.' : 'None of this token is settled and free in this wallet yet.');
+    const at = Date.now(), group = `g${at.toString(36)}`;
+    const queue = async () => {
+      // the engine's bitcoin side can't spend these outputs (they came from swaps): split step by step instead, the way a
+      // single Instant listing moves its tokens; each lot moves to an output of its own as soon as tokens are free
+      list.forEach((l, k) => store.set(l.offerId, { role: 'seller', assetId: l.assetId, amount: String(l.amount), priceSats: String(l.priceSats), market: String(market), token: l.token, at, stage: 'queued', lotGroup: group, lotNo: k, lots: list.length, feeRate: Number(feeRate) || 1 }));
+      this.lotsFeeRate = Number(feeRate) || this.lotsFeeRate || 1;
+      await this.save();
+      const moved = await this.lotsAdvance(store, group, feeRate, onStep).catch(() => []);
+      return { stage: 'moving', txid: moved[0] || null, stepByStep: true, lots: list.map((l) => ({ offerId: l.offerId, stage: 'moving' })) };
+    };
+    if (this.lotsStepByStep) return queue();
     onStep(`Making ${list.length} invoices of your own for the lots…`);
     // a lot's invoice stays open a week: this wallet takes in its own lots the next time it's open
     const invs = [];
@@ -892,6 +919,7 @@ export class LiteWallet {
       for (const inv of invs) if (inv.batchTransferIdx != null) { try { await this.wallet.failTransfers(this.requireOnline(), inv.batchTransferIdx, false, true); } catch { /* they expire anyway */ } }
       await this.save().catch(() => {});
       const text = String(err?.message || err);
+      if (err?.code === 'NOT_SPENDABLE_BY_ENGINE') { this.lotsStepByStep = true; return queue(); }
       if (/insufficient ?allocation|allocation ?slots|NoAvailableUtxos|InsufficientBitcoins/i.test(text)) {
         onStep('Making new RGB outputs for the lots…');
         try { await this.createUtxos({ upTo: true, num: 4, size: LiteWallet.UTXO_SATS, feeRate }); } catch (e2) {
@@ -901,10 +929,54 @@ export class LiteWallet {
       }
       throw err;
     }
-    const at = Date.now();
     for (const l of list) store.set(l.offerId, { role: 'seller', assetId: l.assetId, amount: String(l.amount), priceSats: String(l.priceSats), market: String(market), token: l.token, at, stage: 'moving', moveTxid: txid, lotOf: String(txid).toLowerCase(), lots: list.length });
     await this.save();
     return { stage: 'moving', txid, lots: list.map((l) => ({ offerId: l.offerId, stage: 'moving' })) };
+  }
+  /**
+   * Lots split step by step: move the next queued lot of `group` to an output of its own (one transaction, the same
+   * as a single Instant listing's move), from a free settled output that holds enough. One move per call: the tokens'
+   * change needs its block before the next move can use it. Returns the txids moved now.
+   */
+  async lotsAdvance(store, group, feeRate, onStep = (_t) => {}) {
+    const queued = Object.entries(store.all()).filter(([, e]) => e?.role === 'seller' && e.lotGroup === group && e.stage === 'queued').sort((a, b) => a[1].lotNo - b[1].lotNo);
+    if (!queued.length) return [];
+    const [id, e] = queued[0];
+    // promised outputs (signed or moving listings) are never taken
+    const busy = new Set([...this.reserved, ...Object.values(store.all()).filter((x) => x?.role === 'seller' && ['moving', 'ready'].includes(x.stage) && x.coin).map((x) => String(x.coin))]);
+    const unspents = plain(this.wallet.listUnspents(false)) || [];
+    const exact = exactCoinFor(unspents, e.assetId, e.amount, busy);
+    if (exact) {
+      // already alone on an output: no move, it's signed on the next pass
+      store.set(id, { ...e, stage: 'moving', coin: exact.outpoint, waiting: '' });
+      this.reserve([...this.reserved, exact.outpoint]);
+      await this.save();
+      return [];
+    }
+    const from = freeSellerCoinFor(unspents, e.assetId, e.amount, busy);
+    if (!from) {
+      const why = 'Waiting for the previous lot\'s move to confirm: the rest of the tokens are free again after one block.';
+      if (e.waiting !== why) store.set(id, { ...e, waiting: why, waitingAt: Date.now() });
+      return [];
+    }
+    onStep(`Moving lot ${e.lotNo + 1} of ${e.lots} to an output of its own…`);
+    let moved;
+    try { moved = await this.instantMove(e.assetId, e.amount, from, feeRate, onStep); } catch (err) {
+      const text = String(err?.message || err);
+      if (/insufficient ?allocation|allocation ?slots/i.test(text) && Date.now() - (this.lotsUtxosAt || 0) > 20 * 60_000) {
+        this.lotsUtxosAt = Date.now();
+        try { await this.createUtxos({ upTo: true, num: 4, size: LiteWallet.UTXO_SATS, feeRate }); } catch { /* said below */ }
+        store.set(id, { ...e, waiting: 'MASKED made free RGB outputs for the rest of your tokens; this lot moves after their block.', waitingAt: Date.now() });
+        return [];
+      }
+      store.set(id, { ...e, waiting: `MASKED couldn't move this lot yet: ${text.slice(0, 160)}`, waitingAt: Date.now() });
+      return [];
+    }
+    const next = { ...e, stage: 'moving', moveTxid: moved.txid, moveHex: moved.txHex || undefined, coin: `${moved.txid}:${SEAL_OUTPUT}`, waiting: '' };
+    store.set(id, next);
+    this.reserve([...this.reserved, next.coin]);
+    await this.save();
+    return [moved.txid];
   }
   /**
    * Send tokens to invoices of this wallet in one transaction (the split into lots): its txid. The engine builds it
@@ -917,7 +989,7 @@ export class LiteWallet {
       await this.syncWallet({ full: true });
       try { return await this.sendToOwnOnce(assetId, parts, feeRate); } catch (e2) {
         if (!/UTXO not found|adding UTXOs|UnknownUtxo/i.test(String(e2?.message || e2))) throw e2;
-        throw new Error('MASKED can\'t split these tokens into lots: the output holding them came from a swap, and the wallet\'s bitcoin side doesn\'t see it even after a full scan. List them as one Instant listing instead. Nothing was sent.');
+        throw Object.assign(new Error('The engine\'s bitcoin side can\'t spend the outputs holding these tokens.'), { code: 'NOT_SPENDABLE_BY_ENGINE' });
       }
     }
   }
@@ -947,6 +1019,7 @@ export class LiteWallet {
    */
   async moveStatus(e) {
     try {
+      if (e.stage === 'queued') return e.waiting || 'This lot moves to an output of its own once the tokens before it are free (one block per step).';
       if (e.lotOf && !e.coin) {
         let confirmed = null;
         try { confirmed = !!(await (await this.esplora(`/tx/${e.lotOf}`)).json())?.status?.confirmed; } catch { confirmed = null; }
@@ -977,7 +1050,7 @@ export class LiteWallet {
     try { this.lib.inspectSwapConsignment(bytes, String(txid), this.net, INSTANT_SEAL_OUTPUT); return false; } catch (e) { return OLD_CONSIGNMENT.test(String(e?.message || e)); }
   }
   instantView(offerId, e) {
-    return { offerId: String(offerId), stage: e.stage, txid: e.soldTxid || e.cancelTxid || e.moveTxid || null, ...(e.stage === 'ready' ? { psbt: e.psbt, consignment: e.consignment, templateTxid: e.templateTxid, sellerOutpoint: e.coin } : {}) };
+    return { offerId: String(offerId), stage: e.stage === 'queued' ? 'moving' : e.stage, txid: e.soldTxid || e.cancelTxid || e.moveTxid || null, ...(e.stage === 'ready' ? { psbt: e.psbt, consignment: e.consignment, templateTxid: e.templateTxid, sellerOutpoint: e.coin } : {}) };
   }
   /**
    * Seller, after a refresh: sign listings whose tokens have settled on their own output, and notice listings that
@@ -985,6 +1058,13 @@ export class LiteWallet {
    */
   async instantProgress(store, all) {
     const changes = [];
+    // lots split step by step: move the next lot of each group whose tokens are free
+    const groups = new Set(Object.values(all).filter((e) => e?.role === 'seller' && e.stage === 'queued' && e.lotGroup).map((e) => e.lotGroup));
+    for (const g of groups) {
+      const rate = Object.values(all).find((e) => e?.lotGroup === g)?.feeRate || this.lotsFeeRate || 1;
+      try { await this.lotsAdvance(store, g, rate); } catch { /* next refresh */ }
+    }
+    if (groups.size) all = store.all();
     for (const [id, e] of Object.entries(all)) {
       if (e?.role === 'buyer') {
         try { const c = await this.purchaseProgress(id, e, store); if (c) changes.push(c); } catch { /* next refresh */ }
@@ -1055,7 +1135,7 @@ export class LiteWallet {
     const e = store.get(String(offerId));
     if (!e || e.role !== 'seller') throw new Error('This wallet has no Instant listing with that id.');
     if (['sold', 'cancelled', 'cancelling'].includes(e.stage)) return this.instantView(offerId, e);
-    if (e.stage === 'moving' || !e.coin) {
+    if (e.stage === 'queued' || e.stage === 'moving' || !e.coin) {
       if (e.coin) this.reserve([...this.reserved].filter((x) => x !== e.coin));
       const n = { ...e, stage: 'cancelled', at: Date.now() }; store.set(String(offerId), n); return this.instantView(offerId, n);
     }

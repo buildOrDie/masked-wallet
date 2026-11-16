@@ -520,3 +520,41 @@ test('seller: a wallet behind the chain (an output it counts is spent) refreshes
   const lib2 = s.w.lib; lib2.WasmInvoice = class { constructor(i) { this.i = i; } invoiceData() { return { recipientId: `rid-${this.i}`, network: 'signet', transportEndpoints: [] }; } free() {} };
   assert.equal((await s.w.instantListLots({ assetId: ASSET, lots, feeRate: 2, market: 'https://maskedwallet.com' }, s.store)).stage, 'moving');
 });
+
+test('seller: lots on outputs the engine\'s send can\'t spend: split step by step, one move per block, each lot then signed', async () => {
+  const chain = fakeChain();
+  const src = `${T('b')}:0`, fee = `${T('c')}:2`, fee2 = `${T('c')}:3`;
+  chain.outs[src] = { sats: 1000, script: '5120rgb', tx: 'aa' };
+  chain.outs[fee] = { sats: 5000, script: '5120btc', tx: 'bb' };
+  chain.outs[fee2] = { sats: 5000, script: '5120btc', tx: 'bb' };
+  const rgb = [unspent('b', 0, [tok(1000)])];
+  const coins = [{ outpoint: fee, txout: { value: 5000 }, is_spent: false }, { outpoint: fee2, txout: { value: 5000 }, is_spent: false }];
+  const lib = fakeLib();
+  let txn = 0; lib.WasmWallet.psbtTxid = () => T(String(++txn % 10));
+  const s = wallet({ name: 'seller', lib, chain, rgb, coins });
+  s.w.w.fullScan = async () => {};
+  s.w.w.refresh = async () => ({});
+  s.w.w.failTransfers = async () => {};
+  s.w.w.sendBegin = async () => { throw new Error('Internal error: Error from bdk adding UTXOs: UTXO not found in the internal database for txid: bf88'); };
+  s.w.w.sendEnd = async () => ({ txid: '' });
+  const lots = [0, 1].map((i) => ({ offerId: `swlot${i}0123456`, token: 'ab'.repeat(24), amount: '400', priceSats: '5000' }));
+  const v = await s.w.instantListLots({ assetId: ASSET, lots, feeRate: 2, market: 'https://maskedwallet.com' }, s.store);
+  assert.equal(v.stage, 'moving'); assert.equal(v.stepByStep, true);
+  const [a, b] = lots.map((l) => s.mem[l.offerId]);
+  assert.equal(a.stage, 'moving'); assert.ok(a.coin, 'the first lot moved at once, to an output of its own');
+  assert.equal(b.stage, 'queued', 'the second waits for the tokens\' change');
+  assert.equal(s.log.filter((x) => x[0] === 'colorSwap').length, 1);
+  // a refresh before the block: the source is spent, the change not settled: nothing moves
+  rgb.splice(0, rgb.length, unspent(a.coin.split(':')[0].slice(0, 1), 1, [{ ...tok(400), settled: false }]));
+  await s.w.instantProgress(s.store, s.store.all());
+  assert.equal(s.mem[lots[1].offerId].stage, 'queued');
+  assert.match(s.mem[lots[1].offerId].waiting, /previous lot/);
+  // after the block: lot 1 settled on its output, the change (600) settled elsewhere: lot 2 moves, lot 1 is signed
+  rgb.splice(0, rgb.length, { utxo: { colorable: true, outpoint: { txid: a.coin.split(':')[0], vout: 1 }, btcAmount: 330 }, rgbAllocations: [tok(400)] }, unspent('9', 0, [tok(600)]));
+  chain.outs[`${T('9')}:0`] = { sats: 330, script: '5120rgb', tx: 'cc' };
+  const changes = await s.w.instantProgress(s.store, s.store.all());
+  assert.equal(s.mem[lots[0].offerId].stage, 'ready');
+  assert.equal(s.mem[lots[1].offerId].stage, 'moving'); assert.ok(s.mem[lots[1].offerId].coin);
+  assert.equal(s.log.filter((x) => x[0] === 'colorSwap').length, 2);
+  assert.ok(changes.some((c) => c.offerId === lots[0].offerId && c.stage === 'ready'));
+});
