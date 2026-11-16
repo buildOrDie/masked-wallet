@@ -22,7 +22,7 @@ export function compareVersions(a, b) {
 
 export class AppUpdate {
   /** @param {{ platform: { isApp: boolean }, store: any, render?: () => void }} app */
-  constructor(app, { fetchFn = (...a) => globalThis.fetch(...a), now = () => Date.now(), version = APP_VERSION, url = UPDATE_INFO } = {}) {
+  constructor(app, { fetchFn = (input, init) => globalThis.fetch(input, init), now = () => Date.now(), version = APP_VERSION, url = UPDATE_INFO } = {}) {
     this.app = app; this.fetchFn = fetchFn; this.now = now; this.version = version; this.url = url;
   }
   get on() { return !!this.version && !!this.app.platform.isApp; } // version first: no window in tests

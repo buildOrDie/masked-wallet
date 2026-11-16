@@ -183,10 +183,10 @@ export class AppMarket {
     for (const b of this.box.querySelectorAll('[data-market-page]')) b.setAttribute('aria-checked', String(/** @type {HTMLElement} */ (b).dataset.marketPage === this.page));
     // no market on this network (Mainnet, for now): say so instead of an error page
     const live = !!this.url();
-    this.box.querySelector('.market-soon').hidden = live;
-    this.box.querySelector('.market-bar').hidden = !live;
+    /** @type {HTMLElement} */ (this.box.querySelector('.market-soon')).hidden = live;
+    /** @type {HTMLElement} */ (this.box.querySelector('.market-bar')).hidden = !live;
     this.frame.hidden = !live;
-    const note = this.box.querySelector('.market-note');
+    const note = /** @type {HTMLElement} */ (this.box.querySelector('.market-note'));
     const demo = live && !this.pub();
     note.hidden = !demo;
     note.textContent = demo ? tr('Set up or open your own wallet to connect (the demo wallet can browse only).') : '';

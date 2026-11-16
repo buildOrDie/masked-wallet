@@ -45,7 +45,7 @@ export async function rgbFetch(input, init) {
  * @param {RequestInfo | URL} input @param {RequestInit} [init] @returns {Promise<[string | URL, RequestInit | undefined]>}
  */
 export async function unpack(input, init) {
-  if (typeof Request === 'undefined' || !(input instanceof Request)) return [input, init];
+  if (typeof Request === 'undefined' || !(input instanceof Request)) return [/** @type {string | URL} */ (input), init];
   const req = input.clone();
   const method = (init?.method || req.method || 'GET').toUpperCase();
   // CapacitorHttp sends a Uint8Array as is (an ArrayBuffer would go out as "{}"), and a multipart upload only as FormData

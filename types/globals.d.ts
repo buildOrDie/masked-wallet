@@ -2,3 +2,6 @@
 declare module '*.wasm' { const bytes: Uint8Array; export default bytes; }
 declare const chrome: any;
 interface Window { Capacitor: any }
+
+/** The app version, set by the build (esbuild define); absent in tests. */
+declare const __MASKED_VERSION__: string;

@@ -3,6 +3,7 @@
 // with AbortSignal.timeout (Chrome 103+) and AbortSignal.any (Chrome 116+); without them every RGB request failed
 // before it was sent ("Invalid indexer"). Each one is only added where the browser lacks it.
 
+/** @type {any} */
 const AS = typeof AbortSignal !== 'undefined' ? AbortSignal : null;
 
 if (AS && typeof AS.timeout !== 'function') {
