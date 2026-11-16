@@ -336,6 +336,7 @@ export class LiteWallet {
   /** Send to an invoice (blind or witness): build, sign and broadcast. */
   async onchainSend({ invoice, assetId, amount, feeRate, endpoint = '', nft: isNft = false }) {
     if (isNft && !this.canNft) throw new Error('This MASKED build can\'t send NFTs. Update MASKED.');
+    if (assetId) { try { await this.wallet.sync(this.requireOnline()); } catch { /* checked below with the last known state */ } await this.requireInSync(assetId); }
     if (this.engineV1) return this.onchainSendNative({ invoice, assetId, amount, feeRate, isNft });
     if (isInvoiceV1(invoice)) { if (isNft) throw new Error('MASKED can\'t send an NFT to this kind of invoice yet.'); return this.onchainSendV1({ invoice, assetId, amount, feeRate }); }
     const online = this.requireOnline();
@@ -658,6 +659,33 @@ export class LiteWallet {
     if (!r.ok) throw new Error(`Block server: ${(await r.text().catch(() => '')).slice(0, 160) || r.status}`);
     return r;
   }
+  /**
+   * Before tokens move (a listing, lots, a send): is this wallet up to date for them? Every output it counts as
+   * holding the token is checked on the block server; one already spent there means the wallet is behind the chain
+   * (it would build a transaction the network refuses, or the engine can't find the output). It refreshes once and
+   * checks again; still behind, it stops with what it found, before anything is signed.
+   */
+  async requireInSync(assetId, onStep = (_t) => {}) {
+    if (typeof this.wallet?.listUnspents !== 'function') return; // an engine without the list (nothing to check)
+    const opOf = (u) => `${String(u.utxo?.outpoint?.txid).toLowerCase()}:${u.utxo?.outpoint?.vout}`;
+    const spentOnChain = async () => {
+      const held = (plain(this.wallet.listUnspents(false)) || []).filter((u) => u.utxo?.exists !== false && (u.rgbAllocations || []).some((a) => a.assetId === assetId && a.settled));
+      const gone = [];
+      for (const u of held.slice(0, 40)) {
+        const [txid, vout] = opOf(u).split(':');
+        try { const sp = await (await this.esplora(`/tx/${txid}/outspend/${vout}`)).json(); if (sp?.spent) gone.push(opOf(u)); } catch { /* the block server didn't answer: not counted */ }
+      }
+      return gone;
+    };
+    onStep('Checking this wallet is up to date with the chain…');
+    let gone = await spentOnChain();
+    if (!gone.length) return;
+    onStep('Catching up with the chain…');
+    try { await this.wallet.sync(this.requireOnline()); await this.wallet.refresh(this.requireOnline(), null, [], false); await this.save(); } catch { /* checked again below */ }
+    gone = await spentOnChain();
+    if (!gone.length) return;
+    throw new Error(`This RGB wallet is behind the chain for this token: it still counts ${gone.length === 1 ? 'an output' : `${gone.length} outputs`} the network shows as already spent (${gone.slice(0, 2).map((o) => `${o.slice(0, 10)}…:${o.split(':')[1]}`).join(', ')}). Nothing was sent. Open MASKED → RGB, tap Refresh and wait a minute, then try again.`);
+  }
   /** Move the tokens of a listing onto an output of their own (or a listed output back, when cancelling). */
   async instantMove(assetId, amount, from, feeRate, onStep = (_t) => {}) {
     const online = this.requireOnline();
@@ -776,6 +804,7 @@ export class LiteWallet {
     if (prev && !['cancelled'].includes(prev.stage)) return this.instantView(o.offerId, prev);
     onStep(`Checking your tokens on ${hostOf(this.indexer)}…`);
     await this.wallet.sync(this.requireOnline());
+    await this.requireInSync(o.assetId, onStep);
     const unspents = plain(this.wallet.listUnspents(false)) || [];
     // market and token: where this wallet sends the signed listing when it's signed later (after the move)
     const base = { role: 'seller', assetId: o.assetId, amount: String(o.amount), priceSats: String(o.priceSats), market: String(market), token: String(token), at: Date.now() };
@@ -849,6 +878,7 @@ export class LiteWallet {
     const total = list.reduce((t, l) => t + BigInt(l.amount), 0n);
     onStep(`Checking your tokens on ${hostOf(this.indexer)}…`);
     await this.wallet.sync(this.requireOnline());
+    await this.requireInSync(assetId, onStep);
     const pick = sendCoinsFor(plain(this.wallet.listUnspents(false)) || [], assetId, total, this.reserved);
     if (!pick.coins) throw new Error(pick.held > 0n ? 'Not that much of this token is settled and free in this wallet yet. Wait for incoming transfers to settle, or list less.' : 'None of this token is settled and free in this wallet yet.');
     onStep(`Making ${list.length} invoices of your own for the lots…`);

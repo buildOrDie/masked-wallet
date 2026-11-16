@@ -502,3 +502,21 @@ test('seller: lots: a token output the bitcoin side doesn\'t know yet gets a ful
   const v = await s.w.instantListLots({ assetId: ASSET, lots, feeRate: 2, market: 'https://maskedwallet.com' }, s.store);
   assert.equal(v.stage, 'moving'); assert.equal(scans, 1); assert.equal(tries, 2);
 });
+
+test('seller: a wallet behind the chain (an output it counts is spent) refreshes, then stops before signing', async () => {
+  const chain = fakeChain();
+  const rgb = [unspent('b', 0, [tok(1000)])];
+  const s = wallet({ name: 'seller', lib: fakeLib(), chain, rgb });
+  chain.spends[`${T('b')}:0`] = { spent: true, txid: T('e') };
+  let refreshed = 0; s.w.w.refresh = async () => { refreshed++; return {}; };
+  const lots = [0, 1].map((i) => ({ offerId: `swlot${i}0123456`, token: 'ab'.repeat(24), amount: '500', priceSats: '5000' }));
+  await assert.rejects(s.w.instantListLots({ assetId: ASSET, lots, feeRate: 2, market: 'https://maskedwallet.com' }, s.store), /behind the chain.*Nothing was sent/);
+  assert.equal(refreshed, 1);
+  assert.equal(Object.keys(s.mem).length, 0);
+  await assert.rejects(s.w.instantList({ offerId: 'sw0123456789ab', assetId: ASSET, amount: '500', priceSats: '20000', feeRate: 2 }, s.store), /behind the chain/);
+  // the refresh caught up (the engine dropped the spent output): it goes on
+  s.w.w.refresh = async () => { rgb.splice(0, 1, unspent('d', 1, [tok(1000)])); return {}; };
+  s.w.w.sendBegin = async () => 'psbt';
+  const lib2 = s.w.lib; lib2.WasmInvoice = class { constructor(i) { this.i = i; } invoiceData() { return { recipientId: `rid-${this.i}`, network: 'signet', transportEndpoints: [] }; } free() {} };
+  assert.equal((await s.w.instantListLots({ assetId: ASSET, lots, feeRate: 2, market: 'https://maskedwallet.com' }, s.store)).stage, 'moving');
+});
