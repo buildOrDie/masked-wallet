@@ -698,12 +698,19 @@ export class LiteWallet {
     await this.wallet.sync(this.requireOnline());
     try { await this.wallet.refresh(this.requireOnline(), null, [], false); } catch { /* checked below */ }
     const held = (plain(this.wallet.listUnspents(false)) || []).filter((u) => u.utxo?.exists !== false && (u.rgbAllocations || []).some((a) => a.settled));
+    // transactions this wallet made itself (its transfers, its listing and lot moves): an output one of them spends is
+    // this wallet's own doing, already in its records once the engine catches up, never "another copy"
+    const own = new Set();
+    try {
+      const r = plain(this.wallet.listAssets([]) || {});
+      for (const a of [...(r.nia || []), ...(r.ifa || []), ...(r.uda || [])]) for (const t of plain(this.engineTransfers(a.assetId)) || []) if (t?.txid) own.add(String(t.txid).toLowerCase());
+    } catch { /* no list: every spend counts */ }
     const gone = [];
     for (const u of held.slice(0, 100)) {
       const op = `${String(u.utxo.outpoint.txid).toLowerCase()}:${u.utxo.outpoint.vout}`;
-      let spent = false;
-      try { spent = !!(await (await this.esplora(`/tx/${u.utxo.outpoint.txid}/outspend/${u.utxo.outpoint.vout}`)).json())?.spent; } catch { continue; }
-      if (!spent) continue;
+      let sp = null;
+      try { sp = await (await this.esplora(`/tx/${u.utxo.outpoint.txid}/outspend/${u.utxo.outpoint.vout}`)).json(); } catch { continue; }
+      if (!sp?.spent || (sp.txid && own.has(String(sp.txid).toLowerCase()))) continue;
       gone.push({ outpoint: op, assets: (u.rgbAllocations || []).filter((a) => a.settled).map((a) => ({ assetId: a.assetId, amount: String(a.assignment?.Fungible ?? a.amount ?? 0) })) });
     }
     if (fix && gone.length) {
