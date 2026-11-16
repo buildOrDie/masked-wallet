@@ -323,7 +323,12 @@ export class WalletRgb {
     // incoming transfers the network dropped never arrive: not counted as incoming
     const gone = (this.data?.transfers?.[a.assetId] || []).filter((t) => this.isDropped(t) && String(t.status) === 'WaitingConfirmations')
       .reduce((n, t) => n + (t.assignments || []).reduce((m, x) => m + Number(x?.Fungible ?? x?.amount ?? 0), 0), 0);
-    return { settled: cut(b.settled, d), future: cut(b.future, d + gone), spendable: cut(b.spendable, free), doubled: d };
+    // and never more incoming than the waiting receives listed: the engine can count one twice (a dropped one, say)
+    const sum = (t) => (t.assignments || []).reduce((m, x) => m + Number(x?.Fungible ?? x?.amount ?? 0), 0);
+    const visible = (this.data?.transfers?.[a.assetId] || []).filter((t) => String(t?.kind || '').startsWith('Receive') && ['WaitingCounterparty', 'WaitingConfirmations'].includes(String(t.status)) && !this.isDropped(t))
+      .reduce((n, t) => n + sum(t), 0);
+    const settled = cut(b.settled, d);
+    return { settled, future: Math.min(cut(b.future, d + gone), settled + visible), spendable: cut(b.spendable, free), doubled: d };
   }
   /** The note about a doubled payment was read (for this amount: a new doubling shows it again). */
   doubledSeen(id, amount) { try { return localStorage.getItem(`${this.profile.vaultKey}.doubled-ok.${id}`) === String(amount); } catch { return false; } }

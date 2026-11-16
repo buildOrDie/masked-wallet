@@ -1059,6 +1059,11 @@ test('RGB: an incoming transfer the network dropped is shown as not received and
   localStorage.setItem(`${app.rgb.profile.vaultKey}.dropped`, JSON.stringify({ gone: 1 }));
   assert.equal(app.rgb.bal(MA).future, 6726, 'the dropped 500 is not incoming any more');
   assert.deepEqual(app.rgb.history('rgb:ma').map((t) => t.txid), ['new', 'ok1', 'gone'], 'waiting first, then newest first');
+  // the engine counting the dropped one twice: incoming is never more than the waiting receives listed
+  MA.balance.future = 7726;
+  assert.equal(app.rgb.bal(MA).future, 6726);
+  app.rgb.data.transfers['rgb:ma'] = app.rgb.data.transfers['rgb:ma'].filter((t) => t.txid !== 'new');
+  assert.equal(app.rgb.bal(MA).future, 6226, 'nothing waiting: nothing incoming');
   app.rgb.asset = 'rgb:ma'; app.state.view = 'rgbtok';
   const page = app.ui.views.rgbtok.render();
   assert.match(page, /Not received/);
