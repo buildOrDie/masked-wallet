@@ -939,7 +939,11 @@ export class LiteWallet {
       const moved = await this.lotsAdvance(store, group, feeRate, onStep).catch(() => []);
       return { stage: 'moving', txid: moved[0] || null, stepByStep: true, lots: list.map((l) => ({ offerId: l.offerId, stage: 'moving' })) };
     };
-    if (this.lotsStepByStep) return queue();
+    // One transaction paying several invoices of this same wallet: the RGB engine took in only one of the transfers and
+    // kept counting the spent output (seen on Signet, 2.29.24 tests). So lots move step by step, the way a single
+    // Instant listing moves its tokens: the first at once, then one per block; a lot already alone on an output (the
+    // rest after the last move, often) needs no move. The one-transaction split stays for engines where it works.
+    if (this.lotsStepByStep !== false) return queue();
     onStep(`Making ${list.length} invoices of your own for the lots…`);
     // a lot's invoice stays open a week: this wallet takes in its own lots the next time it's open
     const invs = [];

@@ -437,6 +437,7 @@ test('seller: list in lots: one split to invoices of this wallet, then each lot 
   const lib = fakeLib();
   lib.WasmInvoice = class { constructor(i) { this.i = i; } invoiceData() { return { recipientId: `rid-${this.i}`, network: 'signet', transportEndpoints: [] }; } free() {} };
   const s = wallet({ name: 'seller', lib, chain, rgb });
+  s.w.lotsStepByStep = false; // the one-transaction split, where an engine can do it
   const sent = [];
   s.w.w.sendBegin = async (online, map, donation, fee, minConf) => { sent.push({ map, donation, fee: String(fee), minConf }); return 'psbt-split'; };
   const failed = [];
@@ -468,6 +469,7 @@ test('seller: list in lots: one split to invoices of this wallet, then each lot 
 test('seller: a split into lots that fails cancels the invoices it made', async () => {
   const chain = fakeChain();
   const s = wallet({ name: 'seller', lib: fakeLib(), chain, rgb: [unspent('b', 0, [tok(1000)])] });
+  s.w.lotsStepByStep = false; // the one-transaction split, where an engine can do it
   s.w.w.sendBegin = async () => { throw new Error('the block server is down'); };
   const failed = [];
   s.w.w.failTransfers = async (o, idx) => { failed.push(idx); };
@@ -495,6 +497,7 @@ test('seller: lots: a token output the bitcoin side doesn\'t know yet gets a ful
   const lib = fakeLib();
   lib.WasmInvoice = class { constructor(i) { this.i = i; } invoiceData() { return { recipientId: `rid-${this.i}`, network: 'signet', transportEndpoints: [] }; } free() {} };
   const s = wallet({ name: 'seller', lib, chain, rgb: [unspent('b', 0, [tok(1000)])] });
+  s.w.lotsStepByStep = false; // the one-transaction split, where an engine can do it
   let tries = 0, scans = 0;
   s.w.w.fullScan = async () => { scans++; };
   s.w.w.sendBegin = async () => { if (++tries === 1) throw new Error('Internal error: Error from bdk adding UTXOs: UTXO not found in the internal database for txid: bf88'); return 'psbt-split'; };
