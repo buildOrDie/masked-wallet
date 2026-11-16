@@ -1075,7 +1075,7 @@ index a3a9f46..bf0a61a 100644
      }
  
 diff --git a/src/wallet/online.rs b/src/wallet/online.rs
-index ca96b4a..a21c347 100644
+index ca96b4a..9f87256 100644
 --- a/src/wallet/online.rs
 +++ b/src/wallet/online.rs
 @@ -791,8 +791,9 @@ pub(crate) struct ConsignmentPayment<'c> {
@@ -1145,7 +1145,7 @@ index ca96b4a..a21c347 100644
      ) -> Result<Vec<LocalUnspent>, Error> {
          let mut input_unspents = unspents.to_vec();
          // consider the following UTXOs unspendable:
-@@ -2449,14 +2466,24 @@ impl Wallet {
+@@ -2449,16 +2466,28 @@ impl Wallet {
          // - pending incoming witness
          // - pending incoming blinded
          // - inexistent
@@ -1162,19 +1162,24 @@ index ca96b4a..a21c347 100644
 -                .any(|a| a.incoming && a.status.pending()))
 +            let own_move = own.contains(&u.utxo.txid.to_string())
 +                && u.rgb_allocations.iter().all(|a| !a.status.failed() && (a.status.settled() || a.status.waiting_confirmations()));
++            // (an output of an own move exists once the wallet has the transaction, which `own_unconfirmed_ok`
++            // checked: the database learns it only on its next scan)
 +            (own_move
 +                || (!(u.rgb_allocations
 +                    .iter()
 +                    .any(|a| a.incoming && a.status.pending()))
-+                    && !u.utxo.pending_witness))
++                    && !u.utxo.pending_witness
++                    && u.utxo.exists))
                  && !(u.rgb_allocations.iter().any(|a| {
                      !a.incoming && (a.status.initiated() || a.status.waiting_counterparty())
                  }))
 -                && !u.utxo.pending_witness
                  && u.pending_blinded == 0
-                 && u.utxo.exists
+-                && u.utxo.exists
          });
-@@ -2815,11 +2842,11 @@ impl Wallet {
+         Ok(input_unspents)
+     }
+@@ -2815,11 +2844,11 @@ impl Wallet {
              if internal_unspents_outpoints.contains(&(txid.clone(), vout)) {
                  continue;
              }
@@ -1191,7 +1196,7 @@ index ca96b4a..a21c347 100644
              db_txo.spent = ActiveValue::Set(true);
              self.database.update_txo(db_txo)?;
          }
-@@ -4723,6 +4750,22 @@ impl Wallet {
+@@ -4723,6 +4752,22 @@ impl Wallet {
                  &data.consignment_hash,
              ) {
                  Ok(bytes) => {
@@ -1214,7 +1219,7 @@ index ca96b4a..a21c347 100644
                      self.received_consignments
                          .insert(recipient_id.clone(), bytes);
                  }
-@@ -4871,7 +4914,14 @@ impl Wallet {
+@@ -4871,7 +4916,14 @@ impl Wallet {
                  .await;
          };
          let blinding = derive_shared(&ed25519_from_seed(&seed), &sender_vk)?.seal_blinding;
@@ -1230,7 +1235,7 @@ index ca96b4a..a21c347 100644
          let spent = Self::known_spent_opouts(&consignment);
          let mut payments: Vec<_> = self.find_payments(&consignment, &matcher, &spent).collect();
          if payments.len() != 1 {
-@@ -5805,6 +5855,8 @@ impl Wallet {
+@@ -5805,6 +5857,8 @@ impl Wallet {
                      details: s!("consignment not found in memory"),
                  })?
                  .clone();
@@ -1239,7 +1244,7 @@ index ca96b4a..a21c347 100644
              let consignment =
                  RgbTransfer::load(&consignment_bytes[..]).map_err(InternalError::from)?;
  
-@@ -7053,6 +7105,10 @@ impl Wallet {
+@@ -7053,6 +7107,10 @@ impl Wallet {
          batch: bool,
      ) -> Result<(), Error> {
          for recipient in recipients {
@@ -1250,7 +1255,7 @@ index ca96b4a..a21c347 100644
              let recipient_id = &recipient.recipient_id;
              let recipient_vk = verifying_key_from_bytes(&recipient.public_key)?;
              let derived = derive_shared(sender_sk, &recipient_vk)?;
-@@ -12074,3 +12130,712 @@ mod bfa_tests {
+@@ -12074,3 +12132,712 @@ mod bfa_tests {
          assert!(options(&format!(r#","evm_chains":{{"mainnet":{chain}}}"#)).is_err());
      }
  }
@@ -1964,7 +1969,7 @@ index ca96b4a..a21c347 100644
 +    }
 +}
 diff --git a/src/wallet/rust_only.rs b/src/wallet/rust_only.rs
-index 4e07a9c..007a95f 100644
+index 4e07a9c..9f18205 100644
 --- a/src/wallet/rust_only.rs
 +++ b/src/wallet/rust_only.rs
 @@ -52,6 +52,12 @@ pub struct ValidateConsignmentResult {
@@ -2146,7 +2151,7 @@ index 4e07a9c..007a95f 100644
          };
          let json = serde_json::to_string(&result_invalid).unwrap();
          let deserialized: ValidateConsignmentResult = serde_json::from_str(&json).unwrap();
-@@ -719,3 +821,491 @@ mod tests {
+@@ -719,3 +821,493 @@ mod tests {
          assert_eq!(IndexerProtocol::Esplora.to_string(), "Esplora");
      }
  }
@@ -2186,11 +2191,13 @@ index 4e07a9c..007a95f 100644
 +}
 +
 +/// An unsigned swap PSBT: the inputs in order, an empty OP_RETURN at output 0 (where the RGB commitment goes),
-+/// then `outputs` in order. Version 2, RBF signalled, no lock time.
++/// then `outputs` in order. Version 2, RBF signalled, no lock time. A swap between two people has two inputs or
++/// more; a move of this wallet's own tokens (MASKED: a listing or lot move) can have one, when the token output's
++/// own sats pay its fee.
 +pub fn new_swap_psbt(inputs: Vec<SwapInput>, outputs: Vec<SwapOutput>) -> Result<String, Error> {
 +    use bdk_wallet::bitcoin::{Amount, Sequence, TxIn, Witness, absolute::LockTime, consensus::deserialize, transaction::Version};
-+    if inputs.len() < 2 || outputs.is_empty() {
-+        return Err(Error::Internal { details: s!("a swap has at least two inputs and one output") });
++    if inputs.is_empty() || outputs.is_empty() {
++        return Err(Error::Internal { details: s!("a swap has at least one input and one output") });
 +    }
 +    let mut tx_in = vec![];
 +    for i in &inputs {

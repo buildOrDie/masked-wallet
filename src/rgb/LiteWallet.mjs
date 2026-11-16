@@ -266,6 +266,8 @@ export class LiteWallet {
   /** Sats the sender puts in the new output when paying a witness invoice (above dust, so it relays). */
   /** BTC on the receiver's new output for a "No BTC needed" invoice: the Taproot dust limit, the least Bitcoin allows. */
   static WITNESS_SATS = 330;
+  /** Sats on a move's RGB output for the rest of the tokens (the rest of the bitcoin goes back to the RGB balance). */
+  static MOVE_KEEP_SATS = 1000;
   static UTXO_SATS = RGB_UTXO_SATS;
   /** The engine's margin between a send's expiry and its invoice's (rgb-lib INVOICE_EXPIRATION_MARGIN_SECS). */
   static INVOICE_MARGIN_SECS = 600;
@@ -781,34 +783,53 @@ export class LiteWallet {
     return gone;
   }
   /** Move the tokens of a listing onto an output of their own (or a listed output back, when cancelling). */
-  async instantMove(assetId, amount, from, feeRate, onStep = (_t) => {}, { feeFromInputs = false } = {}) {
+  async instantMove(assetId, amount, from, feeRate, onStep = (_t) => {}, { feeFromInputs = true } = {}) {
     const online = this.requireOnline();
     const rate = Math.max(1, Number(feeRate) || 1);
     // `from`: one output holding the tokens, or several (tokens spread over outputs are joined in the same move)
     const froms = Array.isArray(from) ? from : [from];
-    const feeFor = (n) => BigInt(Math.ceil(rate * txVbytes([...Array(froms.length).fill(P2TR_SCRIPT), ...Array(n).fill(P2TR_SCRIPT)], [OPRET_SCRIPT, P2TR_SCRIPT, P2TR_SCRIPT])));
+    // An engine that keeps the rest of the tokens on this move's own output (setSwapChangeVout): that output is a small
+    // RGB output (KEEP sats), and the rest of the bitcoin goes back to the RGB balance, where fees are paid from. All
+    // the change on the RGB output instead (2.29.25 v3) left the RGB balance empty after a move ("needs about 1,131
+    // sats in bitcoin for the network fee" with 50,000 on an RGB output).
+    const split = typeof this.wallet.setSwapChangeVout === 'function';
+    const KEEP = split ? BigInt(LiteWallet.MOVE_KEEP_SATS) : 0n;
+    const outsFor = (back) => [OPRET_SCRIPT, P2TR_SCRIPT, P2TR_SCRIPT, ...(back ? [P2TR_SCRIPT] : [])];
+    const feeFor = (n, back = split) => BigInt(Math.ceil(rate * txVbytes([...Array(froms.length).fill(P2TR_SCRIPT), ...Array(n).fill(P2TR_SCRIPT)], outsFor(back))));
     const perInput = feeFor(2) - feeFor(1);
-    // a chained lot move: the previous move's change carries the rest of the tokens and enough sats for this fee
+    const sis = await Promise.all(froms.map((c) => this.outpointInfo(c.outpoint)));
+    const have = sis.reduce((t, f) => t + BigInt(f.sats), 0n);
+    // the token outputs' own sats pay the fee when they're enough (a chained lot move; an RGB output holding the
+    // bitcoin of an earlier move): no other coin needed
     let pay = null;
-    if (feeFromInputs) {
-      const have = (await Promise.all(froms.map((c) => this.outpointInfo(c.outpoint)))).reduce((t, f) => t + BigInt(f.sats), 0n);
-      if (have >= feeFor(0) + BigInt(INSTANT_SEAL_SATS) + 546n) pay = { coins: [] };
-    }
+    if (feeFromInputs && have >= feeFor(0, false) + BigInt(INSTANT_SEAL_SATS) + KEEP + (split ? 0n : 546n)) pay = { coins: [] };
+    const need = feeFor(1) + BigInt(INSTANT_SEAL_SATS) + KEEP + 546n;
     const { all, confirmed } = pay ? { all: [], confirmed: [] } : await this.btcCoins();
-    pay = pay || payCoinsFor(confirmed, all, feeFor(1) + BigInt(INSTANT_SEAL_SATS) + 546n, perInput);
-    if (!pay) throw new Error(`Your RGB wallet needs about ${(feeFor(1) + BigInt(INSTANT_SEAL_SATS) + 546n).toLocaleString('en-US')} sats in bitcoin for the network fee. Tap Add from Bitcoin under RGB balance on Home.`);
-    const infos = await Promise.all([...froms, ...pay.coins].map((c) => this.outpointInfo(c.outpoint)));
-    const sis = infos.slice(0, froms.length), fis = infos.slice(froms.length);
+    pay = pay || payCoinsFor(confirmed, all, need > have ? need - have : 1n, perInput);
+    if (!pay) throw new Error(`Your RGB wallet needs about ${need.toLocaleString('en-US')} sats in bitcoin for the network fee. Tap Add from Bitcoin under RGB balance on Home.`);
+    const fis = await Promise.all(pay.coins.map((c) => this.outpointInfo(c.outpoint)));
+    const infos = [...sis, ...fis];
     const r = await this.onchainReceive({ assetId, amount: Number(amount), durationSeconds: 86400, witness: true });
     const seal = this.lib.WasmWallet.witnessSealScript(r.invoice);
     // the real size, from the real scripts
     const own = await this.ownScript();
-    const totalFee = BigInt(Math.ceil(rate * txVbytes(infos.map((f) => f.script), [OPRET_SCRIPT, seal, own])));
-    const change = infos.reduce((t, f) => t + BigInt(f.sats), 0n) - BigInt(INSTANT_SEAL_SATS) - totalFee;
-    if (change < 546n) throw new Error('Not enough bitcoin for the network fee.');
+    const total = infos.reduce((t, f) => t + BigInt(f.sats), 0n);
+    let outs;
+    if (split) {
+      // the RGB output for the rest of the tokens (KEEP sats), then the rest of the bitcoin back, if it's worth an output
+      const back = total - BigInt(INSTANT_SEAL_SATS) - KEEP - BigInt(Math.ceil(rate * txVbytes(infos.map((f) => f.script), [OPRET_SCRIPT, seal, own, own])));
+      const alone = total - BigInt(INSTANT_SEAL_SATS) - BigInt(Math.ceil(rate * txVbytes(infos.map((f) => f.script), [OPRET_SCRIPT, seal, own])));
+      if (back >= 546n) outs = [{ script: seal, sats: INSTANT_SEAL_SATS }, { script: own, sats: Number(KEEP) }, { script: own, sats: Number(back) }];
+      else if (alone >= KEEP) outs = [{ script: seal, sats: INSTANT_SEAL_SATS }, { script: own, sats: Number(alone) }];
+      else throw new Error('Not enough bitcoin for the network fee.');
+    } else {
+      const change = total - BigInt(INSTANT_SEAL_SATS) - BigInt(Math.ceil(rate * txVbytes(infos.map((f) => f.script), [OPRET_SCRIPT, seal, own])));
+      if (change < 546n) throw new Error('Not enough bitcoin for the network fee.');
+      outs = [{ script: seal, sats: INSTANT_SEAL_SATS }, { script: own, sats: Number(change) }];
+    }
     const unsigned = this.lib.WasmWallet.newSwapPsbt(
       [...froms.map((c, k) => ({ outpoint: c.outpoint, sats: sis[k].sats, script: sis[k].script, tx: sis[k].tx })), ...pay.coins.map((c, k) => ({ outpoint: c.outpoint, sats: fis[k].sats, script: fis[k].script, tx: fis[k].tx }))],
-      [{ script: seal, sats: INSTANT_SEAL_SATS }, { script: own, sats: Number(change) }],
+      outs,
     );
     // the rest of the tokens stay on this move's own change output (an engine that can): no free RGB output needed,
     // and the next lot of a chain moves from it at once
@@ -954,7 +975,7 @@ export class LiteWallet {
       this.syncOwnUnconfirmed(store, [txid]);
       onStep('Signing the listing…');
       for (let pass = 0; pass < 3; pass++) {
-        try { await this.wallet.sync(this.requireOnline()); await this.wallet.refresh(this.requireOnline(), null, [], true); } catch { /* signed below if it can */ }
+        try { await this.wallet.sync(this.requireOnline()); await this.wallet.refresh(this.requireOnline(), null, [], true); await this.wallet.sync(this.requireOnline()); } catch { /* signed below if it can */ }
         try { return await this.presignLot(o.offerId, e, store); } catch { /* the engine hasn't taken the move in yet */ }
         await new Promise((r) => setTimeout(r, 1500));
       }
@@ -1102,6 +1123,8 @@ export class LiteWallet {
     const views = [];
     for (let pass = 0; pass < 3; pass++) {
       try { await this.wallet.refresh(online, null, [], true); } catch { /* signed below if it can */ }
+      // the outputs the moves made (the lots' own): the engine's records learn them on a scan
+      try { await this.wallet.sync(online); } catch { /* signed below if it can */ }
       for (const l of list) {
         const e = store.get(l.offerId);
         if (e?.stage !== 'moving') continue;

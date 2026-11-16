@@ -734,3 +734,25 @@ test('a single listing that needs a move is signed right after it, when the engi
   assert.equal(v.sellerOutpoint, `${T('5')}:1`);
   assert.ok(own.includes(T('5')), 'the move is named as this wallet\'s own');
 });
+
+test('a move keeps a small RGB output for the rest of the tokens and sends the rest of the bitcoin back; an RGB output with enough sats pays its own fee', async () => {
+  const chain = fakeChain();
+  // 60 tokens on an RGB output that also holds 49,000 sats (an earlier move's change), and no other bitcoin at all
+  const from = `${T('b')}:2`;
+  chain.outs[from] = { sats: 49000, script: '5120rgb', tx: 'aa' };
+  const lib = fakeLib();
+  let outs;
+  const make = lib.WasmWallet.newSwapPsbt;
+  lib.WasmWallet.newSwapPsbt = (ins, o) => { outs = o; return make(ins, o); };
+  const s = wallet({ name: 'seller', lib, chain, rgb: [unspent('b', 2, [tok(60)], 49000)], coins: [] });
+  let vout;
+  s.w.w.setSwapChangeVout = (v) => { vout = v; };
+  const moved = await s.w.instantMove(ASSET, '25', [{ outpoint: from }], 1);
+  assert.equal(moved.txid, T('5'));
+  assert.deepEqual(s.log.find((x) => x[0] === 'colorSwap')[1], [from], 'no other coin: the token output pays the fee');
+  assert.equal(outs.length, 3);
+  assert.equal(outs[0].sats, 330, 'the lot');
+  assert.equal(outs[1].sats, 1000, 'the rest of the tokens: a small RGB output (the engine puts them there)');
+  assert.equal(vout, 2);
+  assert.ok(outs[2].sats > 47000, 'the rest of the bitcoin back where fees are paid from');
+});

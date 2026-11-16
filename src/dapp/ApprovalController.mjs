@@ -236,11 +236,13 @@ export class ApprovalController {
         if (total > r.bal(asset).spendable) throw new Error(`You can list up to ${r.amount(asset, r.bal(asset).spendable)} ${asset.ticker}.`);
         let host = ''; try { host = new URL(P.market).host; } catch { throw new Error('The market address is not valid.'); }
         const rate = P.feeRate || Number(r.fee());
-        // the split: a token output and a bitcoin coin in; the commitment, one output per lot and the change out
-        const vb = Math.ceil(txVbytes([P2TR_SCRIPT, P2TR_SCRIPT], [OPRET_SCRIPT, ...Array(lots.length).fill(P2TR_SCRIPT), P2TR_SCRIPT, P2TR_SCRIPT]));
+        // one move per lot: a token output and a bitcoin coin in; the commitment, the lot, the rest of the tokens and the
+        // bitcoin back out (MASKED with the newer engine: all of them now, every lot signed at once)
+        const atOnce = !!r.service.wallet?.canChainLots;
+        const vb = lots.length * Math.ceil(txVbytes([P2TR_SCRIPT, P2TR_SCRIPT], [OPRET_SCRIPT, P2TR_SCRIPT, P2TR_SCRIPT, P2TR_SCRIPT]));
         const each = lots.map((x) => ({ shown: r.amount(asset, Number(x.amount)), price: Number(x.priceSats) }));
         const same = each.every((x) => x.shown === each[0].shown && x.price === each[0].price);
-        return { asset, assetId: P.assetId, shown: `${r.amount(asset, total)} ${asset.ticker}`, price, n: lots.length, each, same, market: host, rate, vb, fee: Math.ceil(rate * vb), seal: INSTANT_SEAL_SATS * lots.length };
+        return { asset, assetId: P.assetId, shown: `${r.amount(asset, total)} ${asset.ticker}`, price, n: lots.length, each, same, market: host, rate, vb, fee: Math.ceil(rate * vb), seal: INSTANT_SEAL_SATS * lots.length, atOnce };
       }
       if (m === 'rgbInstantBuyMany') {
         if (!r.service.canPresign) throw new Error('This MASKED version can\'t do Instant listings yet. Update MASKED.');
