@@ -347,6 +347,26 @@ test('RGB mainnet cloud backup: on by default, saved after changes, restored in 
   await r.action('cloudReplace');
   assert.equal(store.get(id).version, 3);
   assert.equal(r.cloud.error, '');
+  // 3b. an earlier version, loaded on purpose: asked first, then saved above the server's latest. Numbered from the
+  // loaded version, the server refused it and the screen offered to load the newer (unwanted) state straight back.
+  const history = new Map([[1, { ...store.get(id), version: 1, at: 1000 }], [2, { ...store.get(id), version: 2, at: 2000 }]]);
+  Object.assign(r.cloudApi, {
+    version: async (k) => store.get(k)?.version || 0,
+    list: async () => [...history.values()].map((b) => ({ version: b.version, at: b.at })).reverse(),
+    get: async (_k, v) => history.get(Number(v)) || null,
+  });
+  history.set(1, await cloud.seal(await cloud.cloudKeys(app.lock.secret), { ...ENV, ciphertext: 'state-old' }, 1));
+  await r.action('cloudList');
+  assert.match(app.ui.views.settings.render(), /data-rgb="cloudLoadVersion" data-rgb-arg="1"/);
+  opened = [];
+  await r.action('cloudLoadVersion', '1');
+  assert.deepEqual(opened, [], 'the first tap only asks');
+  assert.match(app.ui.views.settings.render(), /aren't in it[\s\S]*data-rgb="cloudLoadVersionYes"/);
+  await r.action('cloudLoadVersionYes');
+  assert.equal(opened[0].ciphertext, 'state-old');
+  assert.equal(store.get(id).version, 4, 'saved above the latest (3), not as 2');
+  assert.equal(r.cloudVersion, 4);
+  assert.equal(r.cloud.conflict, 0, 'no "newer backup" offered back');
   // 4. switch off: asked inside MASKED, then every copy is deleted and the file reminder comes back
   await r.action('cloudOff');
   assert.match(app.ui.views.settings.render(), /Switch off cloud backup\?[\s\S]*data-rgb="cloudOffYes"/);

@@ -129,6 +129,7 @@ export class WalletRgb {
     /** mainnet encrypted cloud backup: last result in this session */
     this.cloud = { error: '', conflict: 0, saving: false, last: 0 };
     this.cloudAsk = false; // the "switch off cloud backup?" panel is open
+    this.cloudPick = 0; // Earlier backups: the version picked, waiting for the second tap
     /** @type {any} */ this.cloudTimer = null;
     this.cloudApi = new RgbCloud();
     /** sell automatically: the setting (read from Chrome at start) and the offers set to it */
@@ -178,6 +179,8 @@ export class WalletRgb {
   cloudMark(version) {
     try { localStorage.setItem(`${this.profile.vaultKey}.cloud-version`, String(version)); localStorage.setItem(`${this.profile.vaultKey}.cloud-at`, String(Date.now())); } catch { /* */ }
   }
+  /** The latest version the backup server keeps (0 when it can't be asked). */
+  async serverVersion(id) { try { return Number(await this.cloudApi.version(id)) || 0; } catch { return 0; } }
   /** The cloud keys of the RGB network in use. */
   cloudKeysNow() { return cloudKeys(this.app.lock?.secret, this.profile.id); }
   /** Save to the cloud a few seconds after RGB changes (one upload for several changes). */
@@ -203,8 +206,19 @@ export class WalletRgb {
     try {
       const keys = await this.cloudKeysNow();
       const envelope = await this.service.backup();
-      const version = Math.max(this.cloudVersion, replace ? this.cloud.conflict : 0) + 1;
-      await this.cloudApi.put(keys.id, await seal(keys, envelope, version));
+      // replace (this browser's RGB becomes the backup: after loading an earlier version, an undo, a repair, or the
+      // person's choice): numbered above the server's latest, which is newer than the version just loaded. Numbered
+      // from the loaded version, the server refused it as older, and the "newer backup" it then offered to load was
+      // the very state the person was moving away from.
+      let latest = replace ? Math.max(this.cloud.conflict, await this.serverVersion(keys.id)) : 0;
+      let version = Math.max(this.cloudVersion, latest) + 1;
+      try { await this.cloudApi.put(keys.id, await seal(keys, envelope, version)); } catch (e) {
+        // saved meanwhile by the other copy: once more above it, only when replacing on purpose
+        if (!replace || /** @type {any} */ (e)?.status !== 409) throw e;
+        latest = Math.max(latest, Number(/** @type {any} */ (e).latest) || 0, await this.serverVersion(keys.id));
+        version = Math.max(version, latest) + 1;
+        await this.cloudApi.put(keys.id, await seal(keys, envelope, version));
+      }
       this.cloudMark(version);
       this.confirmBackup();
       this.cloud.error = ''; this.cloud.conflict = 0;
@@ -1053,10 +1067,28 @@ export class WalletRgb {
         this.cloudVersions = list;
         if (!list.length) app.toast('The backup server keeps no earlier versions of this wallet\'s RGB backup');
       });
-      case 'cloudVersionsClose': this.cloudVersions = null; return app.render();
-      case 'cloudLoadVersion': return this.run(async () => {
+      case 'cloudVersionsClose': this.cloudVersions = null; this.cloudPick = 0; return app.render();
+      // first tap: what loading an earlier backup does, and the version picked; the second tap loads it
+      case 'cloudLoadVersion': this.cloudPick = Number(arg) || 0; return app.render();
+      case 'cloudPickCancel': this.cloudPick = 0; return app.render();
+      // a state this browser had before a load: back again (the state it replaces is kept in turn)
+      case 'undoLoad': return this.run(async () => {
+        const backup = this.service?.beforeLoad?.(arg);
+        if (!backup) throw new Error('That earlier state of this browser isn\'t kept any more.');
+        await this.close();
+        this.phase = 'opening'; app.render();
+        await this.open(await this.walletKey(), backup, { replace: true });
+        this.service.backupSaved();
+        this.cloud = { ...this.cloud, error: '', conflict: 0 };
+        this.cloudVersions = null; this.cloudPick = 0;
+        if (this.cloudOn) await this.cloudSave({ replace: true }).catch(() => false);
+        app.toast('This browser\'s RGB is back to what it was before that load');
+      });
+      case 'cloudLoadVersionYes': return this.run(async () => {
+        const pick = this.cloudPick; this.cloudPick = 0;
+        if (!pick) return;
         const keys = await this.cloudKeysNow();
-        const body = await this.cloudApi.get(keys.id, Number(arg));
+        const body = await this.cloudApi.get(keys.id, pick);
         if (!body) throw new Error('That backup version isn\'t kept any more.');
         // an earlier version on purpose: no "newer than this browser" rule
         const backup = await openCloud(keys, body, 0);

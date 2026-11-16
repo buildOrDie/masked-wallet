@@ -434,13 +434,26 @@ export class RgbSettings {
   /** Earlier versions of the cloud backup the server keeps: load one (replaces this browser's RGB, kept aside first). */
   static cloudVersions(r) {
     const list = r.cloudVersions;
+    const when = (t) => (t ? new Date(t).toLocaleString() : 'before this update');
+    let undo = [];
+    try { undo = r.service?.beforeLoads?.() || []; } catch { undo = []; }
+    const undoBox = undo.length ? `<div class="cloud-box"><b>Undo a load</b>
+      <p class="muted small">What this browser's RGB was just before each of its last loads. Loading one back replaces the current state, which is kept here in turn.</p>
+      ${undo.map((u, i) => `<button class="btn ghost wide" data-rgb="undoLoad" data-rgb-arg="${i}" ${r.busy ? 'disabled' : ''}>Before the load of ${esc(when(u.at))}</button>`).join('')}</div>` : '';
     if (!list) return `<button class="btn ghost wide" data-rgb="cloudList" ${r.busy ? 'disabled' : ''}>Earlier backups</button>`;
-    if (!list.length) return '';
-    const when = (t) => (t ? new Date(t).toLocaleString() : '?');
+    if (!list.length) return undoBox;
+    const pick = list.find((v) => Number(v.version) === Number(r.cloudPick));
+    if (pick) {
+      return `<div class="cloud-box rgb-ask"><b>Load backup #${Number(pick.version)} from ${esc(when(pick.at))}?</b>
+      <p class="muted small">This browser's RGB becomes exactly what it was then. Tokens received, sent, listed or sold after that time aren't in it: a receive made after it can't be finished from it, and outputs sold since then are counted again until you check RGB against the chain.</p>
+      <p class="muted small">What this browser has now is kept, and Undo a load brings it back. The loaded one becomes the newest cloud backup.</p>
+      <button class="btn primary wide" data-rgb="cloudLoadVersionYes" ${r.busy ? 'disabled' : ''}>Load #${Number(pick.version)}</button>
+      <button class="btn ghost wide" data-rgb="cloudPickCancel">Not now</button></div>`;
+    }
     return `<div class="cloud-box rgb-ask"><b>Earlier RGB backups</b>
-      <p class="muted small">Load one only if this browser's RGB is wrong, for example after another copy of this wallet saved over it. Its tokens then replace this browser's RGB (this browser's current state is kept aside first), and it becomes the backup again.</p>
-      ${list.slice(0, 20).map((v) => `<button class="btn ghost wide" data-rgb="cloudLoadVersion" data-rgb-arg="${Number(v.version)}" ${r.busy || Number(v.version) === r.cloudVersion ? 'disabled' : ''}>#${Number(v.version)} · ${esc(when(v.at))}${Number(v.version) === r.cloudVersion ? ' · this browser' : ''}</button>`).join('')}
-      <button class="btn ghost wide" data-rgb="cloudVersionsClose">Close</button></div>`;
+      <p class="muted small">Load one only if this browser's RGB is wrong, for example after another copy of this wallet saved over it. Newest first.</p>
+      <div class="cloud-list">${list.map((v) => `<button class="btn ghost wide" data-rgb="cloudLoadVersion" data-rgb-arg="${Number(v.version)}" ${r.busy || Number(v.version) === r.cloudVersion ? 'disabled' : ''}>#${Number(v.version)} · ${esc(when(v.at))}${Number(v.version) === r.cloudVersion ? ' · this browser' : ''}</button>`).join('')}</div>
+      <button class="btn ghost wide" data-rgb="cloudVersionsClose">Close</button></div>${undoBox}`;
   }
   /** Check against the chain: outputs this wallet counts that another copy of it already spent. */
   static repair(r) {

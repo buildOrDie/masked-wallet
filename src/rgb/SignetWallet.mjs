@@ -2,6 +2,9 @@ import { RGB_PROFILES, dirtyKey, baseUnits, testFee, newAsset, RGB_UTXO_SATS } f
 import { decryptRgb, encryptRgb } from './backup.mjs';
 import { b64, unb64 } from './bytes.mjs';
 
+/** How many of the RGB states replaced by loading a backup this browser keeps. */
+export const BEFORE_LOADS = 5;
+
 /** One dedicated test wallet per RGB network. No MASKED mnemonic, coin store or mainnet state enters this service. */
 export class SignetWallet {
   /** @param {{ loadSdk: () => Promise<any>, storage: Storage, profile?: any }} options */
@@ -23,7 +26,7 @@ export class SignetWallet {
   }
   /**
    * `replace`: load `backup` over this browser's RGB (the same keys: another copy of this wallet saved newer data).
-   * This browser's own state is kept first, under `${vaultKey}.before-load`.
+   * This browser's own state is kept first (the last few, see `beforeLoads`), so a load can be undone.
    * @param {string} password @param {() => string} generateMnemonic @param {any} [backup] @param {{ replace?: boolean }} [opts]
    */
   async open(password, generateMnemonic, backup = null, opts = {}) {
@@ -54,7 +57,7 @@ export class SignetWallet {
           if (typeof payload.rgbBackup !== 'string') throw new Error('Backup does not contain RGB state.');
           if (replace) {
             // the state being replaced, kept in case it was the right one after all
-            try { await wallet.createBackup({ backupPath: '', password }); this.storage.setItem(`${this.vaultKey}.before-load`, JSON.stringify(await encryptRgb({ mnemonic: payload.mnemonic, rgbBackup: b64(wallet.getLastBackupBytes()), at: Date.now() }, password, net))); } catch { /* nothing to keep */ }
+            try { await wallet.createBackup({ backupPath: '', password }); this.keepBeforeLoad(await encryptRgb({ mnemonic: payload.mnemonic, rgbBackup: b64(wallet.getLastBackupBytes()), instant: this.instantForBackup() }, password, net)); } catch { /* nothing to keep */ }
           }
           await wallet.restoreFromBackupBytes(unb64(payload.rgbBackup), password);
           // Instant listings and purchases this wallet made in another copy: kept with the backup
@@ -68,6 +71,33 @@ export class SignetWallet {
       } catch (e) { await this.close(); throw e; }
     });
   }
+  // ---- the states replaced by loads (newest first, a few kept): a wrong load is undone by loading one back ----
+  get beforeLoadsKey() { return `${this.vaultKey}.before-loads`; }
+  readBeforeLoads() {
+    let list = [];
+    try { list = JSON.parse(this.storage.getItem(this.beforeLoadsKey) || '[]'); } catch { list = []; }
+    if (!Array.isArray(list)) list = [];
+    // the single slot older builds kept
+    try {
+      const old = this.storage.getItem(`${this.vaultKey}.before-load`);
+      if (old) {
+        list.push({ at: 0, backup: JSON.parse(old) });
+        this.storage.setItem(this.beforeLoadsKey, JSON.stringify(list));
+        this.storage.removeItem(`${this.vaultKey}.before-load`);
+      }
+    } catch { /* unreadable: dropped */ }
+    return list.filter((x) => x && x.backup).sort((a, b) => b.at - a.at);
+  }
+  keepBeforeLoad(backup) {
+    let list = [{ at: Date.now(), backup }, ...this.readBeforeLoads()].slice(0, BEFORE_LOADS);
+    // browser storage is small: fewer if they don't fit, never the newest dropped for an older one
+    while (list.length) {
+      try { this.storage.setItem(this.beforeLoadsKey, JSON.stringify(list)); return; } catch { list = list.slice(0, -1); }
+    }
+  }
+  /** The kept states: [{ at }] newest first; `beforeLoad(i)` is one of them as a backup to load. */
+  beforeLoads() { return this.readBeforeLoads().map((x) => ({ at: x.at })); }
+  beforeLoad(i) { return this.readBeforeLoads()[Number(i)]?.backup || null; }
   /** Settings → Blockchain server changed: the open wallet switches on its next sync, no reload needed. */
   useServers(list) {
     if (!Array.isArray(list) || !list.length) return;

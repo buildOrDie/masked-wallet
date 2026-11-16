@@ -10,6 +10,7 @@ class MemoryStorage {
   map = new Map();
   getItem(k) { return this.map.get(k) ?? null; }
   setItem(k, v) { this.map.set(k, String(v)); }
+  removeItem(k) { this.map.delete(k); }
 }
 function fixture() {
   const calls = []; const storage = new MemoryStorage();
@@ -251,4 +252,25 @@ test('test networks: RGB tops its fee bitcoin up from Public by itself; mainnet 
   id = 'signet'; app.builder.send = async () => { throw new Error('Your Public balance is empty.'); };
   assert.equal(await w.autoFund(), false, 'nothing in Public: Home\'s button stays');
   assert.equal(sent.length, 1);
+});
+
+test('RGB loads: the states they replace are kept (the last few, newest first), the old single slot included', async () => {
+  const { BEFORE_LOADS } = await import('../src/rgb/SignetWallet.mjs');
+  const storage = new MemoryStorage();
+  const service = new SignetWallet({ loadSdk: async () => ({}), storage });
+  // what an older build kept: one slot
+  storage.setItem(`${service.vaultKey}.before-load`, JSON.stringify({ format: 'x', ciphertext: 'oldest' }));
+  assert.equal(service.beforeLoads().length, 1);
+  assert.equal(storage.getItem(`${service.vaultKey}.before-load`), null, 'moved into the list, not lost');
+  for (let k = 1; k <= BEFORE_LOADS + 2; k++) service.keepBeforeLoad({ format: 'x', ciphertext: `s${k}` });
+  const list = service.beforeLoads();
+  assert.equal(list.length, BEFORE_LOADS);
+  assert.equal(service.beforeLoad(0).ciphertext, `s${BEFORE_LOADS + 2}`, 'newest first');
+  assert.equal(service.beforeLoad(BEFORE_LOADS), null);
+  // storage full: fewer kept, the newest never dropped
+  const full = new MemoryStorage(); const set = full.setItem.bind(full);
+  full.setItem = (k, v) => { if (k.endsWith('.before-loads') && JSON.parse(v).length > 2) throw new Error('QuotaExceededError'); set(k, v); };
+  const s2 = new SignetWallet({ loadSdk: async () => ({}), storage: full });
+  for (let k = 1; k <= 4; k++) s2.keepBeforeLoad({ format: 'x', ciphertext: `t${k}` });
+  assert.deepEqual([0, 1].map((i) => s2.beforeLoad(i).ciphertext), ['t4', 't3']);
 });
