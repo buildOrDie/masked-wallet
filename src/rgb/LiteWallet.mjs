@@ -876,8 +876,22 @@ export class LiteWallet {
     await this.save();
     return { stage: 'moving', txid, lots: list.map((l) => ({ offerId: l.offerId, stage: 'moving' })) };
   }
-  /** Send tokens to invoices of this wallet in one transaction (the split into lots): its txid. */
+  /**
+   * Send tokens to invoices of this wallet in one transaction (the split into lots): its txid. The engine builds it
+   * with its bitcoin wallet, which must know the token output; one made by a swap or an Instant listing can be
+   * missing there until a full scan finds it ("UTXO not found in the internal database"): scan once and try again.
+   */
   async sendToOwn(assetId, parts, feeRate) {
+    try { return await this.sendToOwnOnce(assetId, parts, feeRate); } catch (e) {
+      if (!/UTXO not found|adding UTXOs|UnknownUtxo/i.test(String(e?.message || e))) throw e;
+      await this.syncWallet({ full: true });
+      try { return await this.sendToOwnOnce(assetId, parts, feeRate); } catch (e2) {
+        if (!/UTXO not found|adding UTXOs|UnknownUtxo/i.test(String(e2?.message || e2))) throw e2;
+        throw new Error('MASKED can\'t split these tokens into lots: the output holding them came from a swap, and the wallet\'s bitcoin side doesn\'t see it even after a full scan. List them as one Instant listing instead. Nothing was sent.');
+      }
+    }
+  }
+  async sendToOwnOnce(assetId, parts, feeRate) {
     const online = this.requireOnline();
     const fee = BigInt(Math.max(1, Math.round(Number(feeRate) || 1)));
     const ds = await Promise.all(parts.map((p) => this.decodeRGBInvoice({ invoice: p.invoice })));

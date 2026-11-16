@@ -489,3 +489,16 @@ test('requests: list in lots: 2 to 10 lots of one token, each with its market to
   assert.throws(() => lotsParams({ assetId: ASSET, lots: [lot(1), { ...lot(2), amount: '0' }], market: 'https://m.com' }), /above 0/);
   assert.throws(() => lotsParams({ assetId: ASSET, lots: [lot(1), lot(2)], market: 'http://evil.example' }), /https/);
 });
+
+test('seller: lots: a token output the bitcoin side doesn\'t know yet gets a full scan, then the split goes', async () => {
+  const chain = fakeChain();
+  const lib = fakeLib();
+  lib.WasmInvoice = class { constructor(i) { this.i = i; } invoiceData() { return { recipientId: `rid-${this.i}`, network: 'signet', transportEndpoints: [] }; } free() {} };
+  const s = wallet({ name: 'seller', lib, chain, rgb: [unspent('b', 0, [tok(1000)])] });
+  let tries = 0, scans = 0;
+  s.w.w.fullScan = async () => { scans++; };
+  s.w.w.sendBegin = async () => { if (++tries === 1) throw new Error('Internal error: Error from bdk adding UTXOs: UTXO not found in the internal database for txid: bf88'); return 'psbt-split'; };
+  const lots = [0, 1].map((i) => ({ offerId: `swlot${i}0123456`, token: 'ab'.repeat(24), amount: '500', priceSats: '5000' }));
+  const v = await s.w.instantListLots({ assetId: ASSET, lots, feeRate: 2, market: 'https://maskedwallet.com' }, s.store);
+  assert.equal(v.stage, 'moving'); assert.equal(scans, 1); assert.equal(tries, 2);
+});
