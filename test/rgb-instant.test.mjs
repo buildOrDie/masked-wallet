@@ -574,3 +574,36 @@ test('seller: an Instant listing bigger than any one output joins several output
   const { offerable } = await import('../src/rgb/swap.mjs');
   assert.deepEqual(offerable(rgb, ASSET), { total: '3000', max: '1000' }, 'Instant can list the total; a four-step swap one output');
 });
+
+test('seller: cancel a listing another copy of this wallet made, from its output, only if this wallet holds it', async () => {
+  const chain = fakeChain();
+  const coin = `${T('a')}:0`, fee = `${T('c')}:2`;
+  chain.outs[coin] = { sats: 330, script: '5120rgb', tx: 'aa' };
+  chain.outs[fee] = { sats: 5000, script: '5120btc', tx: 'bb' };
+  const s = wallet({ name: 'seller', lib: fakeLib(), chain, rgb: [unspent('a', 0, [tok(500)])], coins: [{ outpoint: fee, txout: { value: 5000 }, is_spent: false }] });
+  const offer = { assetId: ASSET, amount: '500', priceSats: '20000' };
+  await assert.rejects(s.w.instantCancel({ offerId: 'swother1234567', feeRate: 2 }, s.store), /no Instant listing/);
+  await assert.rejects(s.w.instantCancel({ offerId: 'swother1234567', feeRate: 2, sellerOutpoint: `${T('d')}:0`, offer }, s.store), /doesn't hold that listing's tokens/);
+  await assert.rejects(s.w.instantCancel({ offerId: 'swother1234567', feeRate: 2, sellerOutpoint: coin, offer: { ...offer, amount: '400' } }, s.store), /doesn't hold/);
+  const v = await s.w.instantCancel({ offerId: 'swother1234567', feeRate: 2, sellerOutpoint: coin, offer }, s.store);
+  assert.equal(v.stage, 'cancelling');
+  assert.ok(s.log.some((x) => x[0] === 'colorSwap' && x[1].includes(coin)), 'the tokens moved off the listed output');
+});
+
+test('backup: Instant listings go with the RGB backup; loading it adds the other copy\'s, a newer entry wins', async () => {
+  const { SignetWallet } = await import('../src/rgb/SignetWallet.mjs');
+  const mem = new Map();
+  const storage = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, String(v)), removeItem: (k) => mem.delete(k) };
+  const w = new SignetWallet({ storage, profile: { id: 'public-signet', vaultKey: 'v', sdk: {} }, loadSdk: async () => ({}) });
+  const store = w.instantStore();
+  store.set('mine', { role: 'seller', stage: 'ready', at: 100, coin: 'x:0' });
+  store.set('old', { role: 'seller', stage: 'sold', at: 1 });
+  store.set('pub', { role: 'seller', stage: 'ready', at: 50, published: true, consignment: 'BIG' });
+  const b = w.instantForBackup();
+  assert.ok(b.mine && !b.old, 'finished ones older than a week are left out');
+  assert.equal(b.pub.consignment, undefined, "a published listing's proof stays with the market");
+  w.mergeInstant({ mine: { role: 'seller', stage: 'ready', at: 50 }, theirs: { role: 'seller', stage: 'moving', at: 200 }, bad: { role: 'x' } });
+  assert.equal(store.get('mine').at, 100, 'the newer entry here stays');
+  assert.equal(store.get('theirs').stage, 'moving');
+  assert.equal(store.get('bad'), null);
+});

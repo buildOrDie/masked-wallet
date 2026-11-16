@@ -21,11 +21,17 @@ export class SignetWallet {
     this.busy = true;
     try { return await fn(); } finally { this.busy = false; }
   }
-  async open(password, generateMnemonic, backup = null) {
+  /**
+   * `replace`: load `backup` over this browser's RGB (the same keys: another copy of this wallet saved newer data).
+   * This browser's own state is kept first, under `${vaultKey}.before-load`.
+   * @param {string} password @param {() => string} generateMnemonic @param {any} [backup] @param {{ replace?: boolean }} [opts]
+   */
+  async open(password, generateMnemonic, backup = null, opts = {}) {
+    const replace = !!opts.replace;
     const net = this.profile.id;
     return this.exclusive(async () => {
       if (this.wallet) throw new Error('Lock and reload before opening a wallet again.');
-      if (backup && this.exists) throw new Error('Restore in a clean browser profile; do not overwrite an existing RGB wallet.');
+      if (backup && this.exists && !replace) throw new Error('Restore in a clean browser profile; do not overwrite an existing RGB wallet.');
       const saved = backup || (this.exists ? JSON.parse(this.storage.getItem(this.vaultKey)) : null);
       const payload = saved ? await decryptRgb(saved, password, net) : { mnemonic: generateMnemonic() };
       // Persist encrypted keys before the SDK creates state. An init failure must never lose the seed.
@@ -46,7 +52,13 @@ export class SignetWallet {
         wallet.expectPurchases?.(Object.values(this.instantStore().all()).filter((e) => e?.role === 'buyer' && e.recipientId).map((e) => String(e.recipientId)));
         if (backup) {
           if (typeof payload.rgbBackup !== 'string') throw new Error('Backup does not contain RGB state.');
+          if (replace) {
+            // the state being replaced, kept in case it was the right one after all
+            try { await wallet.createBackup({ backupPath: '', password }); this.storage.setItem(`${this.vaultKey}.before-load`, JSON.stringify(await encryptRgb({ mnemonic: payload.mnemonic, rgbBackup: b64(wallet.getLastBackupBytes()), at: Date.now() }, password, net))); } catch { /* nothing to keep */ }
+          }
           await wallet.restoreFromBackupBytes(unb64(payload.rgbBackup), password);
+          // Instant listings and purchases this wallet made in another copy: kept with the backup
+          this.mergeInstant(payload.instant);
         }
         await wallet.unlock();
         // unlock can return offline. Explicit sync must fail visibly instead of showing a zero balance.
@@ -168,6 +180,26 @@ export class SignetWallet {
     };
   }
   /** Instant listings and purchases, kept until done (listings last up to 30 days). */
+  /** The Instant entries worth carrying in a backup: finished ones only for a week; a published listing's proof stays with the market. */
+  instantForBackup() {
+    const out = {}, week = Date.now() - 7 * 86400_000;
+    for (const [id, e] of Object.entries(this.instantStore().all())) {
+      if (!e || (['sold', 'cancelled', 'purchase-failed'].includes(e.stage) && Number(e.at || 0) < week)) continue;
+      out[id] = e.published && e.consignment ? { ...e, consignment: undefined } : e;
+    }
+    return out;
+  }
+  /** Instant entries from a backup: added, and an entry kept here replaced only by a newer one (`at`). */
+  mergeInstant(map) {
+    if (!map || typeof map !== 'object') return;
+    const store = this.instantStore(), mine = store.all();
+    for (const [id, e] of Object.entries(map)) {
+      if (!e || typeof e !== 'object' || !['seller', 'buyer'].includes(e.role)) continue;
+      const have = mine[id];
+      if (!have || Number(e.at || 0) > Number(have.at || 0)) store.set(id, e);
+    }
+    this.wallet?.reserve?.(this.instantReserved());
+  }
   instantStore() {
     const key = `${this.vaultKey}.swaps.instant`;
     const read = () => { try { return JSON.parse(this.storage.getItem(key) || '{}'); } catch { return {}; } };
@@ -235,7 +267,8 @@ export class SignetWallet {
       await wallet.createBackup({ backupPath: '', password: this.password });
       const bytes = wallet.getLastBackupBytes();
       if (!(bytes instanceof Uint8Array) || !bytes.length) throw new Error('The SDK did not return backup data.');
-      return encryptRgb({ mnemonic: this.mnemonic, rgbBackup: b64(bytes) }, this.password, this.profile.id);
+      // Instant listings and purchases go with it, so another copy that loads it can finish, see and cancel them
+      return encryptRgb({ mnemonic: this.mnemonic, rgbBackup: b64(bytes), instant: this.instantForBackup() }, this.password, this.profile.id);
     });
   }
   backupSaved() { this.storage.setItem(this.dirtyKey, '0'); this.storage.setItem(`${this.vaultKey}.backed-up`, '1'); }

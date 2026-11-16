@@ -286,6 +286,8 @@ export class ApprovalController {
           return { ...base, fee, rate, vb, market: host };
         }
         const e = r.service.instantStore().get(P.offerId);
+        // made in another copy of this wallet: cancelled from its output, if this wallet holds it
+        if ((!e || e.role !== 'seller') && P.sellerOutpoint) return { ...base, fee, rate, vb, stage: 'ready', fromOutput: true };
         if (!e || e.role !== 'seller') throw new Error('This wallet has no Instant listing with that id.');
         return { ...base, fee: e.stage === 'ready' ? fee : 0, rate, vb, stage: e.stage };
       }
@@ -549,7 +551,7 @@ export class ApprovalController {
       });
       case 'rgbInstantCancel': return this.rgbBusy(async () => {
         prepared(''); const r = app.rgb, P = a.params;
-        const out = await r.service.instantCancel({ offerId: P.offerId, feeRate: P.feeRate || Number(r.fee()) });
+        const out = await r.service.instantCancel({ offerId: P.offerId, feeRate: P.feeRate || Number(r.fee()), sellerOutpoint: P.sellerOutpoint || '', offer: P.offer });
         await r.refresh().catch(() => {});
         await this.rgbBackedUp(r).catch(() => {});
         return out;

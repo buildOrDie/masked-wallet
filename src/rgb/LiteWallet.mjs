@@ -1135,8 +1135,19 @@ export class LiteWallet {
     }
   }
   /** Seller: cancel an Instant listing. A signed one is moved to a new output (an on-chain transaction). */
-  async instantCancel({ offerId, feeRate }, store) {
-    const e = store.get(String(offerId));
+  async instantCancel({ offerId, feeRate, sellerOutpoint = '', offer = null }, store) {
+    let e = store.get(String(offerId));
+    if ((!e || e.role !== 'seller') && sellerOutpoint) {
+      // a listing made in another copy of this wallet: this one has no record of it, only the market's word for its
+      // output. Cancel it only if this wallet holds exactly that output, with the listed amount of the token.
+      const o = readOffer({ assetId: offer?.assetId, amount: offer?.amount, priceSats: offer?.priceSats }, offerId);
+      await this.wallet.sync(this.requireOnline());
+      const op = String(sellerOutpoint).toLowerCase();
+      const mine = (plain(this.wallet.listUnspents(false)) || []).filter((u) => `${String(u.utxo?.outpoint?.txid).toLowerCase()}:${u.utxo?.outpoint?.vout}` === op);
+      if (!exactCoinFor(mine, o.assetId, o.amount)) throw new Error('This wallet doesn\'t hold that listing\'s tokens: cancel it in the copy of MASKED that made it, or load the newer RGB backup first.');
+      e = { role: 'seller', assetId: o.assetId, amount: String(o.amount), priceSats: String(o.priceSats), stage: 'ready', coin: op, at: Date.now() };
+      store.set(String(offerId), e);
+    }
     if (!e || e.role !== 'seller') throw new Error('This wallet has no Instant listing with that id.');
     if (['sold', 'cancelled', 'cancelling'].includes(e.stage)) return this.instantView(offerId, e);
     if (e.stage === 'queued' || e.stage === 'moving' || !e.coin) {

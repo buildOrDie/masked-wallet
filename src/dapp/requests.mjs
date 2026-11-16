@@ -60,6 +60,11 @@ function swapParams(method, p) {
     if (!/^[0-9a-f]{32,128}$/.test(String(p.token || ''))) throw err(4000, 'token (the seller token from listing) is required.');
     out.market = u.origin + u.pathname.replace(/\/+$/, ''); out.token = String(p.token);
   }
+  if (method === 'rgbInstantCancel' && p.sellerOutpoint != null) {
+    // a listing another copy of this wallet made: cancelled from its output (the market shows it)
+    if (!/^[0-9a-f]{64}:\d{1,5}$/.test(String(p.sellerOutpoint))) throw err(4000, 'sellerOutpoint must be txid:vout.');
+    out.sellerOutpoint = String(p.sellerOutpoint);
+  }
   if (method === 'rgbInstantBuy') {
     const l = p.listing;
     if (!l || typeof l !== 'object') throw err(4000, 'listing (the signed listing from the market) is required.');

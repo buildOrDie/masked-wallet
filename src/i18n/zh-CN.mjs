@@ -1272,4 +1272,5 @@ export const ZH_CN = {
   "Checking your lots…": "正在检查你的批次…",
   "Checking this wallet is up to date with the chain…": "正在检查此钱包是否与区块链同步…",
   "Catching up with the chain…": "正在与区块链同步…",
+  "This wallet doesn't hold that listing's tokens: cancel it in the copy of MASKED that made it, or load the newer RGB backup first.": "此钱包没有该挂单的代币：请在创建它的 MASKED 副本中取消，或者先载入较新的 RGB 备份。",
 };

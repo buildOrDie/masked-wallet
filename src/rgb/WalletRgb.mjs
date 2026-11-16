@@ -398,15 +398,15 @@ export class WalletRgb {
     this.service = new runtime.SignetWallet({ loadSdk: runtime.loadRgbSdk, storage: localStorage, profile: this.withIndexers(this.profile) });
     return this.service;
   }
-  /** @param {string} password @param {any} [backup] @param {{ keyed?: boolean }} [o] keyed: password is the wallet key */
-  async open(password, backup = null, { keyed = true } = {}) {
+  /** @param {string} password @param {any} [backup] @param {{ keyed?: boolean, replace?: boolean }} [o] keyed: password is the wallet key; replace: load the backup over this browser's RGB */
+  async open(password, backup = null, { keyed = true, replace = false } = {}) {
     await this.acquire();
     try {
       const runtime = await this.runtime();
       const service = await this.serviceFor();
       const seed = await this.mainSeed();
       service.setPayoutScript?.(this.payoutScript());
-      await service.open(password, () => runtime.mnemonicFrom(seed), backup);
+      await service.open(password, () => runtime.mnemonicFrom(seed), backup, { replace });
       this.ready = true;
       // the last balances, shown at once while the refresh below checks the block server (it can take a minute)
       if (!this.data) { this.data = this.cachedSnapshot(); if (this.data) this.app.render?.(); }
@@ -963,7 +963,7 @@ export class WalletRgb {
         if (!found) throw new Error('No RGB cloud backup was found.');
         await this.close();
         this.phase = 'opening'; app.render();
-        await this.open(await this.walletKey(), found.backup);
+        await this.open(await this.walletKey(), found.backup, { replace: true });
         this.cloudMark(found.version); this.service.backupSaved();
         this.cloud = { ...this.cloud, error: '', conflict: 0 };
         app.toast('Loaded the newer RGB backup: this browser is up to date');
