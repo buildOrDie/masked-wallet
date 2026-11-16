@@ -1043,3 +1043,26 @@ test('RGB cloud backup: mainnet keeps its keys, each test network has its own ba
   // the same phrase finds the same Signet backup in any browser
   assert.equal((await cloud.cloudKeys({ ...secret }, 'public')).id, sig.id);
 });
+
+test('RGB: an incoming transfer the network dropped is shown as not received and left out of "incoming"; waiting ones on top', async () => {
+  const app = rgbApp('main');
+  localStorage.setItem('masked.rgb.mainnet-beta', '1');
+  rgbReady(app);
+  const MA = { assetId: 'rgb:ma', ticker: 'MA', name: 'Masked', precision: 0, issuedSupply: 10000, balance: { settled: 6226, future: 7226, spendable: 6226 } };
+  app.rgb.data.groups = { nia: [MA] };
+  app.rgb.data.transfers = { 'rgb:ma': [
+    { idx: 1, status: 'Settled', kind: 'ReceiveWitness', txid: 'ok1', createdAt: 300, assignments: [{ Fungible: 1000 }] },
+    { idx: 2, status: 'WaitingConfirmations', kind: 'ReceiveWitness', txid: 'gone', createdAt: 100, assignments: [{ Fungible: 500 }] },
+    { idx: 3, status: 'WaitingConfirmations', kind: 'ReceiveWitness', txid: 'new', createdAt: 200, assignments: [{ Fungible: 500 }] },
+  ] };
+  assert.equal(app.rgb.bal(MA).future, 7226);
+  localStorage.setItem(`${app.rgb.profile.vaultKey}.dropped`, JSON.stringify({ gone: 1 }));
+  assert.equal(app.rgb.bal(MA).future, 6726, 'the dropped 500 is not incoming any more');
+  assert.deepEqual(app.rgb.history('rgb:ma').map((t) => t.txid), ['new', 'ok1', 'gone'], 'waiting first, then newest first');
+  app.rgb.asset = 'rgb:ma'; app.state.view = 'rgbtok';
+  const page = app.ui.views.rgbtok.render();
+  assert.match(page, /Not received/);
+  assert.match(page, /Dropped: the transaction never confirmed/);
+  localStorage.removeItem(`${app.rgb.profile.vaultKey}.dropped`);
+  localStorage.removeItem('masked.rgb.mainnet-beta');
+});

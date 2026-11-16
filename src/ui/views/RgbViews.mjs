@@ -26,6 +26,8 @@ export function historyRow(t, a, r) {
   if (kind.startsWith('Receive')) {
     if (t.status === 'WaitingCounterparty' && !got) return null; // an invoice nobody has paid yet
     if (t.status === 'Failed' && !got) return null; // an invoice cancelled before anything came (a lots split that didn't go, say)
+    // its transaction is gone from the network: it never arrives
+    if (r.isDropped?.(t)) return { label: 'Not received', sign: '', amount: got ? r.amount(a, got) : '', note: 'Dropped: the transaction never confirmed and is no longer on the network, so these tokens didn\'t arrive', txid: t.txid, dropped: true };
     return { label: 'Received', sign: '+', amount: got ? r.amount(a, got) : '…', note: STATUS[t.status] ?? '', txid: t.txid };
   }
   if (kind === 'Send') {
@@ -206,7 +208,7 @@ export class RgbTokenView extends View {
     if (!rows.length) return '<p class="muted small center">No activity yet.</p>';
     let day = '';
     return rows.map(({ t, h }) => {
-      const label = ['WaitingCounterparty', 'WaitingConfirmations'].includes(String(t.status)) ? 'Pending' : dayLabel((t.updatedAt || t.createdAt || 0) * 1000);
+      const label = ['WaitingCounterparty', 'WaitingConfirmations'].includes(String(t.status)) && !h.dropped ? 'Pending' : dayLabel((t.updatedAt || t.createdAt || 0) * 1000);
       const sep = label !== day ? `<p class="h-day">${esc(label)}</p>` : '';
       day = label;
       const cls = h.sign === '−' ? 'out' : 'in';

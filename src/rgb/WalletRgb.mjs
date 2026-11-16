@@ -320,7 +320,10 @@ export class WalletRgb {
     const d = all.reduce((n, x) => n + x.amount, 0);
     const free = all.filter((x) => !x.coin || !locked.has(x.coin)).reduce((n, x) => n + x.amount, 0);
     const cut = (n, by) => Math.max(0, Number(n || 0) - by);
-    return { settled: cut(b.settled, d), future: cut(b.future, d), spendable: cut(b.spendable, free), doubled: d };
+    // incoming transfers the network dropped never arrive: not counted as incoming
+    const gone = (this.data?.transfers?.[a.assetId] || []).filter((t) => this.isDropped(t) && String(t.status) === 'WaitingConfirmations')
+      .reduce((n, t) => n + (t.assignments || []).reduce((m, x) => m + Number(x?.Fungible ?? x?.amount ?? 0), 0), 0);
+    return { settled: cut(b.settled, d), future: cut(b.future, d + gone), spendable: cut(b.spendable, free), doubled: d };
   }
   /** The note about a doubled payment was read (for this amount: a new doubling shows it again). */
   doubledSeen(id, amount) { try { return localStorage.getItem(`${this.profile.vaultKey}.doubled-ok.${id}`) === String(amount); } catch { return false; } }
@@ -328,7 +331,11 @@ export class WalletRgb {
   stranded(t) { return (this.data?.stranded || []).includes(Number(t?.batchTransferIdx)); }
   /** Sends of this token the other wallet hasn't accepted yet (not broadcast, so they can be cancelled). */
   unsent(id) { return (this.data?.transfers?.[id] || []).filter((t) => t?.kind === 'Send' && t?.status === 'WaitingCounterparty'); }
-  history(id) { return (this.data?.transfers?.[id] || []).slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)); }
+  /** Newest first, with transfers still waiting on top (an old one stuck waiting doesn't hide among the days). */
+  history(id) {
+    const waiting = (t) => ['WaitingCounterparty', 'WaitingConfirmations'].includes(String(t.status)) && !this.isDropped(t);
+    return (this.data?.transfers?.[id] || []).slice().sort((a, b) => (Number(waiting(b)) - Number(waiting(a))) || (b.createdAt || 0) - (a.createdAt || 0));
+  }
   /** Test BTC the RGB wallet holds: { settled, pending } in sats. */
   btc() {
     const b = this.data?.btc || {};
@@ -450,6 +457,39 @@ export class WalletRgb {
     if (full) try { localStorage.setItem(`${this.profile.vaultKey}.scanned-v3`, '1'); } catch { /* scans again next time */ }
     await this.instantCheck();
     this.autoFund().catch(() => {});
+    this.checkDropped().catch(() => {});
+  }
+  // ---- incoming transfers whose transaction the network dropped (never confirmed, gone from the mempool) ----
+  get droppedKey() { return `${this.profile.vaultKey}.dropped`; }
+  dropped() { try { return JSON.parse(localStorage.getItem(this.droppedKey) || '{}') || {}; } catch { return {}; } }
+  isDropped(t) { return !!(t?.txid && this.dropped()[String(t.txid)]); }
+  /**
+   * A receive still "waiting for a block" after hours: ask the block server whether its transaction exists at all.
+   * Gone (not found twice, an hour apart): it never arrives, so it's shown as dropped and left out of "incoming".
+   * Found again later (rebroadcast): it counts again. At most every 30 minutes, a few transactions at a time.
+   */
+  async checkDropped() {
+    if (Date.now() - (this.droppedAt || 0) < 30 * 60_000) return;
+    this.droppedAt = Date.now();
+    const base = (this.withIndexers(this.profile).sdk?.indexerUrls || [])[0];
+    if (!base) return;
+    /** @type {Record<string, number>} */
+    const seen = (/** @type {any} */ (this)).droppedSeen ||= {};
+    const map = this.dropped();
+    const old = Date.now() / 1000 - 3 * 3600;
+    const waiting = Object.values(this.data?.transfers || {}).flat()
+      .filter((t) => String(t?.kind || '').startsWith('Receive') && String(t.status) === 'WaitingConfirmations' && t.txid && Number(t.createdAt || 0) < old).slice(0, 10);
+    let changed = false;
+    for (const t of waiting) {
+      let gone = null;
+      try { const r = await fetch(`${base}/tx/${t.txid}/hex`); gone = r.status === 404 ? true : r.ok ? false : null; } catch { gone = null; }
+      if (gone === false && map[t.txid]) { delete map[t.txid]; changed = true; }
+      if (gone === true && !map[t.txid]) {
+        // twice, an hour apart, before calling it dropped (a server can lag behind)
+        if (seen[t.txid] && Date.now() - seen[t.txid] > 60 * 60_000) { map[t.txid] = Date.now(); changed = true; } else seen[t.txid] ||= Date.now();
+      }
+    }
+    if (changed) { try { localStorage.setItem(this.droppedKey, JSON.stringify(map)); } catch { /* checked again */ } this.app.render?.(); }
   }
   /**
    * Test networks only: keep the RGB wallet's test BTC for network fees topped up from the Public balance, so sends,

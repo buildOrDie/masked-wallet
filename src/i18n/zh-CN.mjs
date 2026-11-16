@@ -1273,4 +1273,6 @@ export const ZH_CN = {
   "Checking this wallet is up to date with the chain…": "正在检查此钱包是否与区块链同步…",
   "Catching up with the chain…": "正在与区块链同步…",
   "This wallet doesn't hold that listing's tokens: cancel it in the copy of MASKED that made it, or load the newer RGB backup first.": "此钱包没有该挂单的代币：请在创建它的 MASKED 副本中取消，或者先载入较新的 RGB 备份。",
+  "Not received": "未收到",
+  "Dropped: the transaction never confirmed and is no longer on the network, so these tokens didn't arrive": "已丢弃：该交易从未确认，且已不在网络上，所以这些代币没有到账",
 };
