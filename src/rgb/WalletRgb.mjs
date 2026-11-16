@@ -464,15 +464,16 @@ export class WalletRgb {
   dropped() { try { return JSON.parse(localStorage.getItem(this.droppedKey) || '{}') || {}; } catch { return {}; } }
   isDropped(t) { return !!(t?.txid && this.dropped()[String(t.txid)]); }
   /**
-   * A receive still "waiting for a block" after hours: ask the block server whether its transaction exists at all.
-   * Gone (not found twice, an hour apart): it never arrives, so it's shown as dropped and left out of "incoming".
-   * Found again later (rebroadcast): it counts again. At most every 30 minutes, a few transactions at a time.
+   * A receive still "waiting for a block" after hours: ask the block servers whether its transaction exists at all.
+   * Waiting over a day and no server has it: dropped at once. Waiting a few hours: not found twice, an hour apart
+   * (a server can lag). Dropped: shown as not received and left out of "incoming"; found again later (rebroadcast),
+   * it counts again. At most every 30 minutes, a few transactions at a time.
    */
   async checkDropped() {
     if (Date.now() - (this.droppedAt || 0) < 30 * 60_000) return;
     this.droppedAt = Date.now();
-    const base = (this.withIndexers(this.profile).sdk?.indexerUrls || [])[0];
-    if (!base) return;
+    const bases = (this.withIndexers(this.profile).sdk?.indexerUrls || []).slice(0, 2);
+    if (!bases.length) return;
     /** @type {Record<string, number>} */
     const seen = (/** @type {any} */ (this)).droppedSeen ||= {};
     const map = this.dropped();
@@ -480,14 +481,17 @@ export class WalletRgb {
     const waiting = Object.values(this.data?.transfers || {}).flat()
       .filter((t) => String(t?.kind || '').startsWith('Receive') && String(t.status) === 'WaitingConfirmations' && t.txid && Number(t.createdAt || 0) < old).slice(0, 10);
     let changed = false;
+    const day = Date.now() / 1000 - 86400;
     for (const t of waiting) {
-      let gone = null;
-      try { const r = await fetch(`${base}/tx/${t.txid}/hex`); gone = r.status === 404 ? true : r.ok ? false : null; } catch { gone = null; }
-      if (gone === false && map[t.txid]) { delete map[t.txid]; changed = true; }
-      if (gone === true && !map[t.txid]) {
-        // twice, an hour apart, before calling it dropped (a server can lag behind)
-        if (seen[t.txid] && Date.now() - seen[t.txid] > 60 * 60_000) { map[t.txid] = Date.now(); changed = true; } else seen[t.txid] ||= Date.now();
+      // every server that answers: true = it doesn't have the transaction, false = it does
+      const answers = [];
+      for (const base of bases) {
+        try { const r = await fetch(`${base}/tx/${t.txid}/hex`); if (r.status === 404) answers.push(true); else if (r.ok) answers.push(false); } catch { /* no answer */ }
       }
+      if (answers.includes(false)) { if (map[t.txid]) { delete map[t.txid]; changed = true; } continue; }
+      if (!answers.length || map[t.txid]) continue;
+      // waiting over a day: gone now. A few hours: twice, an hour apart (a server can lag behind)
+      if (Number(t.createdAt || 0) < day || (seen[t.txid] && Date.now() - seen[t.txid] > 60 * 60_000)) { map[t.txid] = Date.now(); changed = true; } else seen[t.txid] ||= Date.now();
     }
     if (changed) { try { localStorage.setItem(this.droppedKey, JSON.stringify(map)); } catch { /* checked again */ } this.app.render?.(); }
   }

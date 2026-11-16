@@ -1066,3 +1066,24 @@ test('RGB: an incoming transfer the network dropped is shown as not received and
   localStorage.removeItem(`${app.rgb.profile.vaultKey}.dropped`);
   localStorage.removeItem('masked.rgb.mainnet-beta');
 });
+
+test('RGB: a receive waiting over a day whose transaction no server has is dropped at the first check', async () => {
+  const app = rgbApp('main');
+  localStorage.setItem('masked.rgb.mainnet-beta', '1');
+  rgbReady(app);
+  const now = Date.now() / 1000;
+  app.rgb.data.transfers = { 'rgb:ma': [
+    { idx: 2, status: 'WaitingConfirmations', kind: 'ReceiveWitness', txid: 'old', createdAt: now - 5 * 86400, assignments: [{ Fungible: 500 }] },
+    { idx: 3, status: 'WaitingConfirmations', kind: 'ReceiveWitness', txid: 'recent', createdAt: now - 4 * 3600, assignments: [{ Fungible: 500 }] },
+    { idx: 4, status: 'WaitingConfirmations', kind: 'ReceiveWitness', txid: 'there', createdAt: now - 5 * 86400, assignments: [{ Fungible: 500 }] },
+  ] };
+  const prev = globalThis.fetch;
+  globalThis.fetch = async (url) => (/\/tx\/there\/hex$/.test(String(url)) ? new Response('0200') : new Response('not found', { status: 404 }));
+  try { await app.rgb.checkDropped(); } finally { globalThis.fetch = prev; }
+  const d = app.rgb.dropped();
+  assert.ok(d.old, 'five days and no server has it: dropped');
+  assert.ok(!d.recent, 'a few hours: checked again an hour later first');
+  assert.ok(!d.there, 'still on the network: not dropped');
+  localStorage.removeItem(`${app.rgb.profile.vaultKey}.dropped`);
+  localStorage.removeItem('masked.rgb.mainnet-beta');
+});
