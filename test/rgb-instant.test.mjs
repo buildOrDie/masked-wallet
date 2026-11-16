@@ -111,7 +111,8 @@ test('seller: tokens sharing an output move first, then the listing is signed; c
   chain.outs[from] = { sats: 1000, script: '5120rgb', tx: 'aa' };
   chain.outs[fee] = { sats: 5000, script: '5120btc', tx: 'bb' };
   const rgb = [unspent('b', 0, [tok(800)])];
-  const s = wallet({ name: 'seller', lib: fakeLib(), chain, rgb, coins: [{ outpoint: fee, txout: { value: 5000 }, is_spent: false }] });
+  const coins = [{ outpoint: fee, txout: { value: 5000 }, is_spent: false }];
+  const s = wallet({ name: 'seller', lib: fakeLib(), chain, rgb, coins });
   const v = await s.w.instantList({ offerId: 'sw0123456789ab', assetId: ASSET, amount: '500', priceSats: '20000', feeRate: 2 }, s.store);
   assert.equal(v.stage, 'moving'); assert.equal(v.txid, T('5'));
   const [, ins, amount, vout] = s.log.find((x) => x[0] === 'colorSwap');
@@ -126,9 +127,13 @@ test('seller: tokens sharing an output move first, then the listing is signed; c
   assert.equal(ch[0].stage, 'ready'); assert.equal(ch[0].sellerOutpoint, moved);
   // cancel: moves the signed output to a fresh one (a transaction), then the cancel is noticed on chain
   chain.outs[moved] = { sats: 1000, script: '5120rgb', tx: 'cc' };
+  // the move spent the first fee coin: the cancel pays from another one (never the one just spent)
+  const fee2 = `${T('e')}:2`;
+  chain.outs[fee2] = { sats: 5000, script: '5120btc', tx: 'ee' };
+  coins.push({ outpoint: fee2, txout: { value: 5000 }, is_spent: false });
   const c = await s.w.instantCancel({ offerId: 'sw0123456789ab', feeRate: 2 }, s.store);
   assert.equal(c.stage, 'cancelling');
-  assert.deepEqual(s.log.filter((x) => x[0] === 'colorSwap').at(-1)[1], [moved, fee]);
+  assert.deepEqual(s.log.filter((x) => x[0] === 'colorSwap').at(-1)[1], [moved, fee2]);
   assert.deepEqual(s.log.findLast((x) => x[0] === 'reserve'), ['reserve', []]);
   chain.spends[moved] = { spent: true, txid: T('5') };
   assert.deepEqual(await s.w.instantProgress(s.store, s.store.all()), [{ offerId: 'sw0123456789ab', stage: 'cancelled', txid: T('5') }]);
@@ -775,4 +780,16 @@ test('lots: tokens on the rest-of-tokens output of this wallet\'s own unconfirme
   const r = await s.w.instantListLots({ assetId: ASSET, lots, feeRate: 1 }, s.store);
   assert.deepEqual(s.log.find((x) => x[0] === 'colorSwap')[1].slice(0, 1), [rest], 'moved from the unconfirmed move\'s output');
   assert.equal(r.lots.length, 2);
+});
+
+test('two Instant buys in a row never spend the same coin, even before the block server shows it spent', async () => {
+  const chain = fakeChain();
+  const s = wallet({ name: 'buyer', lib: fakeLib(), chain, coins: [{ outpoint: `${T('c')}:0`, txout: { value: 50000 }, is_spent: false }, { outpoint: `${T('d')}:0`, txout: { value: 40000 }, is_spent: false }] });
+  s.w.w.listUnspentsVanilla = async () => [{ outpoint: `${T('c')}:0`, txout: { value: 50000 }, is_spent: false }, { outpoint: `${T('d')}:0`, txout: { value: 40000 }, is_spent: false }];
+  const first = await s.w.btcCoins();
+  assert.equal(first.all.length, 2);
+  s.w.spentNow([`${T('c')}:0`]);
+  const next = await s.w.btcCoins();
+  assert.deepEqual(next.all.map((c) => c.outpoint), [`${T('d')}:0`], 'the coin just spent is left out');
+  assert.deepEqual(next.confirmed.map((c) => c.outpoint), [`${T('d')}:0`]);
 });

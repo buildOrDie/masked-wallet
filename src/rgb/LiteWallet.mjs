@@ -551,7 +551,21 @@ export class LiteWallet {
     const online = this.requireOnline();
     const all = (await this.wallet.listUnspentsVanilla(online, 0, false)) || [];
     const confirmed = (await this.wallet.listUnspentsVanilla(online, 1, true)) || [];
-    return { all, confirmed };
+    // never a coin this wallet's own transaction spent a moment ago: the block server may not show it spent yet, and
+    // a second transaction on it is refused ("insufficient fee", the second of two Instant buys in a row)
+    const spent = this.justSpent();
+    const ok = (c) => !spent.has(String(outpointOf(c.outpoint) || '').toLowerCase());
+    return { all: all.filter(ok), confirmed: confirmed.filter(ok) };
+  }
+  /** Coins this wallet's own transactions spent in the last hour (`spentNow`). */
+  justSpent() {
+    const now = Date.now(), m = this._justSpent || (this._justSpent = new Map());
+    for (const [k, at] of m) if (now - at > 3600_000) m.delete(k);
+    return new Set(m.keys());
+  }
+  spentNow(outpoints) {
+    const m = this._justSpent || (this._justSpent = new Map());
+    for (const o of outpoints || []) if (o) m.set(String(o).toLowerCase(), Date.now());
   }
 
   /** How much of an asset this wallet can offer: { total, max } (one swap uses one RGB output). */
@@ -861,6 +875,7 @@ export class LiteWallet {
     // the engine's broadcast can fail quietly on a busy server: make sure a block server has it
     if (txHex) await this.ensureBroadcast(txHex, id);
     else if (sendErr) throw sendErr;
+    this.spentNow([...froms.map((c) => c.outpoint), ...pay.coins.map((c) => c.outpoint)]);
     return { txid: id, txHex };
   }
   /**
@@ -1493,7 +1508,7 @@ export class LiteWallet {
     store.set(o.offerId, { role: 'buyer', assetId: o.assetId, amount: String(o.amount), priceSats: String(o.priceSats), recipientId: r.recipientId, invoice: r.invoice, txid, txHex, completed: b64(completed), posted: false, at: Date.now() });
     this.expectPurchases([...this.purchases, r.recipientId]);
     onStep('Sending the purchase to the Bitcoin network…');
-    try { await this.broadcastAll(txHex, txid); } catch (err) {
+    try { await this.broadcastAll(txHex, txid); this.spentNow(pay.coins.map((c) => c.outpoint)); } catch (err) {
       const why = String(err?.message || err);
       if (/no block server accepted it/.test(why)) {
         store.set(o.offerId, { ...store.get(o.offerId), failed: why, completed: undefined, txHex: undefined, at: Date.now() });
