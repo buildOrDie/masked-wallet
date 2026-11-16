@@ -675,6 +675,20 @@ export class LiteWallet {
   // the engine (never used for anything else) until it's sold or the listing is cancelled (which moves it).
   get canPresign() { return typeof this.wallet.presignSale === 'function' && typeof this.lib.WasmWallet?.presignedBuyPsbt === 'function'; }
   requirePresign() { if (!this.canPresign) throw new Error('This MASKED build can\'t make Instant listings yet. Update MASKED.'); }
+  /** The engine can spend and list outputs of this wallet's own unconfirmed moves (all lots signed at once). */
+  get canChainLots() { return this.canPresign && typeof this.wallet.setOwnUnconfirmed === 'function' && /** @type {any} */ (this).lotsChain !== false; }
+  /**
+   * Tell the engine which unconfirmed transactions are this wallet's own moves (listing and lot moves in `store`, plus
+   * `extra`): their outputs can be moved, listed or cancelled before they confirm. The engine checks each is a
+   * transaction it has, funded by an output of its own.
+   */
+  syncOwnUnconfirmed(store, extra = []) {
+    if (typeof this.wallet?.setOwnUnconfirmed !== 'function') return;
+    let ids = [];
+    try { ids = Object.values(store?.all?.() || {}).filter((e) => e?.role === 'seller' && e.moveTxid).map((e) => String(e.moveTxid).toLowerCase()); } catch { ids = []; }
+    this.ownMoves = [...new Set([...ids, ...(this.ownMoves || []), ...extra.map((t) => String(t).toLowerCase())])].slice(-200);
+    try { this.wallet.setOwnUnconfirmed(this.ownMoves); } catch { /* an older engine: moves wait for their block */ }
+  }
   /** @type {Set<string>} */
   get reserved() { return this._reserved || new Set(); }
   /** The outputs promised to Instant listings; the engine never spends, receives on or adds change to them. */
@@ -767,15 +781,21 @@ export class LiteWallet {
     return gone;
   }
   /** Move the tokens of a listing onto an output of their own (or a listed output back, when cancelling). */
-  async instantMove(assetId, amount, from, feeRate, onStep = (_t) => {}) {
+  async instantMove(assetId, amount, from, feeRate, onStep = (_t) => {}, { feeFromInputs = false } = {}) {
     const online = this.requireOnline();
     const rate = Math.max(1, Number(feeRate) || 1);
     // `from`: one output holding the tokens, or several (tokens spread over outputs are joined in the same move)
     const froms = Array.isArray(from) ? from : [from];
     const feeFor = (n) => BigInt(Math.ceil(rate * txVbytes([...Array(froms.length).fill(P2TR_SCRIPT), ...Array(n).fill(P2TR_SCRIPT)], [OPRET_SCRIPT, P2TR_SCRIPT, P2TR_SCRIPT])));
     const perInput = feeFor(2) - feeFor(1);
-    const { all, confirmed } = await this.btcCoins();
-    const pay = payCoinsFor(confirmed, all, feeFor(1) + BigInt(INSTANT_SEAL_SATS) + 546n, perInput);
+    // a chained lot move: the previous move's change carries the rest of the tokens and enough sats for this fee
+    let pay = null;
+    if (feeFromInputs) {
+      const have = (await Promise.all(froms.map((c) => this.outpointInfo(c.outpoint)))).reduce((t, f) => t + BigInt(f.sats), 0n);
+      if (have >= feeFor(0) + BigInt(INSTANT_SEAL_SATS) + 546n) pay = { coins: [] };
+    }
+    const { all, confirmed } = pay ? { all: [], confirmed: [] } : await this.btcCoins();
+    pay = pay || payCoinsFor(confirmed, all, feeFor(1) + BigInt(INSTANT_SEAL_SATS) + 546n, perInput);
     if (!pay) throw new Error(`Your RGB wallet needs about ${(feeFor(1) + BigInt(INSTANT_SEAL_SATS) + 546n).toLocaleString('en-US')} sats in bitcoin for the network fee. Tap Add from Bitcoin under RGB balance on Home.`);
     const infos = await Promise.all([...froms, ...pay.coins].map((c) => this.outpointInfo(c.outpoint)));
     const sis = infos.slice(0, froms.length), fis = infos.slice(froms.length);
@@ -926,6 +946,16 @@ export class LiteWallet {
     const e = { ...base, stage: 'moving', moveTxid: txid, moveHex: txHex || undefined, coin: `${txid}:${SEAL_OUTPUT}` };
     store.set(o.offerId, e);
     this.reserve([...this.reserved, e.coin]);
+    // an engine that lists outputs of this wallet's own unconfirmed moves: signed now, on sale at once
+    if (this.canChainLots) {
+      this.syncOwnUnconfirmed(store, [txid]);
+      onStep('Signing the listing…');
+      for (let pass = 0; pass < 3; pass++) {
+        try { await this.wallet.sync(this.requireOnline()); await this.wallet.refresh(this.requireOnline(), null, [], true); } catch { /* signed below if it can */ }
+        try { return await this.presignLot(o.offerId, e, store); } catch { /* the engine hasn't taken the move in yet */ }
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+    }
     return this.instantView(o.offerId, e);
   }
   async instantSign(offerId, e, store) {
@@ -936,7 +966,14 @@ export class LiteWallet {
     const mine = e.coin ? unspents.filter((u) => opOf(u) === e.coin)
       : e.lotOf ? unspents.filter((u) => String(u.utxo?.outpoint?.txid).toLowerCase() === e.lotOf) : unspents;
     const coin = exactCoinFor(mine, e.assetId, e.amount, e.coin ? new Set() : this.reserved);
-    if (!coin) return this.instantView(offerId, e); // the move hasn't settled yet
+    if (!coin) {
+      // this wallet's own move, not confirmed yet: the engine signs its output anyway (when it has taken the move in)
+      if (e.coin && e.moveTxid && this.canChainLots) {
+        this.syncOwnUnconfirmed(store);
+        try { return await this.presignLot(offerId, e, store); } catch { /* after its block, as before */ }
+      }
+      return this.instantView(offerId, e); // the move hasn't settled yet
+    }
     const payout = await this.payoutScript();
     const r = plain(await this.wallet.presignSale(online, e.assetId, BigInt(e.amount), coin.outpoint, payout, BigInt(e.priceSats), 1));
     const next = { ...e, moveHex: undefined, stage: 'ready', payoutPublic: payout === this.payoutHex, coin: String(r.sellerOutpoint), psbt: String(r.psbt), consignment: b64(Uint8Array.from(r.consignment)), templateTxid: String(r.templateTxid), sellerSats: String(r.sellerSats), at: Date.now() };
@@ -984,6 +1021,7 @@ export class LiteWallet {
     const pick = sendCoinsFor(plain(this.wallet.listUnspents(false)) || [], assetId, total, new Set([...this.reserved, ...pendingSpent]));
     if (!pick.coins) throw new Error(pick.held > 0n ? 'Not that much of this token is settled and free in this wallet yet. Wait for incoming transfers to settle, or list less.' : 'None of this token is settled and free in this wallet yet.');
     const at = Date.now(), group = `g${at.toString(36)}`;
+    if (this.canChainLots) return this.lotsAtOnce({ list, assetId, coins: pick.coins, feeRate, market, at, group, onStep }, store);
     const queue = async () => {
       // the engine's bitcoin side can't spend these outputs (they came from swaps): split step by step instead, the way a
       // single Instant listing moves its tokens; each lot moves to an output of its own as soon as tokens are free
@@ -1022,6 +1060,70 @@ export class LiteWallet {
     for (const l of list) store.set(l.offerId, { role: 'seller', assetId: l.assetId, amount: String(l.amount), priceSats: String(l.priceSats), market: String(market), token: l.token, at, stage: 'moving', moveTxid: txid, lotOf: String(txid).toLowerCase(), lots: list.length });
     await this.save();
     return { stage: 'moving', txid, lots: list.map((l) => ({ offerId: l.offerId, stage: 'moving' })) };
+  }
+  /**
+   * Lots, all at once: each lot moves to an output of its own in a chain of transactions (lot 1 from the chosen outputs,
+   * each next one from the previous move's change), then every lot is signed as its own Instant listing, in the same
+   * approval. Nothing waits for a block: the engine spends and lists outputs of this wallet's own unconfirmed moves
+   * (`syncOwnUnconfirmed`). A buyer who buys before the moves confirm gets the tokens once they do; their wallet waits
+   * for that by itself. A lot that can't be signed now (the engine hasn't taken in its move yet) is signed on the next
+   * refresh, as before.
+   */
+  async lotsAtOnce({ list, assetId, coins, feeRate, market, at, group, onStep }, store) {
+    const online = this.requireOnline();
+    const rate = Math.max(1, Number(feeRate) || 1);
+    this.syncOwnUnconfirmed(store);
+    /** @type {Map<string, string>} lots not moved (the market takes them off) */
+    const failed = new Map();
+    let from = coins;
+    for (const [k, l] of list.entries()) {
+      onStep(`Moving lot ${k + 1} of ${list.length} to an output of its own…`);
+      let moved;
+      try { moved = await this.instantMove(assetId, l.amount, from, rate, onStep, { feeFromInputs: k > 0 }); } catch (err) {
+        // what moved stays listed (signed below); the lots not moved yet are taken off by the market with the error
+        if (k === 0) throw err;
+        for (const r of list.slice(k)) failed.set(r.offerId, `Not listed: ${String(err?.message || err).slice(0, 160)}`);
+        break;
+      }
+      this.syncOwnUnconfirmed(store, [moved.txid]);
+      store.set(l.offerId, { role: 'seller', assetId, amount: String(l.amount), priceSats: String(l.priceSats), market: String(market), token: l.token, at, stage: 'moving', lotGroup: group, lotNo: k, lots: list.length, feeRate: rate, moveTxid: moved.txid, moveHex: moved.txHex || undefined, coin: `${moved.txid}:${SEAL_OUTPUT}` });
+      this.reserve([...this.reserved, `${moved.txid}:${SEAL_OUTPUT}`]);
+      await this.save();
+      // the rest of the tokens: on this move's change, for the next lot
+      from = [{ outpoint: `${moved.txid}:${SEAL_OUTPUT + 1}` }];
+      // the engine learns its new outputs (it already has the transaction: no full scan)
+      try { await this.wallet.sync(online); } catch { /* the next move syncs again */ }
+    }
+    // the engine takes in its own moves (from the transfer server), then signs every lot
+    onStep('Signing every lot…');
+    const views = [];
+    for (let pass = 0; pass < 3; pass++) {
+      try { await this.wallet.refresh(online, null, [], true); } catch { /* signed below if it can */ }
+      for (const l of list) {
+        const e = store.get(l.offerId);
+        if (e?.stage !== 'moving') continue;
+        try { await this.presignLot(l.offerId, e, store); } catch { /* not yet: next pass, or the next refresh */ }
+      }
+      if (list.every((l) => store.get(l.offerId)?.stage !== 'moving')) break;
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+    for (const l of list) {
+      const e = store.get(l.offerId);
+      views.push(failed.has(l.offerId) ? { offerId: l.offerId, stage: 'failed', waiting: failed.get(l.offerId) } : e ? this.instantView(l.offerId, e) : { offerId: l.offerId, stage: 'missing' });
+    }
+    await this.save();
+    return { stage: views.every((v) => v.stage === 'ready') ? 'ready' : 'moving', txid: store.get(list[0].offerId)?.moveTxid || null, lots: views };
+  }
+  /** Sign a moved listing on its own output (`e.coin`), confirmed or not: the engine checks it holds exactly the lot. */
+  async presignLot(offerId, e, store) {
+    const online = this.requireOnline();
+    const payout = await this.payoutScript();
+    const r = plain(await this.wallet.presignSale(online, e.assetId, BigInt(e.amount), String(e.coin), payout, BigInt(e.priceSats), 1));
+    const next = { ...e, moveHex: e.moveHex, stage: 'ready', waiting: '', payoutPublic: payout === this.payoutHex, coin: String(r.sellerOutpoint), psbt: String(r.psbt), consignment: b64(Uint8Array.from(r.consignment)), templateTxid: String(r.templateTxid), sellerSats: String(r.sellerSats), at: Date.now() };
+    store.set(offerId, next);
+    this.reserve([...new Set([...this.reserved, next.coin])]);
+    await this.save();
+    return this.instantView(offerId, next);
   }
   /**
    * Lots split step by step: move the next queued lot of `group` to an output of its own (one transaction, the same
@@ -1164,6 +1266,7 @@ export class LiteWallet {
    */
   async instantProgress(store, all) {
     const changes = [];
+    this.syncOwnUnconfirmed(store);
     // lots split step by step: move the next lot of each group whose tokens are free
     const groups = new Set(Object.values(all).filter((e) => e?.role === 'seller' && e.stage === 'queued' && e.lotGroup).map((e) => e.lotGroup));
     for (const g of groups) {
@@ -1238,6 +1341,7 @@ export class LiteWallet {
   }
   /** Seller: cancel an Instant listing. A signed one is moved to a new output (an on-chain transaction). */
   async instantCancel({ offerId, feeRate, sellerOutpoint = '', offer = null }, store) {
+    this.syncOwnUnconfirmed(store);
     let e = store.get(String(offerId));
     if ((!e || e.role !== 'seller') && sellerOutpoint) {
       // a listing made in another copy of this wallet: this one has no record of it, only the market's word for its

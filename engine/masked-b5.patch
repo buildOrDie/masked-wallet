@@ -11,10 +11,10 @@ index 884d686..e2896b5 100644
  rgb-strict-encoding = { version = "=1.0.5", default-features = false, features = [
      "bitcoin",
 diff --git a/bindings/wasm/src/lib.rs b/bindings/wasm/src/lib.rs
-index 51b6efd..832b59b 100644
+index 51b6efd..f014856 100644
 --- a/bindings/wasm/src/lib.rs
 +++ b/bindings/wasm/src/lib.rs
-@@ -635,6 +635,166 @@ impl WasmWallet {
+@@ -635,6 +635,175 @@ impl WasmWallet {
          to_js(&result)
      }
  
@@ -108,6 +108,15 @@ index 51b6efd..832b59b 100644
 +        Ok(())
 +    }
 +
++    /// Transactions this wallet made itself (listing and lot moves, `["txid"]`) whose outputs may be spent or listed
++    /// before they confirm.
++    #[wasm_bindgen(js_name = "setOwnUnconfirmed")]
++    pub fn set_own_unconfirmed(&self, txids_js: JsValue) -> Result<(), JsValue> {
++        let list: Vec<String> = serde_wasm_bindgen::from_value(txids_js).map_err(|e| JsValue::from_str(&format!("Invalid txids: {e}")))?;
++        self.inner.borrow_mut().set_own_unconfirmed(list);
++        Ok(())
++    }
++
 +    /// A pre-signed listing was bought: mark its output spent (the caller checked it on chain).
 +    #[wasm_bindgen(js_name = "markOutpointSpent")]
 +    pub fn mark_outpoint_spent(&self, outpoint: &str) -> Result<bool, JsValue> {
@@ -181,7 +190,7 @@ index 51b6efd..832b59b 100644
      /// Send RGB assets (end): broadcast a signed PSBT. Returns an OperationResult JS object.
      #[wasm_bindgen(js_name = "sendEnd")]
      pub async fn send_end(
-@@ -1074,6 +1234,22 @@ impl WasmWallet {
+@@ -1074,6 +1243,22 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -204,7 +213,7 @@ index 51b6efd..832b59b 100644
      /// Check if the wallet needs a backup. Returns true if modified since last backup.
      #[wasm_bindgen(js_name = "backupInfo")]
      pub fn backup_info(&self) -> Result<bool, JsValue> {
-@@ -1217,7 +1393,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
+@@ -1217,7 +1402,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
  /// Works before the witness transaction is broadcast. Takes the raw consignment
  /// bytes (strict-encoded, not base64), the witness transaction ID, and the Bitcoin network.
  ///
@@ -214,7 +223,7 @@ index 51b6efd..832b59b 100644
  #[wasm_bindgen(js_name = "validateConsignmentOffchain")]
  pub fn validate_consignment_offchain(
      consignment_bytes: &[u8],
-@@ -1235,3 +1412,43 @@ pub fn validate_consignment_offchain(
+@@ -1235,3 +1421,43 @@ pub fn validate_consignment_offchain(
      .map_err(|e| JsValue::from_str(&e.to_string()))?;
      to_js(&result)
  }
@@ -928,10 +937,10 @@ index c5c45b2..46cf640 100644
  pub(crate) mod offline;
  #[cfg(feature = "esplora")]
 diff --git a/src/wallet/offline.rs b/src/wallet/offline.rs
-index a3a9f46..98d3cd1 100644
+index a3a9f46..0526273 100644
 --- a/src/wallet/offline.rs
 +++ b/src/wallet/offline.rs
-@@ -1312,9 +1312,46 @@ pub struct Wallet {
+@@ -1312,9 +1312,49 @@ pub struct Wallet {
      pub(crate) rgb_stock: std::rc::Rc<std::cell::RefCell<Option<crate::utils::MemStock>>>,
      pub(crate) vss_client: Option<super::vss::VssBackupClient>,
      pub(crate) last_vss_backup_error: std::cell::RefCell<Option<String>>,
@@ -939,6 +948,9 @@ index a3a9f46..98d3cd1 100644
 +    pub(crate) reserved_outpoints: HashSet<Outpoint>,
 +    /// Witness invoices of pre-signed purchases (MASKED): their seal blinding isn't derived.
 +    pub(crate) presigned_receives: HashSet<String>,
++    /// MASKED: transactions this wallet made and broadcast itself (listing and lot moves) whose outputs may be spent
++    /// or listed before they confirm. See `Wallet::own_unconfirmed_ok`.
++    pub(crate) own_unconfirmed: HashSet<String>,
  }
  
  impl Wallet {
@@ -978,7 +990,7 @@ index a3a9f46..98d3cd1 100644
      /// Create a wallet and restore its latest durable IndexedDB snapshot, if one exists.
      ///
      /// The returned wallet is ready for use only after the IndexedDB read and snapshot
-@@ -1325,6 +1362,31 @@ impl Wallet {
+@@ -1325,6 +1365,31 @@ impl Wallet {
          let snapshot = super::idb_store::load_snapshot(&wallet.idb_key())
              .await
              .map_err(|details| Error::Persistence { details })?;
@@ -1010,16 +1022,17 @@ index a3a9f46..98d3cd1 100644
          if let Some(snapshot) = snapshot {
              wallet.idb_loaded = Some((snapshot.writer, snapshot.sequence));
              wallet
-@@ -1475,6 +1537,8 @@ impl Wallet {
+@@ -1475,6 +1540,9 @@ impl Wallet {
              },
              vss_client: None,
              last_vss_backup_error: std::cell::RefCell::new(None),
 +            reserved_outpoints: HashSet::new(),
 +            presigned_receives: HashSet::new(),
++            own_unconfirmed: HashSet::new(),
          })
      }
  
-@@ -1690,8 +1754,10 @@ impl Wallet {
+@@ -1690,8 +1758,10 @@ impl Wallet {
              None => rgb_allocations.as_deref().unwrap(),
          };
  
@@ -1031,7 +1044,7 @@ index a3a9f46..98d3cd1 100644
          allocatable.sort_by_key(|t| t.rgb_allocations.len() + t.pending_blinded as usize);
          match allocatable.first() {
              Some(mut selected) => {
-@@ -2618,7 +2684,7 @@ impl Wallet {
+@@ -2618,7 +2688,7 @@ impl Wallet {
          Ok(psbt.to_string())
      }
  
@@ -1040,17 +1053,18 @@ index a3a9f46..98d3cd1 100644
          let sign_options = sign_options.unwrap_or_default();
          let [colored, vanilla] = &self.signers;
          self.bdk_wallet
-@@ -4215,6 +4281,8 @@ pub(crate) mod address_reuse_tests {
+@@ -4215,6 +4285,9 @@ pub(crate) mod address_reuse_tests {
              rgb_stock: std::rc::Rc::new(std::cell::RefCell::new(None)),
              vss_client: None,
              last_vss_backup_error: std::cell::RefCell::new(None),
 +            reserved_outpoints: HashSet::new(),
 +            presigned_receives: HashSet::new(),
++            own_unconfirmed: HashSet::new(),
          }
      }
  
 diff --git a/src/wallet/online.rs b/src/wallet/online.rs
-index ca96b4a..3e562fc 100644
+index ca96b4a..abd3a20 100644
 --- a/src/wallet/online.rs
 +++ b/src/wallet/online.rs
 @@ -791,8 +791,9 @@ pub(crate) struct ConsignmentPayment<'c> {
@@ -1083,7 +1097,26 @@ index ca96b4a..3e562fc 100644
                              continue;
                          }
                          let vout = seal.vout.into_u32();
-@@ -2441,6 +2442,17 @@ impl Wallet {
+@@ -1778,11 +1779,16 @@ impl Wallet {
+         let mut assignments_collected = AssignmentsCollection::default();
+         let mut input_btc_amt = 0;
+         for unspent in mut_unspents {
+-            // get spendable allocations for the required asset
++            // get spendable allocations for the required asset (MASKED: on an output of this wallet's own unconfirmed
++            // move, those waiting only for confirmations too)
++            let own_move = self.own_unconfirmed_ok(&unspent.utxo.txid.to_string());
+             let asset_allocations: Vec<LocalRgbAllocation> = unspent
+                 .rgb_allocations
+                 .into_iter()
+-                .filter(|a| a.asset_id == Some(asset_id.clone()) && a.status.settled())
++                .filter(|a| {
++                    a.asset_id == Some(asset_id.clone())
++                        && (a.status.settled() || (own_move && a.status.waiting_confirmations() && !a.txo_spent))
++                })
+                 .collect();
+ 
+             // skip UTXOs with no allocations
+@@ -2441,6 +2447,17 @@ impl Wallet {
      pub(crate) fn get_input_unspents(
          &self,
          unspents: &[LocalUnspent],
@@ -1101,7 +1134,36 @@ index ca96b4a..3e562fc 100644
      ) -> Result<Vec<LocalUnspent>, Error> {
          let mut input_unspents = unspents.to_vec();
          // consider the following UTXOs unspendable:
-@@ -2815,11 +2827,11 @@ impl Wallet {
+@@ -2449,14 +2466,24 @@ impl Wallet {
+         // - pending incoming witness
+         // - pending incoming blinded
+         // - inexistent
++        // MASKED: an output of this wallet's own unconfirmed move (see `own_unconfirmed_ok`) is spendable once its
++        // transfer waits only for confirmations
++        let own: HashSet<String> = input_unspents
++            .iter()
++            .map(|u| u.utxo.txid.to_string())
++            .filter(|t| self.own_unconfirmed_ok(t))
++            .collect();
+         input_unspents.retain(|u| {
+-            !(u.rgb_allocations
+-                .iter()
+-                .any(|a| a.incoming && a.status.pending()))
++            let own_move = own.contains(&u.utxo.txid.to_string())
++                && u.rgb_allocations.iter().all(|a| !a.status.failed() && (a.status.settled() || a.status.waiting_confirmations()));
++            (own_move
++                || (!(u.rgb_allocations
++                    .iter()
++                    .any(|a| a.incoming && a.status.pending()))
++                    && !u.utxo.pending_witness))
+                 && !(u.rgb_allocations.iter().any(|a| {
+                     !a.incoming && (a.status.initiated() || a.status.waiting_counterparty())
+                 }))
+-                && !u.utxo.pending_witness
+                 && u.pending_blinded == 0
+                 && u.utxo.exists
+         });
+@@ -2815,11 +2842,11 @@ impl Wallet {
              if internal_unspents_outpoints.contains(&(txid.clone(), vout)) {
                  continue;
              }
@@ -1118,7 +1180,7 @@ index ca96b4a..3e562fc 100644
              db_txo.spent = ActiveValue::Set(true);
              self.database.update_txo(db_txo)?;
          }
-@@ -4723,6 +4735,22 @@ impl Wallet {
+@@ -4723,6 +4750,22 @@ impl Wallet {
                  &data.consignment_hash,
              ) {
                  Ok(bytes) => {
@@ -1141,7 +1203,7 @@ index ca96b4a..3e562fc 100644
                      self.received_consignments
                          .insert(recipient_id.clone(), bytes);
                  }
-@@ -4871,7 +4899,14 @@ impl Wallet {
+@@ -4871,7 +4914,14 @@ impl Wallet {
                  .await;
          };
          let blinding = derive_shared(&ed25519_from_seed(&seed), &sender_vk)?.seal_blinding;
@@ -1157,7 +1219,7 @@ index ca96b4a..3e562fc 100644
          let spent = Self::known_spent_opouts(&consignment);
          let mut payments: Vec<_> = self.find_payments(&consignment, &matcher, &spent).collect();
          if payments.len() != 1 {
-@@ -5805,6 +5840,8 @@ impl Wallet {
+@@ -5805,6 +5855,8 @@ impl Wallet {
                      details: s!("consignment not found in memory"),
                  })?
                  .clone();
@@ -1166,7 +1228,7 @@ index ca96b4a..3e562fc 100644
              let consignment =
                  RgbTransfer::load(&consignment_bytes[..]).map_err(InternalError::from)?;
  
-@@ -7053,6 +7090,10 @@ impl Wallet {
+@@ -7053,6 +7105,10 @@ impl Wallet {
          batch: bool,
      ) -> Result<(), Error> {
          for recipient in recipients {
@@ -1177,7 +1239,7 @@ index ca96b4a..3e562fc 100644
              let recipient_id = &recipient.recipient_id;
              let recipient_vk = verifying_key_from_bytes(&recipient.public_key)?;
              let derived = derive_shared(sender_sk, &recipient_vk)?;
-@@ -12074,3 +12115,628 @@ mod bfa_tests {
+@@ -12074,3 +12130,682 @@ mod bfa_tests {
          assert!(options(&format!(r#","evm_chains":{{"mainnet":{chain}}}"#)).is_err());
      }
  }
@@ -1569,8 +1631,13 @@ index ca96b4a..3e562fc 100644
 +            .find(|u| u.utxo.outpoint() == op)
 +            .ok_or(Error::Internal { details: s!("that output can't be listed: it isn't a settled RGB output of this wallet") })?;
 +        // the database's view: one settled allocation of this asset, nothing pending
++        // (MASKED: on an output of this wallet's own unconfirmed move, an allocation waiting only for confirmations)
++        let own_move = self.own_unconfirmed_ok(&op.txid);
++        let ready = |a: &LocalRgbAllocation| {
++            (a.settled() && !a.future()) || (own_move && !a.txo_spent && a.status.waiting_confirmations())
++        };
 +        if unspent.rgb_allocations.is_empty()
-+            || unspent.rgb_allocations.iter().any(|a| a.asset_id.as_deref() != Some(asset_id.as_str()) || !a.settled() || a.future())
++            || unspent.rgb_allocations.iter().any(|a| a.asset_id.as_deref() != Some(asset_id.as_str()) || !ready(a))
 +        {
 +            return Err(Error::Internal { details: s!("that output also holds other assets or pending transfers: move the tokens to their own output first") });
 +        }
@@ -1685,6 +1752,27 @@ index ca96b4a..3e562fc 100644
 +}
 +
 +impl Wallet {
++    /// MASKED: transactions this wallet made itself (its listing and lot moves) whose outputs may be spent or listed
++    /// before they confirm, so a listing in lots is moved and signed in one go. Only a transaction this wallet
++    /// knows, with an input of its own, counts (`own_unconfirmed_ok`); tokens received from others still wait for
++    /// their confirmations. The list lives in memory; MASKED sets it when it opens the wallet and as it moves.
++    pub fn set_own_unconfirmed(&mut self, txids: Vec<String>) {
++        self.own_unconfirmed = txids.into_iter().map(|t| t.trim().to_lowercase()).collect();
++    }
++
++    /// Is `txid` one of `own_unconfirmed`, a transaction this wallet has, spending at least one of its own outputs?
++    pub(crate) fn own_unconfirmed_ok(&self, txid: &str) -> bool {
++        if self.own_unconfirmed.is_empty() || !self.own_unconfirmed.contains(&txid.to_lowercase()) {
++            return false;
++        }
++        let Ok(id) = bdk_wallet::bitcoin::Txid::from_str(txid) else { return false };
++        let Some(wtx) = self.bdk_wallet.get_tx(id) else { return false };
++        let graph = self.bdk_wallet.tx_graph();
++        wtx.tx_node.tx.input.iter().any(|i| {
++            graph.get_txout(i.previous_output).is_some_and(|o| self.bdk_wallet.is_mine(o.script_pubkey.clone()))
++        })
++    }
++
 +    /// MASKED: the witness invoices of pre-signed purchases this wallet made (see `ReceiveMatcher::Witness`).
 +    /// The list lives in memory; MASKED sets it every time it opens the wallet.
 +    pub fn set_presigned_receives(&mut self, recipient_ids: Vec<String>) {
@@ -1764,6 +1852,34 @@ index ca96b4a..3e562fc 100644
 +        let sig = w.iter().next().unwrap();
 +        assert_eq!(sig.len(), 65);
 +        assert_eq!(sig[64], TapSighashType::SinglePlusAnyoneCanPay as u8);
++    }
++
++    /// A listing in lots moves and signs every lot at once: outputs of this wallet's own unconfirmed moves count as
++    /// spendable, only for transactions it named, has, and funded with an output of its own.
++    #[test]
++    fn own_unconfirmed_moves_only() {
++        let mut w = make_test_wallet_with_keys(crate::keys::generate_keys(BitcoinNetwork::Regtest), false);
++        let mine = w._get_new_address(KeychainKind::External).unwrap().script_pubkey();
++        let fund = funding(mine.clone(), 20_000, 0xab);
++        // a move: spends the wallet's own output
++        let mv = BdkTransaction {
++            version: Version::TWO,
++            lock_time: LockTime::ZERO,
++            input: vec![TxIn { previous_output: bdk_wallet::bitcoin::OutPoint { txid: fund.compute_txid(), vout: 1 }, script_sig: ScriptBuf::new(), sequence: Sequence::ENABLE_RBF_NO_LOCKTIME, witness: Witness::new() }],
++            output: vec![TxOut { value: Amount::from_sat(19_000), script_pubkey: mine.clone() }],
++        };
++        // someone else's payment to this wallet: spends nothing of it
++        let paid = funding(mine, 7_000, 0xcd);
++        w.bdk_wallet.apply_unconfirmed_txs([(fund.clone(), 1), (mv.clone(), 2), (paid.clone(), 3)]);
++        let (m, p) = (mv.compute_txid().to_string(), paid.compute_txid().to_string());
++
++        assert!(!w.own_unconfirmed_ok(&m), "not named: waits for its confirmations as before");
++        w.set_own_unconfirmed(vec![m.to_uppercase(), p.clone(), "ee".repeat(32)]);
++        assert!(w.own_unconfirmed_ok(&m), "named, known, funded by the wallet");
++        assert!(!w.own_unconfirmed_ok(&p), "a payment from someone else never counts, even if named");
++        assert!(!w.own_unconfirmed_ok(&"ee".repeat(32)), "a transaction the wallet doesn't have never counts");
++        w.set_own_unconfirmed(vec![]);
++        assert!(!w.own_unconfirmed_ok(&m));
 +    }
 +
 +    /// The buyer's wallet signs its coin only with the seller's transaction in hand (BDK wants the previous

@@ -65,6 +65,7 @@ To check a download is genuine, compare its SHA-256 with the one on the release 
 
 ## What's new
 
+- **2.29.25**: **lots on sale at once**: one approval moves and signs every lot, so they're all for sale even with MASKED closed right after.
 - **2.29.24**: lots work with tokens from swaps too; RGB pauses token moves while another copy of the wallet is newer, and offers to load its backup.
 - **2.29.23**: **sell in lots**: split a sale into up to 10 Instant listings in one transaction; buyers take as many as they want, the rest stays listed.
 - **2.29.22**: buy several Instant listings at once (a sweep).

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Build MASKED's RGB engine: UTEXO's rgb-lib-wasm v1.0.0-beta.4 (RGB 0.11.2, transfer server protocol 1.0) plus
-# masked-b4.patch: peer-to-peer swaps (colorSwap, newSwapPsbt, verifySwapPsbt, …), pre-signed listings
-# (presignSale, presignedBuyPsbt, setPresignedReceives, …), transfers from RGB 0.11.1 wallets (old-format
+# masked-b5.patch: peer-to-peer swaps (colorSwap, newSwapPsbt, verifySwapPsbt, …), pre-signed listings
+# (presignSale, presignedBuyPsbt, setPresignedReceives, …), lots signed at once (setOwnUnconfirmed: outputs of
+# this wallet's own unconfirmed moves can be moved and listed), transfers from RGB 0.11.1 wallets (old-format
 # consignments converted on arrival) and the upgrade of wallets saved by MASKED's previous engine
 # (migrateLegacyWallet). Output: vendor/rgb-lib-wasm/, which `npm run build` uses instead of the npm package.
 #
@@ -25,7 +26,7 @@ fi
 rm -rf "$work"; mkdir -p "$(dirname "$work")"
 git clone --quiet --depth 1 --branch "$tag" https://github.com/UTEXO-Protocol/rgb-lib-wasm.git "$work"
 [[ "$(git -C "$work" rev-parse HEAD)" == "$commit" ]] || { echo "Upstream $tag is not $commit any more. Stop."; exit 1; }
-git -C "$work" apply "$here/masked-b4.patch"
+git -C "$work" apply "$here/masked-b5.patch"
 # swaps, listings, the wallet upgrade and the engine's own tests, natively
 (cd "$work" && cargo test --locked --lib -q)
 (cd "$work/bindings/wasm" && wasm-pack build --release --target web --out-dir pkg)
@@ -35,7 +36,7 @@ cp "$work/bindings/wasm/pkg/"rgb_lib_wasm_bindings* "$out/"
 # the bindings import small JS helpers from snippets/ (beta.4: a no-store fetch)
 [[ -d "$work/bindings/wasm/pkg/snippets" ]] && cp -R "$work/bindings/wasm/pkg/snippets" "$out/"
 node -e "require('fs').writeFileSync('$out/package.json', JSON.stringify({name:'@utexo/rgb-lib-wasm',version:'1.0.0-beta.4+masked',type:'module',main:'rgb_lib_wasm_bindings.js',types:'rgb_lib_wasm_bindings.d.ts'},null,2))"
-for f in newSwapPsbt presignSale migrateLegacyWallet setPresignedReceives; do
+for f in newSwapPsbt presignSale migrateLegacyWallet setPresignedReceives setOwnUnconfirmed; do
   grep -q "$f" "$out/rgb_lib_wasm_bindings.d.ts" || { echo "The built engine has no $f. Stop."; exit 1; }
 done
 shasum -a 256 "$out/rgb_lib_wasm_bindings_bg.wasm"

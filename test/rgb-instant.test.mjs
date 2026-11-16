@@ -667,3 +667,66 @@ test('receive: a blind invoice is never made on an output the chain shows spent 
   assert.deepEqual(failed, [1], 'the invoice on the spent output is cancelled');
   assert.deepEqual(s.log.filter((x) => x[0] === 'spent'), [['spent', utxos[0]]]);
 });
+
+test('lots all at once: each lot moves in a chain (the next from the previous change), then every lot is signed in the same approval', async () => {
+  const chain = fakeChain();
+  const from = `${T('b')}:0`, fee = `${T('c')}:2`;
+  chain.outs[from] = { sats: 1000, script: '5120rgb', tx: 'aa' };
+  chain.outs[fee] = { sats: 20000, script: '5120btc', tx: 'bb' };
+  chain.outs[`${T('5')}:2`] = { sats: 18000, script: '5120own', tx: 'cc' }; // lot 1's move: the rest of the tokens and sats
+  chain.outs[`${T('8')}:2`] = { sats: 16000, script: '5120own', tx: 'dd' };
+  const s = wallet({ name: 'seller', lib: fakeLib(), chain, rgb: [unspent('b', 0, [tok(1500)])], coins: [{ outpoint: fee, txout: { value: 20000 }, is_spent: false }] });
+  const moves = [T('5'), T('8'), T('9')];
+  s.w.w.sendEnd = async () => { const txid = moves.shift(); s.log.push(['sendEnd', txid]); return { txid }; };
+  let own = [];
+  s.w.w.setOwnUnconfirmed = (l) => { own = [...l]; };
+  s.w.w.refresh = async () => { s.log.push(['refresh']); };
+  const lots = ['a', 'b', 'c'].map((c) => ({ offerId: `sw${c.repeat(12)}`, token: 'ab'.repeat(24), amount: '500', priceSats: '5000' }));
+  const r = await s.w.instantListLots({ assetId: ASSET, lots, feeRate: 2, market: 'https://maskedwallet.com' }, s.store);
+
+  const swaps = s.log.filter((x) => x[0] === 'colorSwap');
+  assert.equal(swaps.length, 3, 'one move per lot, all now');
+  assert.deepEqual(swaps[0][1], [from, fee], 'lot 1 from the tokens\' output, its fee from a bitcoin coin');
+  assert.deepEqual(swaps[1][1], [`${T('5')}:2`], 'lot 2 from lot 1\'s change, which pays its own fee: no block to wait for');
+  assert.deepEqual(swaps[2][1], [`${T('8')}:2`]);
+  assert.deepEqual(own.sort(), [T('5'), T('8'), T('9')].sort(), 'the engine is told these unconfirmed moves are this wallet\'s own');
+  assert.ok(s.log.some((x) => x[0] === 'refresh'), 'it takes in its own moves before signing');
+  assert.deepEqual(s.log.filter((x) => x[0] === 'presign').map((x) => x[1]), [`${T('5')}:1`, `${T('8')}:1`, `${T('9')}:1`], 'every lot signed on its own output');
+  assert.equal(r.stage, 'ready');
+  assert.deepEqual(r.lots.map((v) => v.stage), ['ready', 'ready', 'ready']);
+  assert.deepEqual(r.lots.map((v) => v.sellerOutpoint), [`${T('5')}:1`, `${T('8')}:1`, `${T('9')}:1`]);
+  assert.deepEqual(s.log.findLast((x) => x[0] === 'reserve')[1], [`${T('5')}:1`, `${T('8')}:1`, `${T('9')}:1`].sort(), 'every lot\'s output is promised');
+});
+
+test('lots all at once: a lot whose move fails is reported, the lots already moved stay listed', async () => {
+  const chain = fakeChain();
+  const from = `${T('b')}:0`, fee = `${T('c')}:2`;
+  chain.outs[from] = { sats: 1000, script: '5120rgb', tx: 'aa' };
+  chain.outs[fee] = { sats: 20000, script: '5120btc', tx: 'bb' };
+  chain.outs[`${T('5')}:2`] = { sats: 18000, script: '5120own', tx: 'cc' };
+  const s = wallet({ name: 'seller', lib: fakeLib(), chain, rgb: [unspent('b', 0, [tok(1000)])], coins: [{ outpoint: fee, txout: { value: 20000 }, is_spent: false }] });
+  let n = 0;
+  const color = s.w.w.colorSwap;
+  s.w.w.colorSwap = async (...a) => { if (++n === 2) throw new Error('mempool chain too long'); return color(...a); };
+  s.w.w.setOwnUnconfirmed = () => {};
+  const lots = ['a', 'b'].map((c) => ({ offerId: `sw${c.repeat(12)}`, token: 'ab'.repeat(24), amount: '500', priceSats: '5000' }));
+  const r = await s.w.instantListLots({ assetId: ASSET, lots, feeRate: 2 }, s.store);
+  assert.deepEqual(r.lots.map((v) => v.stage), ['ready', 'failed']);
+  assert.match(r.lots[1].waiting, /Not listed: mempool chain too long/);
+  assert.ok(!s.mem[lots[1].offerId], 'nothing kept for the lot that never moved');
+});
+
+test('a single listing that needs a move is signed right after it, when the engine lists its own unconfirmed moves', async () => {
+  const chain = fakeChain();
+  const from = `${T('b')}:0`, fee = `${T('c')}:2`;
+  chain.outs[from] = { sats: 1000, script: '5120rgb', tx: 'aa' };
+  chain.outs[fee] = { sats: 5000, script: '5120btc', tx: 'bb' };
+  const s = wallet({ name: 'seller', lib: fakeLib(), chain, rgb: [unspent('b', 0, [tok(800)])], coins: [{ outpoint: fee, txout: { value: 5000 }, is_spent: false }] });
+  let own = [];
+  s.w.w.setOwnUnconfirmed = (l) => { own = [...l]; };
+  s.w.w.refresh = async () => {};
+  const v = await s.w.instantList({ offerId: 'sw0123456789ab', assetId: ASSET, amount: '500', priceSats: '20000', feeRate: 2 }, s.store);
+  assert.equal(v.stage, 'ready', 'on sale at once, no block to wait for');
+  assert.equal(v.sellerOutpoint, `${T('5')}:1`);
+  assert.ok(own.includes(T('5')), 'the move is named as this wallet\'s own');
+});

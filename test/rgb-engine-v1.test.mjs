@@ -1,4 +1,4 @@
-// MASKED on the RGB 0.11.2 engine (UTEXO rgb-lib-wasm 1.0.0-beta.4 + engine/masked-b4.patch): the calls whose shape
+// MASKED on the RGB 0.11.2 engine (UTEXO rgb-lib-wasm 1.0.0-beta.4 + engine/masked-b5.patch): the calls whose shape
 // changed, the upgrade of a wallet the previous engine saved, and Instant purchases posted to the buyer's own
 // protocol 1.0 invoice. The engine itself is a stand-in; its Rust side is tested in the patch.
 import test from 'node:test';

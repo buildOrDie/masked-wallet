@@ -2,7 +2,7 @@
 
 MASKED's RGB engine is UTEXO's [rgb-lib-wasm](https://github.com/UTEXO-Protocol/rgb-lib-wasm) `v1.0.0-beta.4` (MIT):
 RGB 0.11.2 and transfer server protocol 1.0 (the protocol UniSat 1.8 and current rgb-lib wallets use). On top of it,
-[`masked-b4.patch`](masked-b4.patch) adds:
+[`masked-b5.patch`](masked-b5.patch) adds:
 
 **Peer-to-peer swaps and Instant (pre-signed) listings**
 
@@ -16,6 +16,7 @@ RGB 0.11.2 and transfer server protocol 1.0 (the protocol UniSat 1.8 and current
 | `wallet.presignSale(online, assetId, amount, outpoint, payoutScript, priceSats, minConf)` | Instant listing: a template (input 0 a placeholder for the buyer's coin, input 1 the seller's output; outputs 0 OP_RETURN, 1 payout, 2 the buyer's 330-sat seal), input 1 signed SIGHASH_SINGLE\|ANYONECANPAY. Refuses an output holding anything but exactly `amount` of this asset |
 | `wallet.setReservedOutpoints(list)`, `wallet.markOutpointSpent(outpoint)` | Outputs promised to listings are never used for sends, change or receives; a sold one leaves the balance |
 | `WasmWallet.presignedListingInfo(psbt)`, `presignedBuyPsbt(template, inputs, sealScript, change)`, `checkPresignedFinal(template, txHex, sealScript)`, `completePresignedConsignment(bytes, templateTxid, txHex)` | The buyer's side: check the listing, build and check its transaction, and the consignment with the final transaction |
+| `wallet.setOwnUnconfirmed(txids)` | Lots signed at once: outputs of these transactions (this wallet's own listing and lot moves, still unconfirmed) can be moved, listed and cancelled before they confirm. Only a transaction the wallet has and funded with an output of its own counts; tokens received from others still wait for their confirmations. A buyer of such a listing gets the tokens once the moves confirm (the engine waits for an unconfirmed history by itself) |
 | `wallet.setPresignedReceives(recipientIds)` | The buyer posts a bought listing's consignment to its own protocol 1.0 invoice; the seller made the seal before the buyer was known, so these invoices match the seal without the derived blinding |
 
 `sendEnd` also broadcasts a transaction with an input that isn't the wallet's (the other side of a swap).
