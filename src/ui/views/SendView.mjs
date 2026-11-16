@@ -73,6 +73,7 @@ export class SendView extends View {
         ${rowKV('Network fee', `${fmtBtc(b.fee)} ${unit}`)}
         ${rowKV('Total', `<b>${fmtBtc(b.amount + b.fee)} ${unit}</b>`)}
       </div>
+      ${b.parts > 1 ? `<p class="info">Sent as ${b.parts} coins of about ${fmtBtc(Math.floor(b.amount / b.parts))} ${unit}, so several RGB buys in a row each have one of their own.</p>` : ''}
       ${b.toSelf ? '' : this.guardNotes(b)}
       ${this.statusLine('send')}
       ${offline ? `<p class="info warn">You're offline. Sign it now; MASKED sends it the moment this device or the receiver gets online.</p>` : ''}

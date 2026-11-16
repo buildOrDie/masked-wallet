@@ -17,6 +17,11 @@ export const RGB_FUND_BTC = '0.0003';
 /** Signet: below this much test BTC (sats) in RGB, MASKED tops it up from Public by itself (RGB_FUND_SATS). */
 export const RGB_AUTO_FUND_BELOW = 10_000;
 export const RGB_FUND_SATS = 30_000;
+/**
+ * Bitcoin added to the RGB balance goes in as a few coins, not one: every RGB buy or move spends a coin of its own,
+ * so several buys in a row don't wait for the first one's change (or get refused for reusing its coin).
+ */
+export const rgbFundParts = (sats) => Math.max(1, Math.min(4, Math.floor(Number(sats) / 5000)));
 
 /**
  * A readable message for an RGB failure. The engine often throws plain strings, not Error objects.
@@ -556,7 +561,7 @@ export class WalletRgb {
     this.fundedAt = now;
     try {
       // a Public wallet on another network refuses the RGB address here, so nothing is sent across networks
-      const b = await app.builder.send({ from: 'public', to: this.data.address, amount: RGB_FUND_SATS, rate: app.feeRate() });
+      const b = await app.builder.send({ from: 'public', to: this.data.address, amount: RGB_FUND_SATS, rate: app.feeRate(), parts: rgbFundParts(RGB_FUND_SATS) });
       await app.broadcast(b.hex);
       await app.afterBroadcast?.(b.spent, [b.txid]);
       app.toast?.(`Added ${RGB_FUND_SATS.toLocaleString('en-US')} test sats to RGB from your Public balance, for network fees. Ready after one block.`, 6000);

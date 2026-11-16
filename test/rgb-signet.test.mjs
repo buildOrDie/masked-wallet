@@ -242,7 +242,7 @@ test('test networks: RGB tops its fee bitcoin up from Public by itself; mainnet 
   Object.defineProperty(w, 'profile', { get: () => ({ id }) });
   w.data = { address: 'tb1prgb', btc: { vanilla: { settled: 2000, future: 2000 }, colored: { settled: 0, future: 0 } } };
   assert.equal(await w.autoFund(), true);
-  assert.deepEqual(sent, [{ from: 'public', to: 'tb1prgb', amount: RGB_FUND_SATS, rate: 1 }]);
+  assert.deepEqual(sent, [{ from: 'public', to: 'tb1prgb', amount: RGB_FUND_SATS, rate: 1, parts: 4 }], 'in a few coins');
   assert.match(toasts[0], /from your Public balance/);
   assert.equal(await w.autoFund(), false, 'once in 20 minutes: the top-up needs its block');
   w.fundedAt = 0; w.data.btc.vanilla = { settled: 50_000, future: 50_000 };

@@ -560,7 +560,7 @@ test('Buying with too little in the RGB balance: the purchase screen offers to a
   app.broadcast = async () => {}; app.afterBroadcast = async () => {};
   app.approvals.active = { method: 'rgbInstantBuy', prep: { price: 20000, topUp: { sats: 21000, have: 0 } } };
   await app.approvals.topUp();
-  assert.deepEqual(sends, [{ from: 'public', to: 'tb1qrgbfunding', amount: 21000, rate: app.feeRate() }]);
+  assert.deepEqual(sends, [{ from: 'public', to: 'tb1qrgbfunding', amount: 21000, rate: app.feeRate(), parts: 4 }], 'in a few coins, so several buys in a row each have one');
   assert.equal(app.approvals.active.prep.topUp.sent, 'ef'.repeat(32));
   await app.approvals.topUp();
   assert.equal(sends.length, 1, 'not twice');

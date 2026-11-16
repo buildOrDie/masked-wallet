@@ -27,6 +27,9 @@ export class SilentOutputs {
   }
 }
 
+/** The smallest output a split payment makes (see `send`'s `parts`). */
+export const SPLIT_MIN = 5000;
+
 export class TxBuilder {
   /** @param {import('../app/MaskedApp.mjs').MaskedApp} app */
   constructor(app) { this.app = app; }
@@ -41,8 +44,12 @@ export class TxBuilder {
     if (!this.account.canSign) throw new Error(`This wallet is watch-only and cannot ${what}.`);
   }
 
-  /** One coin in, the payment and (when worth it) change out. Shielded change stays Shielded. */
-  async send({ from, to, amount, rate }) {
+  /**
+   * One coin in, the payment and (when worth it) change out. Shielded change stays Shielded. `parts`: the payment
+   * split into that many equal outputs to the same (Public) address, each at least SPLIT_MIN sats (fewer parts
+   * otherwise); used for the RGB balance, so several RGB buys in a row each have a coin of their own.
+   */
+  async send({ from, to, amount, rate, parts = 1 }) {
     this.requireSigner('send');
     await this.coins.ensureOrd(from);
     const label = from === 'shielded' ? 'Shielded' : 'Public';
@@ -54,7 +61,8 @@ export class TxBuilder {
     if (k.kind === 'empty') throw new Error('Enter who to send to.');
     if (k.kind !== 'public' && k.kind !== 'shielded') throw new Error(k.text + '.');
     if (!Number.isSafeInteger(amount) || amount < 546) throw new Error(`Minimum is 0.00000546 ${unit}.`);
-    const feeOf = (n, outs) => estimateSimpleSend({ inputs: n, outputs: outs, feeRate: rate });
+    const split = k.kind === 'public' ? Math.max(1, Math.min(Math.floor(Number(parts) || 1), Math.floor(amount / SPLIT_MIN))) : 1;
+    const feeOf = (n, outs) => estimateSimpleSend({ inputs: n, outputs: outs + split - 1, feeRate: rate });
     // one coin when one is enough (the usual case); otherwise several, largest first (small unlocked coins join in)
     let coins = [pickCoin(list, amount + feeOf(1, 2) + DUST_CHANGE) || pickCoin(list, amount + feeOf(1, 1))].filter(Boolean);
     if (!coins.length) {
@@ -75,7 +83,8 @@ export class TxBuilder {
     if (k.kind === 'shielded') silent.push(recipient);
     if (changeShielded) silent.push(change);
     const derived = new SilentOutputs(coins.map((c, i) => ({ txid: c.txid, vout: c.vout, privKey: keys[i], taproot: true })), coins.map((c) => ({ txid: c.txid, vout: c.vout })), silent);
-    const outputs = [{ value: amount, script: k.kind === 'shielded' ? derived.take(recipient) : this.account.codec.outputScript(recipient) }];
+    const outputs = k.kind === 'shielded' ? [{ value: amount, script: derived.take(recipient) }]
+      : Array.from({ length: split }, (_, i) => ({ value: i === 0 ? amount - Math.floor(amount / split) * (split - 1) : Math.floor(amount / split), script: this.account.codec.outputScript(recipient) }));
     let fee = inSum - amount;
     if (wantChange) {
       fee = feeTwo;
@@ -83,7 +92,7 @@ export class TxBuilder {
     }
     const tx = new RawTransaction({ inputs: coins.map(inputOf), outputs });
     const hex = tx.toHex(keys.map((k2, i) => [tx.signKeyPath(i, k2)]));
-    return { hex, txid: tx.txid, amount, fee, coin: coins[0], coins, spent: coins.map((c) => c.key), from, recipient, kind: k.kind, toSelf: to === 'self' };
+    return { hex, txid: tx.txid, amount, fee, coin: coins[0], coins, spent: coins.map((c) => c.key), from, recipient, kind: k.kind, toSelf: to === 'self', parts: split };
   }
 
   /**

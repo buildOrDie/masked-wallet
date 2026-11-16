@@ -1,3 +1,4 @@
+import { rgbFundParts } from '../rgb/WalletRgb.mjs';
 // User input: one listener per event type on the document, routed by data attributes (data-go, data-set,
 // data-tok, …) and by button id. Each handler changes state through the app's services and re-renders.
 import { copyText } from './copy.mjs';
@@ -323,7 +324,10 @@ export class Controller {
       case 'btnReviewSend': {
         const shield = state.view === 'shield';
         f.poisonOk = false;
-        await review('send', () => app.builder.send({ from: shield ? 'public' : f.sendFrom, to: shield ? 'self' : f.sendTo, amount: parseBtc(f.sendAmount, account.unit), rate: app.feeRate() }));
+        // to the RGB balance: in a few coins (see rgbFundParts)
+        const toRgb = !shield && !!app.rgb?.data?.address && String(f.sendTo).trim() === app.rgb.data.address;
+        const amt = parseBtc(f.sendAmount, account.unit);
+        await review('send', () => app.builder.send({ from: shield ? 'public' : f.sendFrom, to: shield ? 'self' : f.sendTo, amount: amt, rate: app.feeRate(), parts: toRgb ? rgbFundParts(amt) : 1 }));
         break;
       }
       case 'btnOrdReview': {

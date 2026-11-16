@@ -127,3 +127,28 @@ test('a small Shielded coin that holds LEAF is never unlocked', async () => {
   assert.equal(await app.coins.unlockSmall(c), 'leaf');
   assert.ok(app.coins.isProtected(c));
 });
+
+test('bitcoin added to the RGB balance goes in as a few coins (several RGB buys in a row each have one)', async () => {
+  const { rgbFundParts } = await import('../src/rgb/WalletRgb.mjs');
+  assert.equal(rgbFundParts(30_000), 4);
+  assert.equal(rgbFundParts(12_000), 2);
+  assert.equal(rgbFundParts(4_000), 1, 'too small to split');
+  const keys = Keyring.fromMnemonic(WORDS, '', 'main');
+  const app = walletApp(keys);
+  app.coins.ensureOrd = async () => {};
+  const f = app.account.funding();
+  app.coins.public = [{ key: 'big', kind: 'funding', txid: '52'.repeat(32), vout: 0, sats: 100_000, output: f.outputX, privKey: f.outputPriv, address: f.address }];
+  app.ord.put(`${'52'.repeat(32)}:0`, { ins: 0, runes: 0, at: 1 });
+  const to = 'bc1p4qhjn9zdvkux4e44uhx8tc55attvtyu358kutcqkudyccelu0was9fqzwh';
+  const b = await app.builder.send({ from: 'public', to, amount: 30_001, rate: 1, parts: 4 });
+  assert.equal(b.parts, 4);
+  const one = await app.builder.send({ from: 'public', to, amount: 30_001, rate: 1 });
+  assert.equal(one.parts, 1, 'a normal send is one output, as before');
+  assert.ok(b.fee > one.fee, 'the fee counts the extra outputs');
+  const { Transaction } = await import('@scure/btc-signer');
+  const tx = Transaction.fromRaw(hex.decode(b.hex));
+  const pay = Array.from({ length: tx.outputsLength }, (_, i) => tx.getOutput(i)).filter((o) => Number(o.amount) < 20_000);
+  assert.equal(pay.length, 4);
+  assert.equal(pay.reduce((t, o) => t + Number(o.amount), 0), 30_001, 'exactly the amount, in 4 coins');
+  assert.equal((await app.builder.send({ from: 'public', to, amount: 8_000, rate: 1, parts: 4 })).parts, 1, 'never coins under 5,000 sats');
+});

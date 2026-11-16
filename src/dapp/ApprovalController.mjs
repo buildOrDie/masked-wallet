@@ -8,7 +8,7 @@ import { signMessageBip322, signMessageEcdsa } from '../bitcoin/messages.mjs';
 import { TRADE_SITES } from '../trade/TradeAccount.mjs';
 import { lockKeyOf, peekToken } from '../ecash/EcashBook.mjs';
 import { toBase, fromBase } from '../rgb/config.mjs';
-import { proxyUrl, rgbError, RGB_CONFLICT_MSG } from '../rgb/WalletRgb.mjs';
+import { rgbFundParts, proxyUrl, rgbError, RGB_CONFLICT_MSG } from '../rgb/WalletRgb.mjs';
 
 /** Methods whose approve button waits for a prepared transaction. */
 export const NEEDS_PREP = ['sendBitcoin', 'inscribeTransfer', 'shareTrade', 'fundTrade', 'moveToTrade', 'returnToShielded', 'cancelShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbInvoice', 'rgbPay', 'rgbSwapAvailable', 'rgbListAssets', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantListLots', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel'];
@@ -339,7 +339,7 @@ export class ApprovalController {
     if (!t || t.sent || !r?.data?.address) return;
     state.busy = true; app.render();
     try {
-      const b = await app.builder.send({ from: 'public', to: r.data.address, amount: t.sats, rate: app.feeRate() });
+      const b = await app.builder.send({ from: 'public', to: r.data.address, amount: t.sats, rate: app.feeRate(), parts: rgbFundParts(t.sats) });
       await app.broadcast(b.hex);
       await app.afterBroadcast?.(b.spent, [b.txid]);
       r.fundedAt = Date.now();
