@@ -1102,7 +1102,10 @@ export class LiteWallet {
       for (const l of list) {
         const e = store.get(l.offerId);
         if (e?.stage !== 'moving') continue;
-        try { await this.presignLot(l.offerId, e, store); } catch { /* not yet: next pass, or the next refresh */ }
+        try { await this.presignLot(l.offerId, e, store); } catch (err) {
+          // not yet: next pass, or the next refresh; what the engine said is kept (shown in Settings and on the market)
+          store.set(l.offerId, { ...e, waiting: `Not signed yet: ${String(err?.message || err).slice(0, 220)}`, waitingAt: Date.now() });
+        }
       }
       if (list.every((l) => store.get(l.offerId)?.stage !== 'moving')) break;
       await new Promise((r) => setTimeout(r, 1500));
@@ -1258,7 +1261,7 @@ export class LiteWallet {
     try { this.lib.inspectSwapConsignment(bytes, String(txid), this.net, INSTANT_SEAL_OUTPUT); return false; } catch (e) { return OLD_CONSIGNMENT.test(String(e?.message || e)); }
   }
   instantView(offerId, e) {
-    return { offerId: String(offerId), stage: e.stage === 'queued' ? 'moving' : e.stage, txid: e.soldTxid || e.cancelTxid || e.moveTxid || null, ...(e.stage === 'ready' ? { psbt: e.psbt, consignment: e.consignment, templateTxid: e.templateTxid, sellerOutpoint: e.coin } : {}) };
+    return { offerId: String(offerId), stage: e.stage === 'queued' ? 'moving' : e.stage, txid: e.soldTxid || e.cancelTxid || e.moveTxid || null, ...(e.stage === 'ready' ? { psbt: e.psbt, consignment: e.consignment, templateTxid: e.templateTxid, sellerOutpoint: e.coin } : e.waiting ? { waiting: String(e.waiting) } : {}) };
   }
   /**
    * Seller, after a refresh: sign listings whose tokens have settled on their own output, and notice listings that
