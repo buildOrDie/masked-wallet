@@ -1225,3 +1225,5 @@ screen,English,中文,reviewed,note
 "listing in lots","Mark them spent","标记为已花费","no",""
 "listing in lots","Every RGB output this wallet counts is unspent on chain: nothing to repair","此钱包计入的每个 RGB 输出在链上都未花费：无需修复","no",""
 "listing in lots","This MASKED build can't repair RGB from the chain. Update MASKED.","此版本的 MASKED 无法根据区块链修复 RGB。请更新 MASKED。","no",""
+"listing in lots","This RGB wallet is behind the chain for this token: it still counts {0}","此 RGB 钱包在该代币上落后于区块链：它仍计入 {0}","no",""
+"listing in lots","This wallet still counts {0} on them, but another copy of this wallet (same recovery phrase) already moved those tokens. Only that copy can use them. If it's gone, mark these outputs spent here so the balance shows what this wallet can really move. If that copy still exists, load its backup instead.","此钱包仍计入其中的 {0}，但此钱包的另一个副本（相同助记词）已经移走了这些代币，只有那个副本能使用它们。如果那个副本已不在，就在这里把这些输出标记为已花费，让余额显示此钱包真正能移动的数量。如果那个副本还在，请改为载入它的备份。","no",""
