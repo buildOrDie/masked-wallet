@@ -3,6 +3,9 @@ import { toHex, enc } from '../core/bytes.mjs';
 import { encryptRgb } from './backup.mjs';
 import { CLOUD_KEY, RgbCloud, cloudKeys, seal, open as openCloud } from './cloud.mjs';
 
+/** Shown when another copy of this wallet saved newer RGB data than this one has. */
+export const RGB_CONFLICT_MSG = 'This wallet\'s RGB is also open in another copy of MASKED (another browser or profile, a second MASKED extension, or the phone app), and that copy saved newer RGB data. Moving tokens here could use outputs that copy already spent. Use RGB in that copy, or, if this one has your latest tokens, open Settings → RGB → cloud backup and make it the backup.';
+
 
 /** Fee rate for RGB's own transactions on the test networks (sat/vB). */
 // Signet: blocks are rarely full, 1 sat/vB confirms
@@ -136,6 +139,27 @@ export class WalletRgb {
   // ---- encrypted cloud backup (mainnet and Signet: each network its own backup) ----
   /** On by default; switched off per browser in Settings. */
   get cloudOn() { try { return localStorage.getItem(CLOUD_KEY) !== '0'; } catch { return false; } }
+  /**
+   * Is the cloud backup newer than what this copy last saved or loaded? Then another copy of this wallet (same
+   * recovery phrase) moved on: flag the conflict, so token moves pause and Settings offers to load it. Never throws.
+   * @returns {Promise<boolean>} newer
+   */
+  async checkCloudNewer() {
+    // nothing saved or loaded by this copy yet: nothing to compare with (the first save tells)
+    if (!this.cloudOn || !this.ready || !this.cloudVersion) return false;
+    let latest = 0;
+    try { latest = await this.cloudApi.version((await this.cloudKeysNow()).id); } catch { return false; }
+    if (latest > this.cloudVersion) {
+      this.cloud = { ...this.cloud, conflict: latest, error: 'A newer RGB cloud backup was saved from another browser. Use RGB in one browser at a time.' };
+      this.app.render?.();
+      return true;
+    }
+    return false;
+  }
+  /** Before tokens move or new RGB state is made: stop if another copy of this wallet is newer. */
+  async requireLatest() {
+    if (this.cloud?.conflict || await this.checkCloudNewer()) throw new Error(RGB_CONFLICT_MSG);
+  }
   get cloudVersion() { try { return Number(localStorage.getItem(`${this.profile.vaultKey}.cloud-version`)) || 0; } catch { return 0; } }
   /** When a backup file was last written from this browser (ms), 0 if never. */
   get fileAt() { try { return Number(localStorage.getItem(`${this.profile.vaultKey}.file-at`)) || 0; } catch { return 0; } }
@@ -423,7 +447,7 @@ export class WalletRgb {
       // the last balances, shown at once while the refresh below checks the block server (it can take a minute)
       if (!this.data) { this.data = this.cachedSnapshot(); if (this.data) this.app.render?.(); }
       if (keyed) this.markKeyed();
-      this.startTimer();
+      this.startTimer(); // its first tick also looks whether another copy saved newer RGB data
     } catch (error) { await this.close(); throw error; }
     // Balances: a slow or busy server must not close RGB. Keep it open and retry with the minute timer.
     try {
@@ -535,6 +559,8 @@ export class WalletRgb {
   /** Instant listings: sign the ones whose tokens settled, notice sales and cancels; finish bought ones. */
   async instantCheck() {
     if (!this.service?.canPresign) return;
+    // another copy of this wallet is newer: no automatic signing or moving of lots here until that's settled
+    if (this.cloud?.conflict) return;
     let changes = [];
     try { changes = await this.service.instantProgress(); } catch { return; }
     // several listings signed at once (lots): one message for them all
@@ -576,6 +602,7 @@ export class WalletRgb {
     this.timer = setInterval(() => {
       if (!this.ready || this.busy || document.visibilityState !== 'visible') return;
       this.run(async () => { await this.refresh(); this.message = ''; }, { quiet: true });
+      if (Date.now() - (this.cloudCheckedAt || 0) > 5 * 60_000) { this.cloudCheckedAt = Date.now(); this.checkCloudNewer().catch(() => {}); }
     }, 60000);
   }
 
@@ -874,6 +901,7 @@ export class WalletRgb {
         const opts = { assetId, amount, durationSeconds: Number(this.fields.recvExpiry) || 86400, witness };
         return this.run(async () => {
           // a witness invoice needs no RGB output of ours; a blind one may need one set up first
+          await this.requireLatest();
           const r = witness ? await this.service.receive(opts) : await this.withOutputs(() => this.service.receive(opts));
           this.invoice = r.invoice;
           this.invoiceInfo = { witness, amount: amount ? this.amount(a, amount) : '', ticker: a?.ticker || '', expiry: Number(this.fields.recvExpiry) || 86400 };
@@ -922,7 +950,7 @@ export class WalletRgb {
         return this.run(async () => {
           this.message = 'Sending…'; app.render();
           if (!p.check?.ok) throw new Error('Check the transfer server first.');
-          if (this.cloud?.conflict) throw new Error('This wallet\'s RGB is also open in another copy of MASKED (another browser or profile, a second MASKED extension, or the phone app), and that copy saved newer RGB data. Use RGB there, or, if this one has your latest tokens, make it the backup in Settings → RGB → cloud backup.');
+          await this.requireLatest();
           if (!await app.platform.hasOrigins([proxyUrl(p.check.endpoint)])) {
             await this.checkProxies();
             throw new Error('Transfer server permission changed. Review the server and try again.');

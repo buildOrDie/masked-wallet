@@ -1092,3 +1092,23 @@ test('RGB: a receive waiting over a day whose transaction no server has is dropp
   localStorage.removeItem(`${app.rgb.profile.vaultKey}.dropped`);
   localStorage.removeItem('masked.rgb.mainnet-beta');
 });
+
+test('RGB: another copy saved newer RGB data: token moves stop before anything is made, and the conflict shows', async () => {
+  const app = rgbApp('main');
+  localStorage.setItem('masked.rgb.mainnet-beta', '1');
+  rgbReady(app);
+  localStorage.setItem(`${app.rgb.profile.vaultKey}.cloud-version`, '359');
+  app.rgb.cloudKeysNow = async () => ({ id: 'ab'.repeat(32) });
+  let asked = 0;
+  app.rgb.cloudApi = { version: async () => { asked++; return 361; } };
+  await assert.rejects(app.rgb.requireLatest(), /another copy of MASKED/);
+  assert.equal(asked, 1); assert.equal(app.rgb.cloud.conflict, 361);
+  // already known: no second question
+  await assert.rejects(app.rgb.requireLatest(), /another copy/); assert.equal(asked, 1);
+  // same version: goes on
+  app.rgb.cloud = { error: '', conflict: 0, saving: false, last: 0 };
+  app.rgb.cloudApi = { version: async () => 359 };
+  await app.rgb.requireLatest();
+  localStorage.removeItem(`${app.rgb.profile.vaultKey}.cloud-version`);
+  localStorage.removeItem('masked.rgb.mainnet-beta');
+});

@@ -557,6 +557,8 @@ export class LiteWallet {
   async prepareSale({ offerId, network, session, offer }, store) {
     this.requireSwaps(); this.checkNet(network);
     const o = readOffer(offer, offerId);
+    try { await this.wallet.sync(this.requireOnline()); } catch { /* checked with the last known state */ }
+    await this.requireInSync(o.assetId);
     if (o.state && o.state !== 'MATCHED') throw new Error(`The offer is ${o.state.toLowerCase()}.`);
     const s = session || {};
     if (changedTerms(o, s)) throw new Error('The buyer prepared different terms.');
@@ -972,6 +974,11 @@ export class LiteWallet {
     const queued = Object.entries(store.all()).filter(([, e]) => e?.role === 'seller' && e.lotGroup === group && e.stage === 'queued').sort((a, b) => a[1].lotNo - b[1].lotNo);
     if (!queued.length) return [];
     const [id, e] = queued[0];
+    // never move a lot while this wallet is behind the chain (another copy spent outputs it still counts)
+    try { await this.requireInSync(e.assetId); } catch (err) {
+      store.set(id, { ...e, waiting: String(err?.message || err).slice(0, 300), waitingAt: Date.now() });
+      return [];
+    }
     // promised outputs (signed or moving listings) are never taken
     const busy = new Set([...this.reserved, ...Object.values(store.all()).filter((x) => x?.role === 'seller' && ['moving', 'ready'].includes(x.stage) && x.coin).map((x) => String(x.coin))]);
     const unspents = plain(this.wallet.listUnspents(false)) || [];

@@ -620,3 +620,15 @@ test('repair from the chain: outputs another copy spent are found, and marked sp
   await s.w.repairFromChain({ fix: true });
   assert.deepEqual(s.log.filter((x) => x[0] === 'spent'), [['spent', `${T('b')}:1`]]);
 });
+
+test('seller: a lot never moves while the wallet is behind the chain; it waits and says why', async () => {
+  const chain = fakeChain();
+  const s = wallet({ name: 'seller', lib: fakeLib(), chain, rgb: [unspent('b', 0, [tok(1000)])] });
+  s.w.w.refresh = async () => ({});
+  s.store.set('lot1', { role: 'seller', assetId: ASSET, amount: '500', priceSats: '5000', stage: 'queued', lotGroup: 'g1', lotNo: 0, lots: 2, at: 1 });
+  chain.spends[`${T('b')}:0`] = { spent: true, txid: T('e') };
+  assert.deepEqual(await s.w.lotsAdvance(s.store, 'g1', 2), []);
+  assert.equal(s.mem.lot1.stage, 'queued');
+  assert.match(s.mem.lot1.waiting, /behind the chain/);
+  assert.equal(s.log.filter((x) => x[0] === 'colorSwap').length, 0);
+});

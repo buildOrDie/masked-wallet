@@ -113,6 +113,18 @@ export class RgbCloud {
     if (status !== 200) throw new CloudError(json?.error || `Backup server error (${status}).`, status);
     return json;
   }
+  /**
+   * The latest version number stored (0: none). Asks for the head only (`?head=1`); a server without that answers
+   * with the whole backup, and its version is read from it.
+   */
+  async version(id) {
+    let { status, json } = await this.call('GET', `${id}?head=1`);
+    // a server that doesn't know ?head=1 may not find the path with it: ask plainly
+    if (status === 404 || status === 400) ({ status, json } = await this.call('GET', id));
+    if (status === 404) return 0;
+    if (status !== 200) throw new CloudError(json?.error || `Backup server error (${status}).`, status);
+    return Number(json?.version) || 0;
+  }
   async put(id, sealed) {
     const { status, json } = await this.call('PUT', id, sealed);
     if (status === 409) throw new CloudError('A newer RGB cloud backup was saved from another browser.', 409, Number(json?.latest) || 0);
