@@ -691,6 +691,18 @@ export class LiteWallet {
     this.ownMoves = [...new Set([...ids, ...(this.ownMoves || []), ...extra.map((t) => String(t).toLowerCase())])].slice(-200);
     try { this.wallet.setOwnUnconfirmed(this.ownMoves); } catch { /* an older engine: moves wait for their block */ }
   }
+  /**
+   * The RGB outputs as the listing code picks from them: with an engine that moves and lists outputs of this wallet's
+   * own unconfirmed moves, the tokens on those outputs count as free too (the rest of the tokens after a lot's move,
+   * say). Before, they only counted after the move's block ("None of this token is settled and free").
+   */
+  listable(unspents) {
+    const own = new Set(this.canChainLots ? this.ownMoves || [] : []);
+    if (!own.size) return unspents;
+    return (unspents || []).map((u) => (own.has(String(u.utxo?.outpoint?.txid).toLowerCase())
+      ? { ...u, utxo: { ...u.utxo, exists: true }, rgbAllocations: (u.rgbAllocations || []).map((a) => ({ ...a, settled: true })) }
+      : u));
+  }
   /** @type {Set<string>} */
   get reserved() { return this._reserved || new Set(); }
   /** The outputs promised to Instant listings; the engine never spends, receives on or adds change to them. */
@@ -941,7 +953,8 @@ export class LiteWallet {
     onStep(`Checking your tokens on ${hostOf(this.indexer)}…`);
     await this.wallet.sync(this.requireOnline());
     const pendingSpent = await this.requireInSync(o.assetId, onStep, { allowOwn: true, own: storeMoveTxids(store) });
-    const unspents = plain(this.wallet.listUnspents(false)) || [];
+    this.syncOwnUnconfirmed(store);
+    const unspents = this.listable(plain(this.wallet.listUnspents(false)) || []);
     // market and token: where this wallet sends the signed listing when it's signed later (after the move)
     const base = { role: 'seller', assetId: o.assetId, amount: String(o.amount), priceSats: String(o.priceSats), market: String(market), token: String(token), at: Date.now() };
     // never an output this wallet's own unconfirmed move already spent
@@ -1042,7 +1055,8 @@ export class LiteWallet {
     onStep(`Checking your tokens on ${hostOf(this.indexer)}…`);
     await this.wallet.sync(this.requireOnline());
     const pendingSpent = await this.requireInSync(assetId, onStep, { allowOwn: true, own: storeMoveTxids(store) });
-    const pick = sendCoinsFor(plain(this.wallet.listUnspents(false)) || [], assetId, total, new Set([...this.reserved, ...pendingSpent]));
+    this.syncOwnUnconfirmed(store);
+    const pick = sendCoinsFor(this.listable(plain(this.wallet.listUnspents(false)) || []), assetId, total, new Set([...this.reserved, ...pendingSpent]));
     if (!pick.coins) throw new Error(pick.held > 0n ? 'Not that much of this token is settled and free in this wallet yet. Wait for incoming transfers to settle, or list less.' : 'None of this token is settled and free in this wallet yet.');
     const at = Date.now(), group = `g${at.toString(36)}`;
     if (this.canChainLots) return this.lotsAtOnce({ list, assetId, coins: pick.coins, feeRate, market, at, group, onStep }, store);

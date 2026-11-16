@@ -756,3 +756,23 @@ test('a move keeps a small RGB output for the rest of the tokens and sends the r
   assert.equal(vout, 2);
   assert.ok(outs[2].sats > 47000, 'the rest of the bitcoin back where fees are paid from');
 });
+
+test('lots: tokens on the rest-of-tokens output of this wallet\'s own unconfirmed move count as free (no "None of this token is settled")', async () => {
+  const chain = fakeChain();
+  const rest = `${T('5')}:2`, fee = `${T('c')}:2`;
+  chain.outs[rest] = { sats: 1000, script: '5120rgb', tx: 'aa' };
+  chain.outs[fee] = { sats: 20000, script: '5120btc', tx: 'bb' };
+  chain.outs[`${T('8')}:2`] = { sats: 1000, script: '5120own', tx: 'cc' };
+  // 10 left on the move's own output: not settled yet (its block hasn't come)
+  const s = wallet({ name: 'seller', lib: fakeLib(), chain, rgb: [unspent('5', 2, [tok(10, ASSET, false)])], coins: [{ outpoint: fee, txout: { value: 20000 }, is_spent: false }] });
+  s.mem.old = { role: 'seller', stage: 'moving', moveTxid: T('5'), coin: `${T('5')}:1`, assetId: ASSET, amount: '10', priceSats: '5000' };
+  const moves = [T('8'), T('9')];
+  s.w.w.sendEnd = async () => ({ txid: moves.shift() });
+  s.w.w.setOwnUnconfirmed = () => {};
+  s.w.w.setSwapChangeVout = () => {};
+  s.w.w.refresh = async () => {};
+  const lots = ['a', 'b'].map((c) => ({ offerId: `sw${c.repeat(12)}`, token: 'ab'.repeat(24), amount: '5', priceSats: '5000' }));
+  const r = await s.w.instantListLots({ assetId: ASSET, lots, feeRate: 1 }, s.store);
+  assert.deepEqual(s.log.find((x) => x[0] === 'colorSwap')[1].slice(0, 1), [rest], 'moved from the unconfirmed move\'s output');
+  assert.equal(r.lots.length, 2);
+});
