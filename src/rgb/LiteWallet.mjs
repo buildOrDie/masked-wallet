@@ -310,7 +310,19 @@ export class LiteWallet {
     for (let i = 0; i < 4; i++) {
       if (witness && typeof this.wallet.rotateAddress === 'function') this.wallet.rotateAddress(0); // 0 = receive keychain; the funding address (1) stays
       r = await this.receiveCall(make, assetId || null, assignment, durationSeconds);
-      if (!witness || !used.has(String(r?.recipientId ?? ''))) break;
+      // A blind invoice puts the tokens on an output this wallet already has. If the chain shows that output spent
+      // (sold through a listing whose record this copy lost, or moved by another copy) and the engine doesn't know,
+      // tokens paid to it can never be moved again. Checked on the block server: such an output is marked spent and
+      // the invoice made again on another one.
+      if (!witness) {
+        const stale = await this.blindSealSpent(r, assetId).catch(() => '');
+        if (!stale) break;
+        try { await this.wallet.failTransfers(this.requireOnline(), r.batchTransferIdx, false, true); } catch { /* it expires */ }
+        try { this.wallet.markOutpointSpent?.(stale); } catch { /* the next invoice is checked the same way */ }
+        r = null;
+        continue;
+      }
+      if (!used.has(String(r?.recipientId ?? ''))) break;
       // a reused one is cancelled at once, so it can never match a payment
       try { await this.wallet.failTransfers(this.requireOnline(), r.batchTransferIdx, false, true); } catch { /* offline: it stays open, but it is never shown */ }
       r = null;
@@ -320,6 +332,19 @@ export class LiteWallet {
     return { invoice: String(r?.invoice ?? ''), recipientId: String(r?.recipientId ?? ''), expirationTimestamp: r?.expirationTimestamp ?? null, batchTransferIdx: r?.batchTransferIdx ?? null };
   }
 
+  /** A blind invoice's output (txid:vout) when the chain shows it already spent; '' when it's unspent or unknown. */
+  async blindSealSpent(r, assetId = null) {
+    if (r?.batchTransferIdx == null) return '';
+    let t = null;
+    for (const id of [...new Set([assetId || null, null])]) {
+      t = (plain(this.engineTransfers(id)) || []).find((x) => Number(x?.batchTransferIdx) === Number(r.batchTransferIdx) && x?.receiveUtxo);
+      if (t) break;
+    }
+    const u = t?.receiveUtxo;
+    if (!u?.txid) return '';
+    const sp = await (await this.esplora(`/tx/${u.txid}/outspend/${u.vout}`)).json();
+    return sp?.spent ? `${String(u.txid).toLowerCase()}:${u.vout}` : '';
+  }
   async decodeRGBInvoice({ invoice }) {
     const inv = new this.lib.WasmInvoice(invoice);
     try {

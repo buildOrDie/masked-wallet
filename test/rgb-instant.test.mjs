@@ -651,3 +651,19 @@ test('seller: a lot never moves while the wallet is behind the chain; it waits a
   assert.match(s.mem.lot1.waiting, /behind the chain/);
   assert.equal(s.log.filter((x) => x[0] === 'colorSwap').length, 0);
 });
+
+test('receive: a blind invoice is never made on an output the chain shows spent (a sale this copy missed): marked spent, made again on another', async () => {
+  const chain = fakeChain();
+  const s = wallet({ name: 'r', lib: fakeLib(), chain });
+  let n = 0;
+  const utxos = [`${T('4')}:0`, `${T('7')}:1`];
+  const failed = [];
+  s.w.w.blindReceive = () => ({ invoice: `rgb:blind-${++n}`, recipientId: `utxob:${n}`, expirationTimestamp: 1, batchTransferIdx: n });
+  s.w.w.listTransfers = () => Array.from({ length: n }, (_, k) => ({ idx: k + 1, batchTransferIdx: k + 1, receiveUtxo: { txid: utxos[k].split(':')[0], vout: Number(utxos[k].split(':')[1]) } }));
+  s.w.w.failTransfers = async (_o, idx) => { failed.push(idx); return true; };
+  chain.spends[utxos[0]] = { spent: true, txid: T('2') }; // the first output the engine picks was sold already
+  const r = await s.w.onchainReceive({ assetId: ASSET, amount: 1000 });
+  assert.equal(r.invoice, 'rgb:blind-2');
+  assert.deepEqual(failed, [1], 'the invoice on the spent output is cancelled');
+  assert.deepEqual(s.log.filter((x) => x[0] === 'spent'), [['spent', utxos[0]]]);
+});
