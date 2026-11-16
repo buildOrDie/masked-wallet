@@ -2,6 +2,14 @@
 // to be built. Network calls go to `fetch`, which each test replaces as it likes.
 import * as sp from '../../src/crypto/sp-core.mjs';
 
+// Tests never reach the internet. A background request no test replaced `fetch` for (the token list at app start,
+// say) is refused at once here: on a computer with internet it went out for real, finished after its test ended, and
+// Node failed the whole file ("generated asynchronous activity after the test ended").
+if (!globalThis.__maskedTestFetchGuard) {
+  globalThis.__maskedTestFetchGuard = true;
+  globalThis.fetch = async (url) => { throw new TypeError(`fetch failed: no network in tests (${String(url).slice(0, 80)})`); };
+}
+
 export class MemoryStorage {
   constructor() { this.map = new Map(); }
   getItem(k) { return this.map.has(k) ? this.map.get(k) : null; }
