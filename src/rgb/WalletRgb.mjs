@@ -479,7 +479,8 @@ export class WalletRgb {
     const map = this.dropped();
     const old = Date.now() / 1000 - 3 * 3600;
     const waiting = Object.values(this.data?.transfers || {}).flat()
-      .filter((t) => String(t?.kind || '').startsWith('Receive') && String(t.status) === 'WaitingConfirmations' && t.txid && Number(t.createdAt || 0) < old).slice(0, 10);
+      .filter((t) => String(t?.kind || '').startsWith('Receive') && String(t.status) === 'WaitingConfirmations' && t.txid && Number(t.createdAt) > 0 && Number(t.createdAt) < old).slice(0, 10);
+    if (!waiting.length) return;
     let changed = false;
     const day = Date.now() / 1000 - 86400;
     for (const t of waiting) {
