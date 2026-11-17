@@ -570,14 +570,18 @@ export class LiteWallet {
       const op = `${String(o.txid).toLowerCase()}:${o.vout}`;
       const tokens = (u.rgbAllocations || []).filter((a) => a.assignment?.Fungible != null).map((a) => ({ assetId: a.assetId, ticker: meta.get(a.assetId)?.ticker || '', precision: meta.get(a.assetId)?.precision ?? 0, amount: String(a.assignment.Fungible), settled: !!a.settled }));
       const p = promised.get(op);
+      const invoices = Number(u.pendingBlinded || 0);
+      // a plain bitcoin coin the engine lists too: it's in `coins`
+      if (!tokens.length && !invoices && u.utxo?.colorable === false) return null;
       const state = p ? (p.stage === 'ready' ? 'on sale' : p.stage === 'cancelling' ? 'cancelling' : 'going live')
         : this.reserved.has(op) ? 'promised'
+          : !tokens.length && invoices ? 'invoice'
           : !tokens.length ? 'empty'
             : u.utxo?.colorable === false ? 'unusable'
               : tokens.some((t) => !t.settled) || u.utxo?.exists === false ? 'waiting'
                 : 'free';
-      return { outpoint: op, sats: Number(u.utxo?.btcAmount ?? 0), tokens, state, listing: p || null };
-    });
+      return { outpoint: op, sats: Number(u.utxo?.btcAmount ?? 0), tokens, state, listing: p || null, invoices };
+    }).filter(Boolean);
     let coins = [];
     try {
       const vanilla = (await this.wallet.listUnspentsVanilla(online, 0, true)) || [];
@@ -585,7 +589,7 @@ export class LiteWallet {
       const spent = this.justSpent();
       coins = vanilla.filter((c) => !c.is_spent).map((c) => { const op = String(outpointOf(c.outpoint) || ''); return { outpoint: op, sats: Number(c.txout?.value ?? 0), confirmed: conf.has(op), justSpent: spent.has(op.toLowerCase()) }; });
     } catch { coins = []; }
-    const order = { 'on sale': 0, 'going live': 1, cancelling: 2, promised: 3, free: 4, waiting: 5, unusable: 6, empty: 7 };
+    const order = { 'on sale': 0, 'going live': 1, cancelling: 2, promised: 3, invoice: 4, free: 5, waiting: 6, unusable: 7, empty: 8 };
     rgb.sort((a, b) => order[a.state] - order[b.state] || b.tokens.length - a.tokens.length);
     coins.sort((a, b) => b.sats - a.sats);
     // per token: where its balance is
