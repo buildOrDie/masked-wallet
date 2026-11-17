@@ -427,12 +427,13 @@ select#obBday { width: 100%; }
 .lk { display: grid; gap: 12px; padding: 18px 2px 8px; text-align: center; }
 .lk h1 { margin: 4px 0 0; font-size: 22px; font-weight: 800; }
 .lk p { margin: 0; }
+.lock-ver { font-size: 11px; color: var(--muted); opacity: .7; font-variant-numeric: tabular-nums; }
 .lk input, .lk textarea { text-align: left; }
 .lk .words, .lk .info, .lk .warn { text-align: left; }
 .lk-logo { justify-self: center; width: 72px; height: 72px; }
 .lk-logo img, .lk-logo svg { width: 72px; height: 72px; display: block; object-fit: contain; filter: drop-shadow(0 6px 18px rgba(247,147,26,.25)); }
 .lk .link { justify-self: center; color: var(--muted); }
-.lk.unlock-screen { min-height: calc(600px - 62px); grid-template-rows: 1fr auto; grid-template-columns: minmax(0, 1fr); width: 100%; box-sizing: border-box; padding: 0 2px 14px; }
+.lk.unlock-screen { min-height: calc(600px - 62px); grid-template-rows: 1fr auto auto; grid-template-columns: minmax(0, 1fr); width: 100%; box-sizing: border-box; padding: 0 2px 14px; }
 .lock-main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-content: center; width: 100%; }
 .lock-logo { position: relative; justify-self: center; width: 112px; height: 112px; display: grid; place-items: center; margin-bottom: 4px; }
 .lock-logo::before { content: ""; position: absolute; inset: 0; border-radius: 50%; background: radial-gradient(circle, rgba(247,147,26,.28), rgba(247,147,26,0) 68%); animation: lockGlow 3.2s ease-in-out infinite; }

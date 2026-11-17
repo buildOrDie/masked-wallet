@@ -5,6 +5,7 @@ import { BIRTHDAYS } from '../../scan/ChainSync.mjs';
 import { View } from '../View.mjs';
 import { I, copyBtn, seg } from '../html.mjs';
 import { $ } from '../dom.mjs';
+import { APP_VERSION } from '../../app/AppUpdate.mjs';
 
 const logoBig = () => `<div class="lk-logo">${$('.logo')?.innerHTML || ''}</div>`;
 const newPasswordFields = (placeholder2 = 'Confirm password') => `<input type="password" id="pwNew1" placeholder="New password (min 8 characters)" autocomplete="new-password">
@@ -28,6 +29,7 @@ export class LockView extends View {
       <button class="link small" data-forgot>Forgot password? Restore with your recovery phrase</button>
     </div>
     <p class="lock-foot">${I.shieldPlain}<span>Your keys never leave this device</span></p>
+    ${APP_VERSION ? `<p class="lock-ver" translate="no">MASKED v${APP_VERSION}</p>` : ''}
   </section>`;
   }
 }
