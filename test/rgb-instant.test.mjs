@@ -938,3 +938,17 @@ test('a lot queued for hours is given up, never moved with tokens that arrive la
   assert.equal(s.store.get('lotA').expired, true);
   assert.deepEqual(changes, [{ offerId: 'lotA', stage: 'cancelled', expired: true }]);
 });
+
+test('lots at once: the next lot waits until the previous move is taken in (refresh) and waits only for its block', async () => {
+  const s = wallet({ name: 'chainwait', lib: fakeLib(), chain: fakeChain() });
+  s.w.ownOutputWaitMs = 2000;
+  const txid = T('9');
+  let refreshed = 0, status = 'WaitingCounterparty';
+  s.w.w.refresh = async () => { refreshed++; if (refreshed >= 2) status = 'WaitingConfirmations'; return {}; };
+  s.w.w.listUnspents = () => [{ utxo: { outpoint: { txid, vout: 2 }, btcAmount: 1000, colorable: true, exists: true }, rgbAllocations: [] }];
+  s.w.engineTransfers = () => [{ kind: 'Send', status, txid }];
+  s.w.knowsTx = async () => true;
+  const ok = await s.w.waitOwnOutput({}, `${txid}:2`, () => {}, 'hex', ASSET);
+  assert.equal(ok, true);
+  assert.ok(refreshed >= 2, 'refreshed until the move waits only for its block');
+});

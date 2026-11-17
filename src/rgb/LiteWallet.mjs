@@ -1055,21 +1055,32 @@ export class LiteWallet {
   }
   /** Wait until the block server in use has `txid` (at most `ms`). */
   /**
-   * Wait (at most `ms`) until the engine lists `outpoint` among this wallet's outputs: the block server in use has the
-   * transaction, and a sync took it in. Says what it waits for. @returns {Promise<boolean>}
+   * Wait (at most `ms`) until the engine can move `outpoint`, the change of this wallet's own move: the block server
+   * in use has the transaction, a sync took it in, and the move's transfer waits only for confirmations (this wallet,
+   * its own receiver, took the transfer in and acknowledged it: a refresh does that). Until then the engine refuses
+   * it as "none of its inputs is an RGB output of this wallet" (seen on Signet: 1 of 10, then 1 of 5 lots listed).
+   * Says what it waits for. @returns {Promise<boolean>}
    */
-  async waitOwnOutput(online, outpoint, onStep = (_t) => {}, txHex = '', ms = /** @type {any} */ (this).ownOutputWaitMs ?? 45_000) {
+  async waitOwnOutput(online, outpoint, onStep = (_t) => {}, txHex = '', assetId = null, ms = /** @type {any} */ (this).ownOutputWaitMs ?? 60_000) {
     const want = String(outpoint).toLowerCase(), txid = want.split(':')[0];
     const end = Date.now() + ms;
-    const has = () => (plain(this.wallet.listUnspents(false)) || []).some((u) => `${String(u.utxo?.outpoint?.txid).toLowerCase()}:${u.utxo?.outpoint?.vout}` === want);
+    const listed = () => (plain(this.wallet.listUnspents(false)) || []).some((u) => `${String(u.utxo?.outpoint?.txid).toLowerCase()}:${u.utxo?.outpoint?.vout}` === want);
+    const ready = () => {
+      if (!assetId) return true;
+      let list = [];
+      try { list = plain(this.engineTransfers(assetId)) || []; } catch { return true; }
+      const mine = list.filter((t) => String(t?.txid || '').toLowerCase() === txid && t?.kind === 'Send');
+      return !mine.length || mine.every((t) => ['WaitingConfirmations', 'Settled'].includes(String(t.status)));
+    };
     let told = false;
     while (Date.now() < end) {
-      try { await this.wallet.sync(online); } catch { /* again */ }
-      if (has()) return true;
-      if (!told) { onStep(`Waiting for ${hostOf(this.indexer)} to see the move…`); told = true; }
       // make sure the server the engine syncs with has it (the broadcast may have gone to another one)
       if (txHex && !(await this.knowsTx(txid))) await this.ensureBroadcast(txHex, txid).catch(() => {});
-      await new Promise((r) => setTimeout(r, Math.min(1500, Math.max(10, ms / 20))));
+      try { await this.wallet.refresh(online, null, [], true); } catch { /* again */ }
+      try { await this.wallet.sync(online); } catch { /* again */ }
+      if (listed() && ready()) return true;
+      if (!told) { onStep('Waiting for the move to reach your wallet before the next lot…'); told = true; }
+      await new Promise((r) => setTimeout(r, Math.min(2000, Math.max(10, ms / 20))));
     }
     return false;
   }
@@ -1358,7 +1369,7 @@ export class LiteWallet {
       // the engine learns its new outputs from the block server it syncs with: wait until that server has the move,
       // then until the engine lists the change. Moving the next lot before that fails with "none of its inputs is an
       // RGB output of this wallet" (seen on Signet: 1 of 10 lots listed when the server was slow)
-      if (k < list.length - 1) await this.waitOwnOutput(online, `${moved.txid}:${SEAL_OUTPUT + 1}`, onStep, moved.txHex || '');
+      if (k < list.length - 1) await this.waitOwnOutput(online, `${moved.txid}:${SEAL_OUTPUT + 1}`, onStep, moved.txHex || '', assetId);
       else { try { await this.wallet.sync(online); } catch { /* the next move syncs again */ } }
     }
     // the engine takes in its own moves (from the transfer server), then signs every lot
