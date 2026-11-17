@@ -1201,7 +1201,15 @@ export class LiteWallet {
   async instantList({ offerId, assetId, amount, priceSats, feeRate, market = '', token = '', onStep = (_t) => {} }, store) {
     this.requirePresign();
     const o = readOffer({ assetId, amount, priceSats }, offerId);
-    const prev = store.get(o.offerId);
+    let prev = store.get(o.offerId);
+    // signed, but its signature was dropped to free browser storage before the market had it: the market still shows it
+    // "going live" and asks again (Check now / Finish listing). Its tokens are on their own output, so it's signed again
+    // there. (Before: the empty listing went to the market, which answered "psbt is missing", and it never went on sale.)
+    if (prev && prev.coin && !prev.psbt && (prev.stage === 'ready' || (prev.stage === 'moving' && prev.resign))) {
+      prev = { ...prev, stage: 'moving', resign: undefined, published: undefined };
+      store.set(o.offerId, prev);
+      onStep('Signing the listing again…');
+    }
     if (prev?.stage === 'moving' && (prev.coin || prev.lotOf)) {
       // asked again while the tokens move (the market's "Finish listing"): look now instead of waiting for a refresh
       onStep('Checking whether your tokens arrived on their own output…');

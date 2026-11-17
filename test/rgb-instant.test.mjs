@@ -971,3 +971,20 @@ test('lots all at once: a lot the engine can\'t chain yet waits its turn (one pe
   assert.deepEqual([1, 2].map((k) => s.store.get(lots[k].offerId).stage), ['queued', 'queued']);
   assert.match(r.lots[1].waiting, /moves after the block of the lot before it/);
 });
+
+test('seller: a signed listing whose signature was dropped to free storage is signed again when the market asks', async () => {
+  const chain = fakeChain();
+  const coin = `${T('a')}:0`;
+  const s = wallet({ name: 'seller', lib: fakeLib(), chain, rgb: [unspent('a', 0, [tok(500)])] });
+  const args = { offerId: 'sw0123456789ab', assetId: ASSET, amount: '500', priceSats: '20000', market: 'https://maskedwallet.com', token: 'ab'.repeat(24) };
+  const v = await s.w.instantList(args, s.store);
+  assert.equal(v.stage, 'ready');
+  // what the storage pruner leaves: on sale as far as this wallet knows, nothing to send
+  s.store.set(args.offerId, { ...s.store.get(args.offerId), psbt: undefined, consignment: undefined, resign: true });
+  const again = await s.w.instantList(args, s.store);
+  assert.equal(again.stage, 'ready');
+  assert.ok(again.psbt, 'signed again: never an empty listing for the market');
+  assert.equal(again.sellerOutpoint, coin);
+  assert.equal(s.log.filter((x) => x[0] === 'presign').length, 2);
+  assert.ok(!s.store.get(args.offerId).resign);
+});
