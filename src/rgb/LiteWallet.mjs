@@ -1065,8 +1065,10 @@ export class LiteWallet {
     const want = String(outpoint).toLowerCase(), txid = want.split(':')[0];
     const end = Date.now() + ms;
     const listed = () => (plain(this.wallet.listUnspents(false)) || []).some((u) => `${String(u.utxo?.outpoint?.txid).toLowerCase()}:${u.utxo?.outpoint?.vout}` === want);
+    // an engine that moves from an own move's change before taking the move in (ownMovesChain) needs only the output
+    const chains = typeof this.wallet?.ownMovesChain === 'function';
     const ready = () => {
-      if (!assetId) return true;
+      if (!assetId || chains) return true;
       let list = [];
       try { list = plain(this.engineTransfers(assetId)) || []; } catch { return true; }
       const mine = list.filter((t) => String(t?.txid || '').toLowerCase() === txid && t?.kind === 'Send');
