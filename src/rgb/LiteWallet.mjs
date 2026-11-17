@@ -113,6 +113,13 @@ export class LiteWallet {
     return [...new Set(list)];
   }
   async unlock() { if (!this.online) await this.goOnline(); }
+  /**
+   * Light syncs (engine: setLightSync): a sync asks the block server only about the last 20 addresses of each side,
+   * the ones invoices wait on and the unconfirmed transactions, instead of every address ever used (hundreds of
+   * requests, too many for mempool.space on mainnet). A full sync still runs at most every 30 minutes, and on a rescan.
+   */
+  lightSync() { try { if (typeof this.wallet?.setLightSync === 'function') this.wallet.setLightSync(LiteWallet.LIGHT_SYNC_RECENT); } catch { /* full syncs as before */ } }
+  static LIGHT_SYNC_RECENT = 20;
   isOnline() { return !!this.online; }
   /**
    * Connect to a block server. The engine accepts one only if it answers "block 0" right away, so a busy, blocked
@@ -126,7 +133,7 @@ export class LiteWallet {
     for (let i = 0; i < list.length; i++) {
       const u = list[(start + i) % list.length];
       if (skip && u === skip && list.length > 1) continue;
-      try { this.online = await this.connect(u); this.indexer = u; return u; } catch (e) {
+      try { this.online = await this.connect(u); this.indexer = u; this.lightSync(); return u; } catch (e) {
         last = e;
         // the engine's own words for each server (the screen shows a short version)
         console.warn('[RGB] block server', u, 'refused:', e?.message || e);

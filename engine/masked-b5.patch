@@ -11,10 +11,10 @@ index 884d686..e2896b5 100644
  rgb-strict-encoding = { version = "=1.0.5", default-features = false, features = [
      "bitcoin",
 diff --git a/bindings/wasm/src/lib.rs b/bindings/wasm/src/lib.rs
-index 51b6efd..3dc2621 100644
+index 51b6efd..bd6b78a 100644
 --- a/bindings/wasm/src/lib.rs
 +++ b/bindings/wasm/src/lib.rs
-@@ -635,6 +635,195 @@ impl WasmWallet {
+@@ -635,6 +635,203 @@ impl WasmWallet {
          to_js(&result)
      }
  
@@ -117,6 +117,14 @@ index 51b6efd..3dc2621 100644
 +        Ok(())
 +    }
 +
++    /// Light syncs: only the last `recent` addresses of each side, the ones invoices wait on, and this wallet's
++    /// unconfirmed transactions (a few dozen requests instead of one per address ever used); a full sync still runs
++    /// at most every 30 minutes, and on a full scan. `null`: every sync full.
++    #[wasm_bindgen(js_name = "setLightSync")]
++    pub fn set_light_sync(&self, recent: Option<u32>) {
++        self.inner.borrow_mut().set_light_sync(recent);
++    }
++
 +    /// Learn the outputs of this wallet's own transactions just broadcast, with no request to the block server.
 +    #[wasm_bindgen(js_name = "learnOwnOutputs")]
 +    pub async fn learn_own_outputs(&self) -> Result<(), JsValue> {
@@ -210,7 +218,7 @@ index 51b6efd..3dc2621 100644
      /// Send RGB assets (end): broadcast a signed PSBT. Returns an OperationResult JS object.
      #[wasm_bindgen(js_name = "sendEnd")]
      pub async fn send_end(
-@@ -763,6 +952,56 @@ impl WasmWallet {
+@@ -763,6 +960,56 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -267,7 +275,7 @@ index 51b6efd..3dc2621 100644
      /// Drain all wallet funds (end): broadcast a signed PSBT. Returns the txid string.
      #[wasm_bindgen(js_name = "drainToEnd")]
      pub async fn drain_to_end(
-@@ -1074,6 +1313,22 @@ impl WasmWallet {
+@@ -1074,6 +1321,22 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -290,7 +298,7 @@ index 51b6efd..3dc2621 100644
      /// Check if the wallet needs a backup. Returns true if modified since last backup.
      #[wasm_bindgen(js_name = "backupInfo")]
      pub fn backup_info(&self) -> Result<bool, JsValue> {
-@@ -1217,7 +1472,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
+@@ -1217,7 +1480,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
  /// Works before the witness transaction is broadcast. Takes the raw consignment
  /// bytes (strict-encoded, not base64), the witness transaction ID, and the Bitcoin network.
  ///
@@ -300,7 +308,7 @@ index 51b6efd..3dc2621 100644
  #[wasm_bindgen(js_name = "validateConsignmentOffchain")]
  pub fn validate_consignment_offchain(
      consignment_bytes: &[u8],
-@@ -1235,3 +1491,43 @@ pub fn validate_consignment_offchain(
+@@ -1235,3 +1499,43 @@ pub fn validate_consignment_offchain(
      .map_err(|e| JsValue::from_str(&e.to_string()))?;
      to_js(&result)
  }
@@ -1014,15 +1022,19 @@ index c5c45b2..46cf640 100644
  pub(crate) mod offline;
  #[cfg(feature = "esplora")]
 diff --git a/src/wallet/offline.rs b/src/wallet/offline.rs
-index a3a9f46..bf0a61a 100644
+index a3a9f46..8a151f9 100644
 --- a/src/wallet/offline.rs
 +++ b/src/wallet/offline.rs
-@@ -1312,9 +1312,51 @@ pub struct Wallet {
+@@ -1312,9 +1312,55 @@ pub struct Wallet {
      pub(crate) rgb_stock: std::rc::Rc<std::cell::RefCell<Option<crate::utils::MemStock>>>,
      pub(crate) vss_client: Option<super::vss::VssBackupClient>,
      pub(crate) last_vss_backup_error: std::cell::RefCell<Option<String>>,
 +    /// Outputs promised to a pre-signed listing (MASKED): never picked for sends, change or receives.
 +    pub(crate) reserved_outpoints: HashSet<Outpoint>,
++    /// MASKED: light syncs (see `Wallet::set_light_sync`): how many recent addresses per side, and when the last full
++    /// sync ran (unix seconds)
++    pub(crate) light_recent: Option<u32>,
++    pub(crate) last_full_sync: u64,
 +    /// Witness invoices of pre-signed purchases (MASKED): their seal blinding isn't derived.
 +    pub(crate) presigned_receives: HashSet<String>,
 +    /// MASKED: transactions this wallet made and broadcast itself (listing and lot moves) whose outputs may be spent
@@ -1069,7 +1081,7 @@ index a3a9f46..bf0a61a 100644
      /// Create a wallet and restore its latest durable IndexedDB snapshot, if one exists.
      ///
      /// The returned wallet is ready for use only after the IndexedDB read and snapshot
-@@ -1325,6 +1367,31 @@ impl Wallet {
+@@ -1325,6 +1371,31 @@ impl Wallet {
          let snapshot = super::idb_store::load_snapshot(&wallet.idb_key())
              .await
              .map_err(|details| Error::Persistence { details })?;
@@ -1101,18 +1113,20 @@ index a3a9f46..bf0a61a 100644
          if let Some(snapshot) = snapshot {
              wallet.idb_loaded = Some((snapshot.writer, snapshot.sequence));
              wallet
-@@ -1475,6 +1542,10 @@ impl Wallet {
+@@ -1475,6 +1546,12 @@ impl Wallet {
              },
              vss_client: None,
              last_vss_backup_error: std::cell::RefCell::new(None),
 +            reserved_outpoints: HashSet::new(),
++            light_recent: None,
++            last_full_sync: 0,
 +            presigned_receives: HashSet::new(),
 +            own_unconfirmed: HashSet::new(),
 +            swap_change_vout: None,
          })
      }
  
-@@ -1690,8 +1761,10 @@ impl Wallet {
+@@ -1690,8 +1767,10 @@ impl Wallet {
              None => rgb_allocations.as_deref().unwrap(),
          };
  
@@ -1124,7 +1138,7 @@ index a3a9f46..bf0a61a 100644
          allocatable.sort_by_key(|t| t.rgb_allocations.len() + t.pending_blinded as usize);
          match allocatable.first() {
              Some(mut selected) => {
-@@ -2618,7 +2691,7 @@ impl Wallet {
+@@ -2618,7 +2697,7 @@ impl Wallet {
          Ok(psbt.to_string())
      }
  
@@ -1133,11 +1147,13 @@ index a3a9f46..bf0a61a 100644
          let sign_options = sign_options.unwrap_or_default();
          let [colored, vanilla] = &self.signers;
          self.bdk_wallet
-@@ -4215,6 +4288,10 @@ pub(crate) mod address_reuse_tests {
+@@ -4215,6 +4294,12 @@ pub(crate) mod address_reuse_tests {
              rgb_stock: std::rc::Rc::new(std::cell::RefCell::new(None)),
              vss_client: None,
              last_vss_backup_error: std::cell::RefCell::new(None),
 +            reserved_outpoints: HashSet::new(),
++            light_recent: None,
++            last_full_sync: 0,
 +            presigned_receives: HashSet::new(),
 +            own_unconfirmed: HashSet::new(),
 +            swap_change_vout: None,
@@ -1145,10 +1161,20 @@ index a3a9f46..bf0a61a 100644
      }
  
 diff --git a/src/wallet/online.rs b/src/wallet/online.rs
-index ca96b4a..ab22a28 100644
+index ca96b4a..22e17f7 100644
 --- a/src/wallet/online.rs
 +++ b/src/wallet/online.rs
-@@ -791,8 +791,9 @@ pub(crate) struct ConsignmentPayment<'c> {
+@@ -4,6 +4,9 @@
+ 
+ use super::*;
+ 
++/// MASKED: with light syncs on, a full sync still runs at most this many seconds apart.
++const LIGHT_SYNC_FULL_EVERY: u64 = 30 * 60;
++
+ const SCHEMAS_SUPPORTING_INFLATION: [database::enums::AssetSchema; 1] = [AssetSchema::Ifa];
+ const SCHEMAS_SUPPORTING_BURN: [database::enums::AssetSchema; 2] =
+     [AssetSchema::Ifa, AssetSchema::Bfa];
+@@ -791,8 +794,9 @@ pub(crate) struct ConsignmentPayment<'c> {
  
  pub(crate) enum ReceiveMatcher {
      Blind(SecretSeal),
@@ -1160,7 +1186,7 @@ index ca96b4a..ab22a28 100644
  }
  
  impl DbTransfer {
-@@ -817,7 +818,7 @@ impl DbTransfer {
+@@ -817,7 +821,7 @@ impl DbTransfer {
              RecipientTypeFull::Witness { .. } => {
                  let script_pubkey = script_buf_from_recipient_id(recipient_id)?
                      .expect("witness recipient ID should yield a script");
@@ -1169,7 +1195,7 @@ index ca96b4a..ab22a28 100644
              }
          }
      }
-@@ -1598,7 +1599,7 @@ impl Wallet {
+@@ -1598,7 +1602,7 @@ impl Wallet {
                          }
                          // the blinding is derived from the keys of both parties, so a seal with a
                          // different one doesn't pay this transfer
@@ -1178,7 +1204,7 @@ index ca96b4a..ab22a28 100644
                              continue;
                          }
                          let vout = seal.vout.into_u32();
-@@ -1778,11 +1779,20 @@ impl Wallet {
+@@ -1778,11 +1782,20 @@ impl Wallet {
          let mut assignments_collected = AssignmentsCollection::default();
          let mut input_btc_amt = 0;
          for unspent in mut_unspents {
@@ -1201,7 +1227,7 @@ index ca96b4a..ab22a28 100644
                  .collect();
  
              // skip UTXOs with no allocations
-@@ -2441,6 +2451,17 @@ impl Wallet {
+@@ -2441,6 +2454,17 @@ impl Wallet {
      pub(crate) fn get_input_unspents(
          &self,
          unspents: &[LocalUnspent],
@@ -1219,7 +1245,7 @@ index ca96b4a..ab22a28 100644
      ) -> Result<Vec<LocalUnspent>, Error> {
          let mut input_unspents = unspents.to_vec();
          // consider the following UTXOs unspendable:
-@@ -2449,16 +2470,35 @@ impl Wallet {
+@@ -2449,16 +2473,35 @@ impl Wallet {
          // - pending incoming witness
          // - pending incoming blinded
          // - inexistent
@@ -1260,7 +1286,31 @@ index ca96b4a..ab22a28 100644
          });
          Ok(input_unspents)
      }
-@@ -2699,6 +2739,16 @@ impl Wallet {
+@@ -2685,13 +2728,23 @@ impl Wallet {
+         // Use js_sys::Date::now() for WASM-compatible timestamp
+         // (std::time::UNIX_EPOCH.elapsed() panics on wasm32-unknown-unknown)
+         let start_time = (js_sys::Date::now() / 1000.0) as u64;
++        // MASKED: a light sync between full ones (at most every 30 minutes), when asked for (`set_light_sync`)
++        let light = !full_scan
++            && self.light_recent.is_some()
++            && start_time.saturating_sub(self.last_full_sync) < LIGHT_SYNC_FULL_EVERY;
+         let update: Update = if full_scan {
+             let request = self.bdk_wallet.start_full_scan_at(start_time);
+             self.indexer().full_scan(request).await?.into()
++        } else if light {
++            let request = self._light_sync_request(start_time, self.light_recent.unwrap_or(20))?;
++            self.indexer().sync(request).await?.into()
+         } else {
+             let request = self.bdk_wallet.start_sync_with_revealed_spks_at(start_time);
+             self.indexer().sync(request).await?.into()
+         };
++        if !light {
++            self.last_full_sync = start_time;
++        }
+         self.bdk_wallet
+             .apply_update(update)
+             .map_err(|e| Error::FailedBdkSync {
+@@ -2699,6 +2752,16 @@ impl Wallet {
              })?;
          self.bdk_wallet.persist(&mut self.bdk_database)?;
  
@@ -1277,28 +1327,72 @@ index ca96b4a..ab22a28 100644
          let pending_witness_scripts = self._reconcile_pending_witness()?;
  
          let db_txos = self.database.iter_txos()?;
-@@ -2730,12 +2780,17 @@ impl Wallet {
+@@ -2730,10 +2793,62 @@ impl Wallet {
              }
              self.database.set_txo(new_db_utxo.clone())?;
          }
--
--        debug!(self.logger, "Synced TXOs");
--
-         Ok(())
-     }
++        Ok(())
++    }
  
+-        debug!(self.logger, "Synced TXOs");
++    /// MASKED: syncs become light (see `_light_sync_request`), with a full one at most every 30 minutes and whenever
++    /// a full scan is asked for. `None`: every sync is full, as rgb-lib does.
++    pub fn set_light_sync(&mut self, recent: Option<u32>) {
++        self.light_recent = recent;
++    }
+ 
+-        Ok(())
++    /// A light sync request. A full one asks the block server about every address this wallet ever used (hundreds
++    /// of requests on a used wallet: too many for public servers like mempool.space). This one asks only about:
++    /// - the last `recent` addresses of each side (where new payments land: a deposit, a payment to a new invoice),
++    /// - the addresses invoices of this wallet still wait on (witness receives),
++    /// - this wallet's transactions not confirmed yet (their confirmation or eviction).
++    /// Spends of older outputs aren't seen until the next full sync: this wallet's own are already known (a broadcast
++    /// puts them in the graph), and a buyer's spend of a listing is checked with the listing.
++    fn _light_sync_request(
++        &self,
++        start_time: u64,
++        recent: u32,
++    ) -> Result<bdk_wallet::chain::spk_client::SyncRequestBuilder<(KeychainKind, u32)>, Error> {
++        let pending: HashSet<String> = self
++            .database
++            .iter_pending_witness_scripts()?
++            .into_iter()
++            .map(|p| p.script)
++            .collect();
++        let mut spks: Vec<((KeychainKind, u32), ScriptBuf)> = vec![];
++        let index = self.bdk_wallet.spk_index();
++        for keychain in [KeychainKind::External, KeychainKind::Internal] {
++            let Some(last) = index.last_revealed_index(keychain) else { continue };
++            let from = last.saturating_sub(recent);
++            for (i, spk) in index.revealed_keychain_spks(keychain) {
++                if i >= from || pending.contains(&spk.to_hex_string()) {
++                    spks.push(((keychain, i), spk));
++                }
++            }
++        }
++        let unconfirmed: Vec<bdk_wallet::bitcoin::Txid> = self
++            .bdk_wallet
++            .transactions()
++            .filter(|t| !t.chain_position.is_confirmed())
++            .map(|t| t.tx_node.txid)
++            .collect();
++        Ok(bdk_wallet::chain::spk_client::SyncRequest::builder_at(start_time)
++            .chain_tip(self.bdk_wallet.latest_checkpoint())
++            .spks_with_indexes(spks)
++            .txids(unconfirmed))
++    }
++
 +    /// MASKED: learn the outputs of this wallet's own transactions just broadcast, without asking the block server
 +    /// (a sync asks it about every address this wallet ever used: hundreds of requests). The broadcast already put
 +    /// the transaction in BDK's graph.
 +    pub async fn learn_own_outputs(&mut self) -> Result<(), Error> {
 +        self._save_new_txos()?;
 +        self.flush().await
-+    }
-+
+     }
+ 
      /// Sync and save the state, also when the sync fails part way.
-     async fn sync_and_save(&mut self, full_scan: bool) -> Result<(), Error> {
-         let res = self.sync_db_txos(full_scan).await;
-@@ -2815,11 +2870,11 @@ impl Wallet {
+@@ -2815,11 +2930,11 @@ impl Wallet {
              if internal_unspents_outpoints.contains(&(txid.clone(), vout)) {
                  continue;
              }
@@ -1315,7 +1409,7 @@ index ca96b4a..ab22a28 100644
              db_txo.spent = ActiveValue::Set(true);
              self.database.update_txo(db_txo)?;
          }
-@@ -4723,6 +4778,22 @@ impl Wallet {
+@@ -4723,6 +4838,22 @@ impl Wallet {
                  &data.consignment_hash,
              ) {
                  Ok(bytes) => {
@@ -1338,7 +1432,7 @@ index ca96b4a..ab22a28 100644
                      self.received_consignments
                          .insert(recipient_id.clone(), bytes);
                  }
-@@ -4871,7 +4942,14 @@ impl Wallet {
+@@ -4871,7 +5002,14 @@ impl Wallet {
                  .await;
          };
          let blinding = derive_shared(&ed25519_from_seed(&seed), &sender_vk)?.seal_blinding;
@@ -1354,7 +1448,7 @@ index ca96b4a..ab22a28 100644
          let spent = Self::known_spent_opouts(&consignment);
          let mut payments: Vec<_> = self.find_payments(&consignment, &matcher, &spent).collect();
          if payments.len() != 1 {
-@@ -5805,6 +5883,8 @@ impl Wallet {
+@@ -5805,6 +5943,8 @@ impl Wallet {
                      details: s!("consignment not found in memory"),
                  })?
                  .clone();
@@ -1363,7 +1457,7 @@ index ca96b4a..ab22a28 100644
              let consignment =
                  RgbTransfer::load(&consignment_bytes[..]).map_err(InternalError::from)?;
  
-@@ -7053,6 +7133,10 @@ impl Wallet {
+@@ -7053,6 +7193,10 @@ impl Wallet {
          batch: bool,
      ) -> Result<(), Error> {
          for recipient in recipients {
@@ -1374,7 +1468,7 @@ index ca96b4a..ab22a28 100644
              let recipient_id = &recipient.recipient_id;
              let recipient_vk = verifying_key_from_bytes(&recipient.public_key)?;
              let derived = derive_shared(sender_sk, &recipient_vk)?;
-@@ -7590,6 +7674,246 @@ impl Wallet {
+@@ -7590,6 +7734,246 @@ impl Wallet {
          Ok(tx.compute_txid().to_string())
      }
  
@@ -1621,7 +1715,7 @@ index ca96b4a..ab22a28 100644
      /// Prepare the PSBT to inflate an IFA asset.
      pub async fn inflate_begin(
          &mut self,
-@@ -12074,3 +12398,839 @@ mod bfa_tests {
+@@ -12074,3 +12458,857 @@ mod bfa_tests {
          assert!(options(&format!(r#","evm_chains":{{"mainnet":{chain}}}"#)).is_err());
      }
  }
@@ -2393,6 +2487,24 @@ index ca96b4a..ab22a28 100644
 +        let why: HashMap<String, &str> = w.empty_utxos().unwrap().into_iter().map(|(_, o, y)| (o.to_string(), y)).collect();
 +        assert_eq!(why[&format!("{moved_txid}:1")], "pending witness", "it closed a token seal: tokens may be on it");
 +        assert_eq!(why[&format!("{}:1", later.compute_txid())], "unconfirmed");
++    }
++
++    /// A light sync asks about the last addresses of each side and the ones invoices wait on, not every address.
++    #[test]
++    fn light_sync_asks_about_few_addresses() {
++        let mut w = make_test_wallet_with_keys(crate::keys::generate_keys(BitcoinNetwork::Regtest), false);
++        let mut ext = vec![];
++        for _ in 0..40 { ext.push(w._get_new_address(KeychainKind::External).unwrap().script_pubkey()); }
++        for _ in 0..30 { w._get_new_address(KeychainKind::Internal).unwrap(); }
++        // an old invoice still waiting on address 3
++        w.database.set_pending_witness_script(DbPendingWitnessScriptActMod { script: ActiveValue::Set(ext[3].to_hex_string()), ..Default::default() }).unwrap();
++        let req = w._light_sync_request(1, 10).unwrap().build();
++        let n = req.progress().spks_remaining;
++        let last_e = w.bdk_wallet.spk_index().last_revealed_index(KeychainKind::External).unwrap() as usize;
++        let last_i = w.bdk_wallet.spk_index().last_revealed_index(KeychainKind::Internal).unwrap() as usize;
++        let expect = (last_e.min(10) + 1) + (last_i.min(10) + 1) + 1;
++        assert_eq!(n, expect, "11 recent per side and the invoice's");
++        assert!(n < 40, "not every address");
 +    }
 +
 +    /// A witness receive no transaction pays is listed (it can be failed); one a known transaction pays is not.
