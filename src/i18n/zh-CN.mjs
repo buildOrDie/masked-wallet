@@ -1432,4 +1432,12 @@ export const ZH_CN = {
   "Get ecash only you can claim.</b> Ask the sender to lock it to your Public address. Anyone who copies the token gets nothing.": "获取只有你能领取的电子现金。</b>请发送方把它锁定到你的公开地址。任何人复制这个代币都拿不到。",
   "Your tokens are still settling from your last move, sale or purchase. Wait for its block (about 10 minutes), then try again. Nothing was sent. ({0})": "你的代币仍在处理上一次的转移、出售或购买。请等待其区块确认（约 10 分钟）后再试。没有发送任何内容。（{0}）",
   "The tokens' last transfer isn't confirmed yet. Try again after its block (about 10 minutes). Nothing was sent.": "这些代币的上一笔转账尚未确认。请在其区块确认后（约 10 分钟）再试。没有发送任何内容。",
+  "Listed": "已挂单",
+  "Listing cancelled": "挂单已取消",
+  "Moved in your wallet": "钱包内转移",
+  "Bought": "已买入",
+  "On its own output for an Instant listing at {0}. Nothing left your wallet.": "已放到单独的输出上，用于售价 {0} 的即时挂单。没有任何东西离开你的钱包。",
+  "Moved back to a new output of yours: the old listing can't be used.": "已转回你的一个新输出：旧挂单无法再使用。",
+  "To an output of your own (a listing or a lot). Nothing left your wallet.": "转到你自己的一个输出（挂单或分批挂单）。没有任何东西离开你的钱包。",
+  "For {0}, on the RGB market": "在 RGB 市场成交，价格 {0}",
 };

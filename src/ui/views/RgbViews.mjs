@@ -51,6 +51,64 @@ export function historyRow(t, a, r) {
   return { label: kind || 'Transfer', sign: '', amount: got ? r.amount(a, got) : '', note: STATUS[t.status] ?? '', txid: t.txid };
 }
 
+/**
+ * A token's history in the words of what happened: one row per transaction. A transaction of this wallet that sends
+ * tokens to itself (a listing's move, a cancel, a lot) is one row, not a "Sent" and a "Received"; a sale of an
+ * Instant listing is "Sold … for … sats", a purchase "Bought … for … sats". The Instant records name them.
+ * @returns {{ label: string, sign: string, amount: string, note: string, txid: string, at: number, pending: boolean, icon?: string, cancel?: number|null, dropped?: boolean }[]}
+ */
+export function tradeHistory(r, a) {
+  let store = {};
+  try { store = r.service?.instantStore?.().all?.() || {}; } catch { store = {}; }
+  const role = new Map(); // txid -> { what, e }
+  for (const e of Object.values(store)) {
+    if (!e || e.assetId !== a.assetId) continue;
+    if (e.role === 'seller') {
+      if (e.moveTxid) role.set(String(e.moveTxid).toLowerCase(), { what: 'listed', e });
+      if (e.cancelTxid) role.set(String(e.cancelTxid).toLowerCase(), { what: 'cancelled', e });
+      if (e.soldTxid) role.set(String(e.soldTxid).toLowerCase(), { what: 'sold', e });
+    } else if (e.role === 'buyer' && e.txid) role.set(String(e.txid).toLowerCase(), { what: 'bought', e });
+  }
+  const sats = (n) => `${Number(n || 0).toLocaleString('en-US')} sats`;
+  const waiting = (t) => ['WaitingCounterparty', 'WaitingConfirmations'].includes(String(t.status));
+  const groups = new Map(), out = [];
+  for (const t of r.history(a.assetId)) {
+    const h = historyRow(t, a, r);
+    if (!h) continue;
+    const key = t.txid ? String(t.txid).toLowerCase() : `#${t.batchTransferIdx}-${t.idx ?? Math.random()}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ t, h });
+  }
+  for (const [txid, list] of groups) {
+    const at = Math.max(...list.map((x) => (x.t.updatedAt || x.t.createdAt || 0) * 1000));
+    const pending = list.some((x) => waiting(x.t) && !x.h.dropped);
+    const ctx = role.get(txid);
+    const recv = list.filter((x) => x.h.sign === '+'), sent = list.filter((x) => x.h.sign === '−');
+    const amtOf = (x) => x.h.amount;
+    const note = pending ? 'Waiting for a block' : '';
+    if (recv.length && sent.length) {
+      // this wallet to itself
+      const amount = amtOf(recv[recv.length - 1]);
+      if (ctx?.what === 'listed') { out.push({ label: 'Listed', sign: '', amount, note: note || `On its own output for an Instant listing at ${sats(ctx.e.priceSats)}. Nothing left your wallet.`, txid, at, pending, icon: 'move' }); continue; }
+      if (ctx?.what === 'cancelled') { out.push({ label: 'Listing cancelled', sign: '', amount, note: note || 'Moved back to a new output of yours: the old listing can\'t be used.', txid, at, pending, icon: 'move' }); continue; }
+      out.push({ label: 'Moved in your wallet', sign: '', amount, note: note || 'To an output of your own (a listing or a lot). Nothing left your wallet.', txid, at, pending, icon: 'move' });
+      continue;
+    }
+    for (const { t, h } of list) {
+      if (ctx?.what === 'sold' && h.sign === '−') { out.push({ ...h, label: 'Sold', note: h.note || `For ${sats(ctx.e.priceSats)}, on the RGB market`, txid, at, pending, icon: 'sold' }); continue; }
+      if (ctx?.what === 'bought' && h.sign === '+') { out.push({ ...h, label: 'Bought', note: h.note || `For ${sats(ctx.e.priceSats)}, on the RGB market`, txid, at, pending }); continue; }
+      out.push({ ...h, txid: h.txid, at: (t.updatedAt || t.createdAt || 0) * 1000, pending: waiting(t) && !h.dropped });
+    }
+  }
+  // sales the engine doesn't list as a transfer (the buyer's transaction spent the listing's output)
+  for (const [txid, c] of role) {
+    if (c.what !== 'sold' || groups.has(txid)) continue;
+    const e = c.e;
+    out.push({ label: 'Sold', sign: '−', amount: r.amount(a, e.amount), note: `For ${sats(e.priceSats)}, on the RGB market`, txid, at: Number(e.at || 0), pending: false, icon: 'sold' });
+  }
+  return out.sort((x, y) => (Number(y.pending) - Number(x.pending)) || (y.at - x.at));
+}
+
 export class RgbHome {
   /** The RGB section of Home (Signet only). */
   static render(app) {
@@ -227,15 +285,16 @@ export class RgbTokenView extends View {
 
   history(a) {
     const r = this.app.rgb, explorer = this.account.explorer, onChain = r.profile.id === 'public' || r.isMain;
-    const rows = r.history(a.assetId).map((t) => ({ t, h: historyRow(t, a, r) })).filter((x) => x.h);
+    const rows = tradeHistory(r, a);
     if (!rows.length) return '<p class="muted small center">No activity yet.</p>';
     let day = '';
-    return rows.map(({ t, h }) => {
-      const label = ['WaitingCounterparty', 'WaitingConfirmations'].includes(String(t.status)) && !h.dropped ? 'Pending' : dayLabel((t.updatedAt || t.createdAt || 0) * 1000);
+    return rows.map((h) => {
+      const label = h.pending ? 'Pending' : dayLabel(h.at);
       const sep = label !== day ? `<p class="h-day">${esc(label)}</p>` : '';
       day = label;
-      const cls = h.sign === '−' ? 'out' : 'in';
-      const inner = `<span class="h-ic ${cls}">${h.sign === '−' ? I.send : h.label === 'Created' ? I.mint : I.recv}</span>
+      const cls = h.sign === '−' ? 'out' : h.sign === '+' ? 'in' : 'mv';
+      const icon = h.icon === 'sold' ? I.send : h.icon === 'move' ? I.list : h.sign === '−' ? I.send : h.label === 'Created' ? I.mint : I.recv;
+      const inner = `<span class="h-ic ${cls}">${icon}</span>
         <span class="bal-txt"><b>${h.label}</b><span>${esc(h.note || 'Confirmed')}</span></span><span class="h-amt ${cls}">${h.sign}${h.amount}</span>`;
       const cancel = Number.isFinite(h.cancel) ? `<button class="btn ghost sm h-cancel" data-rgb="cancelSend" data-rgb-arg="${h.cancel}" ${r.busy ? 'disabled' : ''}>Cancel transfer</button>` : '';
       return sep + (h.txid && onChain ? `<a class="h-row" href="${explorer.tx(h.txid)}" target="_blank" rel="noopener">${inner}</a>` : `<div class="h-row">${inner}</div>`) + cancel;
