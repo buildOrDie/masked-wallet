@@ -512,8 +512,8 @@ export class ApprovalController {
         await this.rgbBackedUp(r).catch(() => {});
         return out;
       });
-      case 'rgbOutputs': return this.rgbBusy(async () => { prepared(''); return app.rgb.service.outputsReport(); });
-      case 'rgbListAssets': return this.rgbBusy(async () => { prepared(''); return app.rgb.service.assetList(); });
+      case 'rgbOutputs': return this.rgbBusy(async () => { prepared(''); return app.rgb.withoutDropped(await app.rgb.service.outputsReport()); });
+      case 'rgbListAssets': return this.rgbBusy(async () => { prepared(''); return app.rgb.withoutDropped(await app.rgb.service.assetList()); });
       case 'rgbSwapAvailable': return this.rgbBusy(async () => { prepared(''); return app.rgb.service.offerableAmount({ assetId: a.params.assetId }); });
       case 'rgbBuyPrepare': return this.rgbBusy(async () => {
         const b = prepared(''), r = app.rgb;

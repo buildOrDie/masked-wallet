@@ -513,6 +513,34 @@ export class WalletRgb {
   dropped() { try { return JSON.parse(localStorage.getItem(this.droppedKey) || '{}') || {}; } catch { return {}; } }
   isDropped(t) { return !!(t?.txid && this.dropped()[String(t.txid)]); }
   /**
+   * Tokens on a receive whose transaction the network dropped never arrived: take them out of "waiting for a block"
+   * in what goes to the page (assetList's `held`, outputsReport's outputs and tokens), as Home already does.
+   * @template T @param {T} x @returns {T}
+   */
+  withoutDropped(x) {
+    const gone = new Set(Object.keys(this.dropped()).map((t) => t.toLowerCase()));
+    if (!gone.size || !x) return x;
+    const any = /** @type {any} */ (x);
+    if (Array.isArray(any)) {
+      // assetList: per token, the amount on dropped receives
+      return /** @type {any} */ (any.map((a) => {
+        const lost = (this.data?.transfers?.[a.assetId] || []).filter((t) => /^Receive/.test(String(t?.kind)) && String(t?.status) === 'WaitingConfirmations' && this.isDropped(t))
+          .reduce((n, t) => n + BigInt((t.assignments || []).reduce((m, y) => m + Number(y?.Fungible ?? 0), 0) || Number(t.requestedAssignment?.Fungible ?? 0) || 0), 0n);
+        if (!lost || !a.held) return a;
+        const w = BigInt(a.held.waiting || 0) - lost;
+        return { ...a, held: { ...a.held, waiting: String(w > 0n ? w : 0n), dropped: String(lost) } };
+      }));
+    }
+    if (Array.isArray(any.rgb)) {
+      for (const o of any.rgb) if (o.state === 'waiting' && gone.has(String(o.outpoint).split(':')[0])) o.state = 'dropped';
+      for (const t of any.tokens || []) {
+        const lost = any.rgb.filter((o) => o.state === 'dropped').flatMap((o) => o.tokens || []).filter((y) => y.assetId === t.assetId).reduce((n, y) => n + BigInt(y.amount || 0), 0n);
+        if (lost) { const w = BigInt(t.waiting || 0) - lost; t.waiting = String(w > 0n ? w : 0n); t.dropped = String(lost); }
+      }
+    }
+    return x;
+  }
+  /**
    * A receive still "waiting for a block" after hours: ask the block servers whether its transaction exists at all.
    * Waiting over a day and no server has it: dropped at once. Waiting a few hours: not found twice, an hour apart
    * (a server can lag). Dropped: shown as not received and left out of "incoming"; found again later (rebroadcast),
@@ -1126,13 +1154,13 @@ export class WalletRgb {
       });
       case 'repairCancel': this.repair = null; return app.render();
       // What's in this wallet: every output and coin, what it's doing
-      case 'outputs': return this.run(async () => { this.outputs = await this.service.outputsReport(); }, { quiet: true });
+      case 'outputs': return this.run(async () => { this.outputs = this.withoutDropped(await this.service.outputsReport()); }, { quiet: true });
       case 'outputsClose': this.outputs = null; return app.render();
       case 'freeSpare': return this.run(async () => {
         const r = await this.service.freeSpare({ fee: this.fee() });
         app.toast([r.freed ? `${r.freed} spare RGB outputs freed: ${r.sats.toLocaleString('en-US')} sats back as bitcoin for buys after one confirmation.` : '', r.cancelled ? `${r.cancelled} unused invoices given up.` : ''].filter(Boolean).join(' '));
         await this.refresh().catch(() => {});
-        this.outputs = await this.service.outputsReport().catch(() => this.outputs);
+        this.outputs = this.withoutDropped(await this.service.outputsReport().catch(() => this.outputs));
       });
       case 'cloudReplace': return this.run(async () => { if (await this.cloudSave({ replace: true })) app.toast('This browser\'s RGB state is now the cloud backup'); });
       case 'betaOff': return this.run(async () => { await this.close(); try { localStorage.setItem(RGB_BETA_KEY, '0'); } catch { /* */ } app.toast('RGB beta is off. Your RGB wallet stays saved in this browser.'); });
