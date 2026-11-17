@@ -552,6 +552,7 @@ test('Buying with too little in the RGB balance: the purchase screen offers to a
   const r = { freeBtc: () => ({ settled: 5000, pending: 0 }) };
   assert.deepEqual(topUpFor(r, 20000), { sats: 21000, have: 5000 });
   assert.equal(topUpFor({ freeBtc: () => ({ settled: 50000 }) }, 20000), null);
+  assert.equal(topUpFor({ freeBtc: () => ({ settled: 5000, pending: 30000 }) }, 20000), null, 'coins not confirmed yet (a move\'s change) count too');
   // the button: from the Bitcoin balance to the RGB balance, once
   const app = rgbApp();
   rgbReady(app);

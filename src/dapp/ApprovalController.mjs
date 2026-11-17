@@ -23,7 +23,10 @@ const TOP_UP_MARGIN = 1000;
 const BUYS = ['rgbBuyPrepare', 'rgbInstantBuy', 'rgbInstantBuyMany'];
 /** A purchase the RGB balance can't pay: how much to add from the Bitcoin balance (null when it can). */
 export function topUpFor(r, cost) {
-  const have = r.freeBtc ? r.freeBtc().settled : 0;
+  // a purchase also pays from coins not confirmed yet (the change of this wallet's own moves and purchases, bitcoin
+  // just added): counting only confirmed ones asked people to add bitcoin they already had
+  const f = r.freeBtc ? r.freeBtc() : { settled: 0, pending: 0 };
+  const have = Number(f.settled || 0) + Number(f.pending || 0);
   return have >= cost + TOP_UP_MARGIN ? null : { sats: cost + TOP_UP_MARGIN, have };
 }
 /** The engine's "needs N sats" for a purchase, as a number (0 when the text says something else). */
