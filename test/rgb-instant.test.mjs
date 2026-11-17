@@ -853,3 +853,26 @@ test('free spare RGB outputs: keeps 6, frees the rest into coins; empty outputs 
   s.w.w.spareUtxos = () => list.slice(0, 5).map((x) => `${x.utxo.outpoint.txid}:0`);
   await assert.rejects(s.w.freeSpare({}), /Only 5 spare RGB outputs: MASKED keeps 6/);
 });
+
+test('why an empty output is held, and tokens on a transaction the network dropped', async () => {
+  const s = wallet({ name: 'held', lib: fakeLib(), chain: fakeChain() });
+  const u = (t, vout, extra = {}) => ({ utxo: { outpoint: { txid: T(t), vout }, btcAmount: 330, colorable: true, exists: true }, rgbAllocations: [], ...extra });
+  const list = [u('1', 0), u('2', 0), u('3', 2, { rgbAllocations: [{ assetId: ASSET, settled: false, assignment: { Fungible: 500 } }] })];
+  s.w.w.sync = () => {};
+  s.w.w.listUnspents = () => list;
+  s.w.w.listUnspentsVanilla = async () => [];
+  s.w.listAssets = async () => ({ nia: [{ assetId: ASSET, ticker: 'MASKED', precision: 0 }], ifa: [] });
+  s.w.w.spareUtxos = () => [`${T('1')}:0`];
+  s.w.w.freeSpareUtxosBegin = async () => 'psbt';
+  s.w.w.emptyUtxos = () => JSON.stringify([{ outpoint: `${T('1')}:0`, sats: 330, why: '' }, { outpoint: `${T('2')}:0`, sats: 330, why: 'pending witness' }]);
+  const was = globalThis.fetch;
+  globalThis.fetch = async (url) => new Response('Transaction not found', { status: String(url).includes(`/tx/${T('3')}/status`) ? 404 : 500 });
+  try {
+    const r = await s.w.outputsReport(s.store);
+    const by = Object.fromEntries(r.rgb.map((o) => [o.outpoint, o]));
+    assert.equal(by[`${T('2')}:0`].state, 'held');
+    assert.equal(by[`${T('2')}:0`].why, 'pending witness');
+    assert.equal(by[`${T('1')}:0`].state, 'empty');
+    assert.equal(by[`${T('3')}:2`].state, 'dropped');
+  } finally { globalThis.fetch = was; }
+});

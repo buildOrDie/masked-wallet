@@ -258,6 +258,15 @@ export class LiteWallet {
 
   /** The engine can free spare RGB outputs (engine: spareUtxos, freeSpareUtxosBegin). */
   get canFreeSpare() { return typeof this.wallet?.spareUtxos === 'function' && typeof this.wallet?.freeSpareUtxosBegin === 'function'; }
+  /**
+   * Outputs with no live token (a failed transfer's doesn't count) and why each isn't spare (engine: emptyUtxos):
+   * Map outpoint -> '' (spare) | 'pending witness' | 'blinded receive' | 'transfer' | 'listing' | 'bitcoin operation' |
+   * 'not broadcast' | 'unconfirmed'. null on an older engine.
+   */
+  emptyReasons() {
+    if (typeof this.wallet?.emptyUtxos !== 'function') return null;
+    try { return new Map((JSON.parse(String(this.wallet.emptyUtxos())) || []).map((x) => [String(x.outpoint).toLowerCase(), String(x.why || '')])); } catch { return null; }
+  }
   /** Spare RGB outputs (nothing on them, nothing pending, not reserved, confirmed), as `txid:vout`; null on an older engine. */
   spareOutputs() {
     if (!this.canFreeSpare) return null;
@@ -601,6 +610,7 @@ export class LiteWallet {
     const promised = new Map();
     try { for (const [id, e] of Object.entries(store?.all?.() || {})) if (e?.role === 'seller' && e.coin && ['moving', 'queued', 'ready', 'cancelling'].includes(e.stage)) promised.set(String(e.coin).toLowerCase(), { offerId: id, stage: e.stage === 'moving' && e.resign && e.templateTxid ? 'ready' : e.stage, assetId: e.assetId, amount: String(e.amount || ''), priceSats: String(e.priceSats || ''), waiting: e.stage === 'moving' && e.waiting ? String(e.waiting).slice(0, 240) : '' }); } catch { /* none */ }
     const spareSet = this.spareOutputs();
+    const reasons = this.emptyReasons();
     const rgb = all.map((u) => {
       const o = u.utxo?.outpoint || {};
       const op = `${String(o.txid).toLowerCase()}:${o.vout}`;
@@ -616,8 +626,15 @@ export class LiteWallet {
             : u.utxo?.colorable === false ? 'unusable'
               : tokens.some((t) => !t.settled) || u.utxo?.exists === false ? 'waiting'
                 : 'free';
-      return { outpoint: op, sats: Number(u.utxo?.btcAmount ?? 0), tokens, state, listing: p || null, invoices };
+      return { outpoint: op, sats: Number(u.utxo?.btcAmount ?? 0), tokens, state, listing: p || null, invoices, why: state === 'held' ? (reasons?.get(op) || '') : '' };
     }).filter(Boolean);
+    // tokens waiting on a transaction no block server has (dropped from the mempool, or never sent): they never arrived
+    const missing = new Map();
+    for (const o of rgb.filter((x) => x.state === 'waiting').slice(0, 6)) {
+      const txid = o.outpoint.split(':')[0];
+      if (!missing.has(txid)) missing.set(txid, await this.txMissing(txid));
+      if (missing.get(txid)) o.state = 'dropped';
+    }
     let coins = [];
     try {
       const vanilla = (await this.wallet.listUnspentsVanilla(online, 0, true)) || [];
@@ -625,7 +642,7 @@ export class LiteWallet {
       const spent = this.justSpent();
       coins = vanilla.filter((c) => !c.is_spent).map((c) => { const op = String(outpointOf(c.outpoint) || ''); return { outpoint: op, sats: Number(c.txout?.value ?? 0), confirmed: conf.has(op), justSpent: spent.has(op.toLowerCase()) }; });
     } catch { coins = []; }
-    const order = { 'on sale': 0, 'going live': 1, cancelling: 2, promised: 3, invoice: 4, free: 5, waiting: 6, unusable: 7, held: 8, empty: 9 };
+    const order = { 'on sale': 0, 'going live': 1, cancelling: 2, promised: 3, invoice: 4, free: 5, waiting: 6, dropped: 7, unusable: 8, held: 9, empty: 10 };
     rgb.sort((a, b) => order[a.state] - order[b.state] || b.tokens.length - a.tokens.length);
     coins.sort((a, b) => b.sats - a.sats);
     // per token: where its balance is
@@ -996,6 +1013,10 @@ export class LiteWallet {
    * Does a block server know this transaction (in the mempool or in a block)? Asks for the transaction itself:
    * electrs answers /status with {"confirmed":false} even for a transaction it has never seen.
    */
+  /** The block server in use answers that it doesn't have this transaction at all (404): not in a block, not in its mempool. */
+  async txMissing(txid) {
+    try { const r = await fetch(`${this.indexer || this.indexers()[0]}/tx/${txid}/status`); return r.status === 404; } catch { return false; }
+  }
   async knowsTx(txid) {
     try {
       const r = await fetch(`${this.indexer || this.indexers()[0]}/tx/${txid}/hex`);
