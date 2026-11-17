@@ -564,7 +564,7 @@ export class LiteWallet {
     const meta = new Map([...nia, ...ifa].map((a) => [a.assetId, { ticker: a.ticker, precision: a.precision }]));
     // what each promised output is for
     const promised = new Map();
-    try { for (const [id, e] of Object.entries(store?.all?.() || {})) if (e?.role === 'seller' && e.coin && ['moving', 'queued', 'ready', 'cancelling'].includes(e.stage)) promised.set(String(e.coin).toLowerCase(), { offerId: id, stage: e.stage, priceSats: e.priceSats }); } catch { /* none */ }
+    try { for (const [id, e] of Object.entries(store?.all?.() || {})) if (e?.role === 'seller' && e.coin && ['moving', 'queued', 'ready', 'cancelling'].includes(e.stage)) promised.set(String(e.coin).toLowerCase(), { offerId: id, stage: e.stage, assetId: e.assetId, amount: String(e.amount || ''), priceSats: String(e.priceSats || '') }); } catch { /* none */ }
     const rgb = all.map((u) => {
       const o = u.utxo?.outpoint || {};
       const op = `${String(o.txid).toLowerCase()}:${o.vout}`;
