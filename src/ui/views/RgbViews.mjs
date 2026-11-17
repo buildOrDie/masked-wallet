@@ -421,6 +421,7 @@ export class RgbSettings {
         ${Object.keys(r.data?.transfers || {}).some((id) => r.unsent(id).length) ? '<p class="info warn small">A transfer is waiting for the other wallet to accept it. Let it finish, or cancel it, before you restore this wallet anywhere else: a restored wallet can\'t finish a transfer that was already signed.</p>' : ''}
         <button class="btn ghost wide" data-rgb="backup" ${r.busy ? 'disabled' : ''}>Save RGB backup file</button>
         <p class="muted small">${r.fileAt ? `Last file: ${ago(r.fileAt)}. ` : 'No backup file saved from this browser yet. '}${r.cloudOn ? (r.cloud.error || r.service?.backupRequired ? 'Changes since the last cloud backup are not saved anywhere yet.' : 'The cloud backup has every change.') : r.service?.backupRequired ? 'Changed since your last RGB backup.' : 'Backup up to date.'} Restoring needs this same MASKED wallet.</p>
+        ${RgbSettings.outputs(r, app)}
         ${RgbSettings.repair(r)}
         ${RgbSettings.instant(r)}
         <button class="btn ghost wide" data-rgb="off" ${r.busy ? 'disabled' : ''}>Turn off RGB for now</button>
@@ -429,6 +430,48 @@ export class RgbSettings {
         <details><summary>Restore an RGB backup</summary><input id="rgbRestore" type="file" accept=".json,application/json"><button class="btn ghost wide" data-rgb="restore" ${r.busy ? 'disabled' : ''}>Restore</button></details>
         ${msg(r)}
       </div></details></section>`;
+  }
+  /**
+   * Settings → RGB → What's in this wallet: each token's balance (free, in listings, waiting, unusable), every RGB
+   * output with the tokens on it and what it's doing, and every plain bitcoin coin of the RGB balance.
+   */
+  static outputs(r, app) {
+    const rep = r.outputs;
+    if (!rep) return `<button class="btn ghost wide" data-rgb="outputs" ${r.busy ? 'disabled' : ''}>What's in this RGB wallet</button>`;
+    const unit = r.isMain ? 'BTC' : 'tBTC';
+    const amt = (t) => { const a = r.find?.(t.assetId); return a ? r.amount(a, t.amount) : (Number(t.amount) / 10 ** (t.precision || 0)).toLocaleString('en-US'); };
+    const tick = (t) => esc(t.ticker || short(t.assetId, 6));
+    const link = (op) => { const tx = String(op).split(':')[0]; const ex = app?.account?.explorer; return ex && (r.profile.id === 'public' || r.isMain) ? `<a class="mono" href="${ex.tx(tx)}" target="_blank" rel="noopener">${esc(short(op, 6))}</a>` : `<span class="mono">${esc(short(op, 6))}</span>`; };
+    const N = (v) => Number(v);
+    // per token: where the balance is
+    const tokens = (rep.tokens || []).map((t) => {
+      const parts = [['free', 'free to list or send', t.free], ['listed', 'in your listings', t.listed], ['waiting', 'waiting for a block', t.waiting], ['other', 'on outputs it can\'t use', t.other]].filter(([, , v]) => N(v) > 0);
+      const total = parts.reduce((x, [, , v]) => x + N(v), 0);
+      return `<div class="rgo-tok"><div class="rgo-tokh"><b>${tick(t)}</b><span>${amt({ ...t, amount: String(total) })}</span></div>
+        <div class="rgo-bar">${parts.map(([k, , v]) => `<i class="${k}" style="flex-grow:${N(v)}"></i>`).join('')}</div>
+        <ul class="rgo-parts">${parts.map(([k, label, v]) => `<li><i class="${k}"></i>${amt({ ...t, amount: v })} ${label}</li>`).join('')}</ul></div>`;
+    }).join('');
+    // RGB outputs, by what they're doing
+    const STATE = { 'on sale': ['On sale', 'An Instant listing: anyone can buy it, even with MASKED closed.'], 'going live': ['Going live', 'Moved for a listing, waiting to be signed.'], cancelling: ['Cancelling', 'A cancel waiting for its block.'], promised: ['Promised', 'Held for a listing MASKED no longer has a record of.'], free: ['Free', 'Can be listed or sent.'], waiting: ['Waiting for a block', 'A receive or a move not confirmed yet.'], unusable: ['Unusable', 'An output MASKED can\'t use for tokens.'], empty: ['Empty', 'Spare RGB outputs: tokens can be received on them.'] };
+    const groups = new Map();
+    for (const o of rep.rgb || []) { if (!groups.has(o.state)) groups.set(o.state, []); groups.get(o.state).push(o); }
+    const rgbList = [...groups].map(([st, list]) => {
+      const [title, hint] = STATE[st] || [st, ''];
+      const sats = list.reduce((x, o) => x + o.sats, 0);
+      return `<details class="rgo-grp" ${['on sale', 'going live', 'free', 'promised', 'unusable'].includes(st) ? 'open' : ''}><summary><span class="rgo-dot ${esc(st.replace(' ', '-'))}"></span><b>${title}</b><span class="muted small">${list.length} output${list.length === 1 ? '' : 's'} · ${fmtBtc(sats)} ${unit}</span></summary>
+        <p class="muted small">${hint}</p>
+        <ul class="rgo-list">${list.map((o) => `<li><span>${o.tokens.length ? o.tokens.map((t) => `<b>${amt(t)}</b> ${tick(t)}${t.settled ? '' : ' <small class="muted">(unconfirmed)</small>'}`).join(' · ') : '<span class="muted">no token</span>'}${o.listing?.priceSats ? ` <small class="muted">for ${N(o.listing.priceSats).toLocaleString('en-US')} sats</small>` : ''}</span><span class="rgo-op">${link(o.outpoint)}<small class="muted">${o.sats.toLocaleString('en-US')} sats</small></span></li>`).join('')}</ul></details>`;
+    }).join('');
+    const coins = rep.coins || [];
+    const coinSats = coins.reduce((x, c) => x + c.sats, 0);
+    const coinList = coins.length ? `<ul class="rgo-list">${coins.map((c) => `<li><span><b>${c.sats.toLocaleString('en-US')}</b> sats${c.confirmed ? '' : ' <small class="muted">(unconfirmed)</small>'}${c.justSpent ? ' <small class="warn">just spent</small>' : ''}</span><span class="rgo-op">${link(c.outpoint)}</span></li>`).join('')}</ul>` : '<p class="muted small">No bitcoin on the RGB balance. Buying and moving tokens needs some: use Add from Bitcoin on Home.</p>';
+    return `<div class="cloud-box rgo">
+      <div class="cloud-h"><b>What's in this RGB wallet</b><span><button class="btn ghost sm" data-rgb="outputs" ${r.busy ? 'disabled' : ''}>Refresh</button> <button class="btn ghost sm" data-rgb="outputsClose">Close</button></span></div>
+      ${tokens ? `<div class="rgo-sec"><h4>Tokens</h4>${tokens}</div>` : ''}
+      <div class="rgo-sec"><h4>RGB outputs <span class="muted small">${(rep.rgb || []).length}</span></h4>${rgbList || '<p class="muted small">None.</p>'}</div>
+      <div class="rgo-sec"><h4>Bitcoin for fees and buys <span class="muted small">${coins.length} coin${coins.length === 1 ? '' : 's'} · ${fmtBtc(coinSats)} ${unit}</span></h4>${coinList}
+        <p class="muted small">Each buy or move spends a coin of its own: a few coins let several go one after another without waiting.</p></div>
+    </div>`;
   }
   /** Settings → RGB → Instant listings: each one's state (signed listings are bought with MASKED closed). */
   /** Earlier versions of the cloud backup the server keeps: load one (replaces this browser's RGB, kept aside first). */

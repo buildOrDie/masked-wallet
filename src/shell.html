@@ -614,6 +614,26 @@ a.act, a.act:hover { text-decoration: none; color: inherit; }
 .lang-btns .btn { flex: 1; }
 :lang(zh-CN) body { line-height: 1.55; }
 .cloud-box { display: grid; gap: 8px; margin: 10px 0; padding: 12px; border: 1px solid var(--line); border-radius: 12px; }
+.rgo { gap: 12px; }
+.rgo h4 { margin: 0 0 6px; font-size: 13px; display: flex; justify-content: space-between; gap: 8px; }
+.rgo-sec { display: grid; gap: 6px; }
+.rgo-tok { padding: 8px 0; border-top: 1px solid var(--line); }
+.rgo-tokh { display: flex; justify-content: space-between; font-size: 13px; }
+.rgo-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; margin: 6px 0; background: var(--line); }
+.rgo-bar i { flex-basis: 0; min-width: 3px; }
+.rgo i.free, .rgo-dot.free { background: #3fb950; } .rgo i.listed, .rgo-dot.on-sale { background: var(--gold, #d4a72c); }
+.rgo i.waiting, .rgo-dot.waiting, .rgo-dot.going-live { background: #58a6ff; } .rgo i.other, .rgo-dot.unusable, .rgo-dot.promised { background: #f85149; }
+.rgo-dot.cancelling { background: #a371f7; } .rgo-dot.empty { background: var(--muted, #888); }
+.rgo-parts { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-size: 12px; }
+.rgo-parts i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; }
+.rgo-grp { border-top: 1px solid var(--line); padding: 6px 0; }
+.rgo-grp summary { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; }
+.rgo-grp summary .muted { margin-left: auto; }
+.rgo-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.rgo-list { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 4px; font-size: 12px; }
+.rgo-list li { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; flex-wrap: wrap; }
+.rgo-op { display: flex; gap: 8px; align-items: baseline; }
+.rgo .warn { color: #f0883e; }
 .auto-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .auto-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); }
 .auto-list li > span { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }

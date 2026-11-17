@@ -800,3 +800,19 @@ test('where a token\'s balance is: free, in listings, waiting for a block, unusa
   const list = [u('a', 0, 36), u('b', 1, 100), u('c', 1, 60), u('d', 2, 37, { settled: false }), u('e', 0, 40, { colorable: false })];
   assert.deepEqual(heldBreakdown(list, ASSET, new Set([`${T('b')}:1`, `${T('c')}:1`])), { free: '36', listed: '160', waiting: '37', other: '40' });
 });
+
+test('what\'s in this RGB wallet: every output with its tokens and what it is doing, and the plain coins', async () => {
+  const s = wallet({ name: 'report', lib: fakeLib(), chain: fakeChain() });
+  const u = (t, vout, v, { settled = true, colorable = true, sats = 1000 } = {}) => ({ utxo: { outpoint: { txid: T(t), vout }, btcAmount: sats, colorable, exists: true }, rgbAllocations: v == null ? [] : [{ assetId: ASSET, settled, assignment: { Fungible: v } }] });
+  s.w.w.sync = () => {};
+  s.w.w.listUnspents = () => [u('a', 0, 36), u('b', 1, 100), u('d', 2, 37, { settled: false }), u('e', 0, 40, { colorable: false }), u('f', 0, null, { sats: 600 })];
+  s.w.w.listUnspentsVanilla = async (_o, min) => min ? [{ outpoint: `${T('c')}:0`, txout: { value: 50000 }, is_spent: false }] : [{ outpoint: `${T('c')}:0`, txout: { value: 50000 }, is_spent: false }, { outpoint: `${T('g')}:1`, txout: { value: 7000 }, is_spent: false }];
+  s.w.listAssets = async () => ({ nia: [{ assetId: ASSET, ticker: 'MASKED', precision: 0 }], ifa: [] });
+  s.store.set('o1', { role: 'seller', assetId: ASSET, amount: '100', priceSats: '5000', stage: 'ready', coin: `${T('b')}:1` });
+  const r = await s.w.outputsReport(s.store);
+  const st = Object.fromEntries(r.rgb.map((o) => [o.outpoint.split(':')[0].slice(0, 4) + ':' + o.outpoint.split(':')[1], o.state]));
+  assert.deepEqual(r.rgb.map((o) => o.state), ['on sale', 'free', 'waiting', 'unusable', 'empty'], JSON.stringify(st));
+  assert.equal(r.rgb[0].listing.priceSats, '5000');
+  assert.deepEqual(r.coins.map((c) => [c.sats, c.confirmed]), [[50000, true], [7000, false]]);
+  assert.equal(r.tokens[0].ticker, 'MASKED');
+});

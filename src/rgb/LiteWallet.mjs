@@ -549,6 +549,50 @@ export class LiteWallet {
       .filter((a) => BigInt(a.spendable) > 0n || BigInt(a.max) > 0n);
   }
 
+  /**
+   * Everything this RGB wallet holds, output by output, with what each is doing (Settings → RGB → What's in this
+   * wallet): plain bitcoin coins (amount, confirmed, just spent by this wallet), and RGB outputs (sats, the tokens on
+   * them, and a state: free, on sale (an Instant listing), going live, being cancelled, waiting for a block, unusable,
+   * or empty: a spare output that can take a token). `store`: the Instant listings, to name what an output is promised to.
+   */
+  async outputsReport(store = null) {
+    const online = this.requireOnline();
+    try { await this.wallet.sync(online); } catch { /* last known */ }
+    if (store) this.syncOwnUnconfirmed(store);
+    const all = this.listable(plain(this.wallet.listUnspents(false)) || []);
+    const { nia, ifa } = await this.listAssets();
+    const meta = new Map([...nia, ...ifa].map((a) => [a.assetId, { ticker: a.ticker, precision: a.precision }]));
+    // what each promised output is for
+    const promised = new Map();
+    try { for (const [id, e] of Object.entries(store?.all?.() || {})) if (e?.role === 'seller' && e.coin && ['moving', 'queued', 'ready', 'cancelling'].includes(e.stage)) promised.set(String(e.coin).toLowerCase(), { offerId: id, stage: e.stage, priceSats: e.priceSats }); } catch { /* none */ }
+    const rgb = all.map((u) => {
+      const o = u.utxo?.outpoint || {};
+      const op = `${String(o.txid).toLowerCase()}:${o.vout}`;
+      const tokens = (u.rgbAllocations || []).filter((a) => a.assignment?.Fungible != null).map((a) => ({ assetId: a.assetId, ticker: meta.get(a.assetId)?.ticker || '', precision: meta.get(a.assetId)?.precision ?? 0, amount: String(a.assignment.Fungible), settled: !!a.settled }));
+      const p = promised.get(op);
+      const state = p ? (p.stage === 'ready' ? 'on sale' : p.stage === 'cancelling' ? 'cancelling' : 'going live')
+        : this.reserved.has(op) ? 'promised'
+          : !tokens.length ? 'empty'
+            : u.utxo?.colorable === false ? 'unusable'
+              : tokens.some((t) => !t.settled) || u.utxo?.exists === false ? 'waiting'
+                : 'free';
+      return { outpoint: op, sats: Number(u.utxo?.btcAmount ?? 0), tokens, state, listing: p || null };
+    });
+    let coins = [];
+    try {
+      const vanilla = (await this.wallet.listUnspentsVanilla(online, 0, true)) || [];
+      const conf = new Set(((await this.wallet.listUnspentsVanilla(online, 1, true)) || []).map((c) => String(outpointOf(c.outpoint) || '')));
+      const spent = this.justSpent();
+      coins = vanilla.filter((c) => !c.is_spent).map((c) => { const op = String(outpointOf(c.outpoint) || ''); return { outpoint: op, sats: Number(c.txout?.value ?? 0), confirmed: conf.has(op), justSpent: spent.has(op.toLowerCase()) }; });
+    } catch { coins = []; }
+    const order = { 'on sale': 0, 'going live': 1, cancelling: 2, promised: 3, free: 4, waiting: 5, unusable: 6, empty: 7 };
+    rgb.sort((a, b) => order[a.state] - order[b.state] || b.tokens.length - a.tokens.length);
+    coins.sort((a, b) => b.sats - a.sats);
+    // per token: where its balance is
+    const byToken = [...meta].map(([assetId, m]) => ({ assetId, ...m, ...heldBreakdown(all, assetId, this.reserved) })).filter((t) => [t.free, t.listed, t.waiting, t.other].some((v) => BigInt(v) > 0n));
+    return { at: Date.now(), coins, rgb, tokens: byToken };
+  }
+
   /** This wallet's plain bitcoin coins: confirmed, and all (with its own unconfirmed change). */
   async btcCoins() {
     const online = this.requireOnline();

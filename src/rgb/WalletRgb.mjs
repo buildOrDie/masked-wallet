@@ -135,6 +135,7 @@ export class WalletRgb {
     this.cloud = { error: '', conflict: 0, saving: false, last: 0 };
     this.cloudAsk = false; // the "switch off cloud backup?" panel is open
     this.cloudPick = 0; // Earlier backups: the version picked, waiting for the second tap
+    this.outputs = null; // Settings → RGB → What's in this wallet (LiteWallet.outputsReport)
     /** @type {any} */ this.cloudTimer = null;
     this.cloudApi = new RgbCloud();
     /** sell automatically: the setting (read from Chrome at start) and the offers set to it */
@@ -1120,6 +1121,9 @@ export class WalletRgb {
         app.toast(gone.length ? `Marked ${gone.length} spent output${gone.length > 1 ? 's' : ''}: balances now count only what this wallet can move` : 'Nothing to repair');
       });
       case 'repairCancel': this.repair = null; return app.render();
+      // What's in this wallet: every output and coin, what it's doing
+      case 'outputs': return this.run(async () => { this.outputs = await this.service.outputsReport(); }, { quiet: true });
+      case 'outputsClose': this.outputs = null; return app.render();
       case 'cloudReplace': return this.run(async () => { if (await this.cloudSave({ replace: true })) app.toast('This browser\'s RGB state is now the cloud backup'); });
       case 'betaOff': return this.run(async () => { await this.close(); try { localStorage.setItem(RGB_BETA_KEY, '0'); } catch { /* */ } app.toast('RGB beta is off. Your RGB wallet stays saved in this browser.'); });
       default: return undefined;

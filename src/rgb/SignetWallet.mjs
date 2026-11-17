@@ -147,6 +147,8 @@ export class SignetWallet {
       return fn(wallet);
     });
   }
+  /** Everything this RGB wallet holds, output by output (see LiteWallet.outputsReport). */
+  outputsReport() { return this.exclusive(() => this.requireWallet().outputsReport(this.instantStore())); }
   /** Outputs this wallet counts that the chain shows spent; `fix` marks them spent (see LiteWallet.repairFromChain). */
   repairFromChain(o = {}) { return this.mutate((w) => w.repairFromChain(o)); }
   /** Bitcoin from the RGB balance to an address; tokens stay (see LiteWallet.sendBtcOut). */
