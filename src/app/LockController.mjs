@@ -65,12 +65,16 @@ export class LockController {
     this.lastActive = Date.now();
     if (this.started) { app.render(); app.sync.run(6); return; }
     this.started = true;
-    if (app.platform.requestId && app.platform.hasExt) app.approvals.load();
+    // an approval window for an RGB request (the market) needs no Bitcoin or Shielded scan: RGB has its own wallet,
+    // and the main MASKED window keeps those balances. Before, every market tap started a full balance and payment scan.
+    const approval = !!(app.platform.requestId && app.platform.hasExt);
+    const loaded = approval ? app.approvals.load() : null;
+    const rgbOnly = () => /^rgb/i.test(String(app.approvals.active?.method || ''));
     app.sites.loadSites().then(() => app.render());
     app.render();
-    app.sync.run(6);
+    if (loaded) loaded.then(() => { if (!rgbOnly()) app.sync.run(6); }, () => app.sync.run(6)); else app.sync.run(6);
     app.rgb.resume(); // RGB opens with the wallet on Signet (its test keys are encrypted with a key from the wallet's words)
-    setInterval(() => { if (state.lockState === 'open' && !app.sync.syncing && document.visibilityState === 'visible') app.sync.run(4); }, 60000);
+    setInterval(() => { if (state.lockState === 'open' && !app.sync.syncing && document.visibilityState === 'visible' && !(loaded && rgbOnly())) app.sync.run(4); }, 60000);
   }
 
   async lockNow() {

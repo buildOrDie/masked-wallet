@@ -39,3 +39,13 @@ test('a refresh by another MASKED window is shared: the next window starts from 
     assert.equal(at.call(me), 0, 'a time in the future is ignored');
   } finally { globalThis.localStorage = prev; }
 });
+
+test('the popup refreshes every minute only while something is under way', () => {
+  const store = (m) => ({ instantStore: () => ({ all: () => m }) });
+  const me = (transfers, listings = {}) => ({ data: { transfers }, service: store(listings), isDropped: () => false, underWay: WalletRgb.prototype.underWay });
+  assert.equal(me({ a: [{ status: 'Settled' }] }).underWay(), false, 'all settled: every 5 minutes');
+  assert.equal(me({ a: [{ status: 'WaitingConfirmations' }] }).underWay(), true);
+  assert.equal(me({}, { x: { role: 'seller', stage: 'moving' } }).underWay(), true, 'a lot going live');
+  assert.equal(me({}, { x: { role: 'seller', stage: 'ready' } }).underWay(), false, 'on sale: nothing to wait for');
+  assert.equal(me({}, { x: { role: 'buyer', posted: true } }).underWay(), true, 'a purchase not confirmed');
+});

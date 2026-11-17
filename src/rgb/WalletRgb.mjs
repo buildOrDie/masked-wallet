@@ -108,6 +108,8 @@ async function publishInstant(e, v) {
 
 /** A refresh this recent, by any MASKED window, is used as is when RGB opens. */
 export const OPEN_FRESH_MS = 60_000;
+/** With nothing under way, the open popup refreshes RGB this often. */
+export const IDLE_REFRESH_MS = 5 * 60_000;
 
 export class WalletRgb {
   constructor(app) {
@@ -512,6 +514,18 @@ export class WalletRgb {
   // v3: once more after the move to the RGB 0.11.2 engine (an upgraded wallet may rebuild its bitcoin view)
   needsScan() { try { return localStorage.getItem(`${this.profile.vaultKey}.scanned-v3`) !== '1'; } catch { return true; } }
   get snapshotKey() { return `${this.profile.vaultKey}.snapshot`; }
+  /** Something that changes on its own soon: a transfer not settled, a listing or lot not on sale yet, a purchase not confirmed. */
+  underWay() {
+    const open = ['WaitingCounterparty', 'WaitingConfirmations', 'Initiated'];
+    for (const list of Object.values(this.data?.transfers || {})) for (const t of /** @type {any[]} */ (list) || []) if (open.includes(String(t?.status)) && !this.isDropped(t)) return true;
+    try {
+      for (const e of Object.values(this.service?.instantStore?.().all() || {})) {
+        if (e?.role === 'seller' && ['moving', 'queued', 'cancelling'].includes(e.stage)) return true;
+        if (e?.role === 'buyer' && e.posted && !e.confirmed && !e.failed) return true;
+      }
+    } catch { /* no store: transfers decide */ }
+    return false;
+  }
   /** When any MASKED window last refreshed RGB (and saved it): this window's own, or one kept in browser storage. */
   sharedRefreshAt() {
     let kept = 0;
@@ -522,12 +536,17 @@ export class WalletRgb {
   cachedSnapshot() {
     try { const d = JSON.parse(localStorage.getItem(this.snapshotKey) || 'null'); return d && typeof d === 'object' && d.groups ? { ...d, cached: true } : null; } catch { return null; }
   }
-  /** @param {boolean} [full] scan addresses ahead too: the first time, and when Refresh is tapped */
-  async refresh(full = false) {
+  /**
+   * @param {boolean} [full] scan addresses ahead too: the first time, and when Refresh is tapped
+   * @param {{ sync?: boolean }} [o] sync: false asks the transfer server only (no block server requests)
+   */
+  async refresh(full = false, { sync = true } = {}) {
     full ||= this.needsScan();
-    this.data = await this.service.snapshot({ full }); this.saved = false;
-    this.refreshedAt = Date.now();
-    try { localStorage.setItem(`${this.profile.vaultKey}.refreshed-at`, String(this.refreshedAt)); } catch { /* this window only */ }
+    this.data = await this.service.snapshot({ full, sync: sync || full }); this.saved = false;
+    if (sync || full) {
+      this.refreshedAt = Date.now();
+      try { localStorage.setItem(`${this.profile.vaultKey}.refreshed-at`, String(this.refreshedAt)); } catch { /* this window only */ }
+    }
     try { localStorage.setItem(this.snapshotKey, JSON.stringify(this.data, (_, v) => typeof v === 'bigint' ? v.toString() : v)); } catch { /* shown live only */ }
     if (full) try { localStorage.setItem(`${this.profile.vaultKey}.scanned-v3`, '1'); } catch { /* scans again next time */ }
     await this.instantCheck();
@@ -677,6 +696,10 @@ export class WalletRgb {
     clearInterval(this.timer);
     this.timer = setInterval(() => {
       if (!this.ready || this.busy || document.visibilityState !== 'visible') return;
+      // every minute only while something is under way (a transfer, a listing going live, a purchase); otherwise every
+      // 5 minutes. A refresh by another MASKED window counts. (Mainnet block servers: no needless requests.)
+      const since = Date.now() - this.sharedRefreshAt();
+      if (since < 55_000 || (since < IDLE_REFRESH_MS && !this.underWay())) return;
       this.run(async () => { await this.refresh(); this.message = ''; }, { quiet: true });
       if (Date.now() - (this.cloudCheckedAt || 0) > 5 * 60_000) { this.cloudCheckedAt = Date.now(); this.checkCloudNewer().catch(() => {}); }
     }, 60000);

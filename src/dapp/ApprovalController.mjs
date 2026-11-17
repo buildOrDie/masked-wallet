@@ -338,7 +338,8 @@ export class ApprovalController {
   async rgbWaitBroadcast(r, assetId, batch) {
     for (let i = 0; i < 12; i++) {
       await new Promise((ok) => setTimeout(ok, 5000));
-      try { await r.refresh(); } catch { continue; }
+      // the transfer server only: waiting for an answer needs no block server sync (12 syncs a minute before)
+      try { await r.refresh(false, { sync: false }); } catch { continue; }
       const t = (r.data?.transfers?.[assetId] || []).find((x) => Number(x?.batchTransferIdx) === Number(batch));
       if (t && String(t.status) === 'Failed') return 'failed';
       if (t && !['WaitingCounterparty', 'Initiated'].includes(String(t.status))) return 'broadcast';
@@ -361,6 +362,8 @@ export class ApprovalController {
     if (!t || t.sent || !r?.data?.address) return;
     state.busy = true; app.render();
     try {
+      // RGB approval windows don't scan the Public balance on open: its coins are read now (one request)
+      try { await app.coins.syncPublic(); } catch { /* the last known coins */ }
       const b = await app.builder.send({ from: 'public', to: r.data.address, amount: t.sats, rate: app.feeRate(), parts: rgbFundParts(t.sats) });
       await app.broadcast(b.hex);
       await app.afterBroadcast?.(b.spent, [b.txid]);

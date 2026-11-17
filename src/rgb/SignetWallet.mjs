@@ -125,12 +125,16 @@ export class SignetWallet {
   setPayoutScript(hex) { this.payoutHex = hex || null; this.wallet?.setPayoutScript?.(this.payoutHex); }
   requireWallet() { if (!this.wallet || !this.mnemonic) throw new Error('Unlock the RGB test wallet first.'); return this.wallet; }
   /** @param {{ full?: boolean }} [o] full: also scan addresses ahead (finds coins sent to older addresses) */
-  async snapshot({ full = false } = {}) {
+  /**
+   * `sync: false`: the transfer server only (waiting for the other side to accept a send), no block server sync.
+   * @param {{ full?: boolean, sync?: boolean }} [o]
+   */
+  async snapshot({ full = false, sync = true } = {}) {
     return this.exclusive(async () => {
       const wallet = this.requireWallet();
       await wallet.preferFirst?.();
       // the block server in use is busy or gone: try the next one once before giving up
-      try { await wallet.syncWallet({ full }); } catch (e) {
+      if (sync) try { await wallet.syncWallet({ full }); } catch (e) {
         if (!/invalid indexer|esplora|failed to fetch|network|429|too many|timed? ?out|50[234]/i.test(String(e?.message || e)) || !(await wallet.switchIndexer?.())) throw e;
         await wallet.syncWallet({ full });
       }
