@@ -1054,6 +1054,25 @@ export class LiteWallet {
     }
   }
   /** Wait until the block server in use has `txid` (at most `ms`). */
+  /**
+   * Wait (at most `ms`) until the engine lists `outpoint` among this wallet's outputs: the block server in use has the
+   * transaction, and a sync took it in. Says what it waits for. @returns {Promise<boolean>}
+   */
+  async waitOwnOutput(online, outpoint, onStep = (_t) => {}, txHex = '', ms = 45_000) {
+    const want = String(outpoint).toLowerCase(), txid = want.split(':')[0];
+    const end = Date.now() + ms;
+    const has = () => (plain(this.wallet.listUnspents(false)) || []).some((u) => `${String(u.utxo?.outpoint?.txid).toLowerCase()}:${u.utxo?.outpoint?.vout}` === want);
+    let told = false;
+    while (Date.now() < end) {
+      try { await this.wallet.sync(online); } catch { /* again */ }
+      if (has()) return true;
+      if (!told) { onStep(`Waiting for ${hostOf(this.indexer)} to see the move…`); told = true; }
+      // make sure the server the engine syncs with has it (the broadcast may have gone to another one)
+      if (txHex && !(await this.knowsTx(txid))) await this.ensureBroadcast(txHex, txid).catch(() => {});
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+    return false;
+  }
   async waitKnown(txid, ms = 15_000) {
     const end = Date.now() + ms;
     while (Date.now() < end) {
@@ -1336,8 +1355,11 @@ export class LiteWallet {
       await this.save();
       // the rest of the tokens: on this move's change, for the next lot
       from = [{ outpoint: `${moved.txid}:${SEAL_OUTPUT + 1}` }];
-      // the engine learns its new outputs (it already has the transaction: no full scan)
-      try { await this.wallet.sync(online); } catch { /* the next move syncs again */ }
+      // the engine learns its new outputs from the block server it syncs with: wait until that server has the move,
+      // then until the engine lists the change. Moving the next lot before that fails with "none of its inputs is an
+      // RGB output of this wallet" (seen on Signet: 1 of 10 lots listed when the server was slow)
+      if (k < list.length - 1) await this.waitOwnOutput(online, `${moved.txid}:${SEAL_OUTPUT + 1}`, onStep, moved.txHex || '');
+      else { try { await this.wallet.sync(online); } catch { /* the next move syncs again */ } }
     }
     // the engine takes in its own moves (from the transfer server), then signs every lot
     onStep('Signing every lot…');
