@@ -21,6 +21,58 @@ const pause = (ms) => new Promise((r) => setTimeout(r, ms));
  * @param {RequestInfo | URL} input @param {RequestInit} [init]
  */
 export async function rgbFetch(input, init) {
+  // a transaction never changes, and a confirmed one stays confirmed: checking a token's history asks about every
+  // transaction in it, again for each transfer (thousands of requests while lots were signed). Answered from memory.
+  const key = cacheKey(input, init);
+  if (key) {
+    const hit = txCache.get(key);
+    if (hit && hit.until > Date.now()) return answer(hit);
+    if (inflight.has(key)) return answer(await inflight.get(key));
+    const p = fetchAndKeep(key, input, init);
+    inflight.set(key, p);
+    try { return answer(await p); } finally { inflight.delete(key); }
+  }
+  return send(input, init);
+}
+
+// ---- the transaction cache (block server GETs about one transaction) ----
+const TX_PATH = /\/tx\/([0-9a-f]{64})(\/(raw|hex|status))?$/i;
+const MAX_CACHED = 5000;
+/** @type {Map<string, { status: number, type: string, body: ArrayBuffer, until: number }>} */
+const txCache = new Map();
+/** @type {Map<string, Promise<{ status: number, type: string, body: ArrayBuffer, until: number }>>} */
+const inflight = new Map();
+function cacheKey(input, init) {
+  const method = String(init?.method || (typeof Request !== 'undefined' && input instanceof Request ? input.method : 'GET')).toUpperCase();
+  if (method !== 'GET') return '';
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : /** @type {any} */ (input)?.url || '';
+  try { const u = new URL(url); return TX_PATH.test(u.pathname) && !u.search ? u.href : ''; } catch { return ''; }
+}
+async function fetchAndKeep(key, input, init) {
+  const r = await send(input, init);
+  const body = await r.arrayBuffer();
+  const type = r.headers.get('content-type') || '';
+  let keepMs = 0;
+  if (r.ok) {
+    if (/\/status$/i.test(key)) {
+      // confirmed: kept 10 minutes (a reorg on a test network is rare); not yet: 5 s, enough to answer a burst once
+      let confirmed = false;
+      try { confirmed = !!JSON.parse(new TextDecoder().decode(body))?.confirmed; } catch { /* not kept long */ }
+      keepMs = confirmed ? 600_000 : 5_000;
+    } else keepMs = 24 * 3600_000; // the transaction itself never changes
+  }
+  const entry = { status: r.status, type, body, until: Date.now() + keepMs };
+  if (keepMs) {
+    if (txCache.size >= MAX_CACHED) txCache.delete(txCache.keys().next().value);
+    txCache.set(key, entry);
+  }
+  return entry;
+}
+const answer = (e) => new Response(e.body.slice(0), { status: e.status, headers: e.type ? { 'content-type': e.type } : {} });
+/** For tests: forget what was kept. */
+export function rgbCacheClear() { txCache.clear(); inflight.clear(); }
+
+async function send(input, init) {
   await slot();
   try {
     for (let i = 0; ; i++) {

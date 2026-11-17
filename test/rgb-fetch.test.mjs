@@ -43,3 +43,31 @@ test('a Request from the engine is passed on as an address with its body already
     assert.equal(seen[2].body, 'form:consignment-bytes', 'a multipart upload stays a form');
   } finally { globalThis.fetch = keep; }
 });
+
+test('transaction lookups are answered from memory: a transaction once, a confirmed status for a while, concurrent asks once', async () => {
+  const { rgbCacheClear } = await import('../src/rgb/rgbFetch.mjs');
+  rgbCacheClear();
+  const was = globalThis.fetch;
+  const asked = [];
+  const tx = 'ab'.repeat(32), tx2 = 'cd'.repeat(32);
+  globalThis.fetch = async (url) => {
+    asked.push(String(url));
+    if (String(url).endsWith('/raw')) return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': 'application/octet-stream' } });
+    if (String(url).includes(tx2)) return Response.json({ confirmed: false });
+    return Response.json({ confirmed: true, block_height: 5 });
+  };
+  try {
+    const base = 'https://signet-api.example/api/tx/';
+    for (let i = 0; i < 3; i++) {
+      assert.deepEqual([...new Uint8Array(await (await rgbFetch(`${base}${tx}/raw`)).arrayBuffer())], [1, 2, 3]);
+      assert.equal((await (await rgbFetch(`${base}${tx}/status`)).json()).confirmed, true);
+    }
+    await Promise.all(Array.from({ length: 5 }, () => rgbFetch(`${base}${tx2}/status`)));
+    assert.equal(asked.filter((u) => u.endsWith(`${tx}/raw`)).length, 1);
+    assert.equal(asked.filter((u) => u.endsWith(`${tx}/status`)).length, 1);
+    assert.equal(asked.filter((u) => u.includes(tx2)).length, 1, 'five at once: asked once');
+    // anything else is not kept
+    await rgbFetch('https://signet-api.example/api/blocks/tip/height'); await rgbFetch('https://signet-api.example/api/blocks/tip/height');
+    assert.equal(asked.filter((u) => u.endsWith('/tip/height')).length, 2);
+  } finally { globalThis.fetch = was; rgbCacheClear(); }
+});
