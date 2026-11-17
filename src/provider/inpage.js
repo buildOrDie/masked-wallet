@@ -90,6 +90,8 @@
       getAssets: () => request('rgbListAssets'),
       /** What's in the RGB wallet (asks the person first): { coins, rgb, tokens, activity } (docs/PROVIDER.md) */
       getOutputs: () => request('rgbOutputs'),
+      /** Free spare RGB outputs back to bitcoin (asks first): { feeRate? } → { txid, freed, sats } */
+      freeSpare: (o = {}) => request('rgbFreeSpare', { feeRate: o.feeRate }),
       /** { assetId } → { total, max } in base units */
       offerableAmount: (o = {}) => request('rgbSwapAvailable', o),
       /** buyer: { offerId, network, offer, feeRate? } → session for the seller */

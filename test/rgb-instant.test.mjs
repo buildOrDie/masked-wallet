@@ -829,3 +829,27 @@ test('a listing whose signed data was dropped for storage is still watched for i
   assert.deepEqual(changes, [{ offerId: 'o9', stage: 'sold', txid: T('9') }]);
   assert.equal(s.store.get('o9').stage, 'sold');
 });
+
+test('free spare RGB outputs: keeps 6, frees the rest into coins; empty outputs the engine holds are not spare', async () => {
+  const s = wallet({ name: 'spare', lib: fakeLib(), chain: fakeChain() });
+  const u = (t, vout, sats = 330) => ({ utxo: { outpoint: { txid: T(t), vout }, btcAmount: sats, colorable: true, exists: true }, rgbAllocations: [] });
+  const list = ['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((t) => u(t, 0));
+  s.w.w.sync = () => {};
+  s.w.w.listUnspents = () => list;
+  s.w.w.listUnspentsVanilla = async () => [];
+  s.w.listAssets = async () => ({ nia: [], ifa: [] });
+  // the engine counts 8 of them as spare (the 9th: a transfer it began)
+  s.w.w.spareUtxos = () => list.slice(0, 8).map((x) => `${x.utxo.outpoint.txid}:0`);
+  let begun = null;
+  s.w.w.freeSpareUtxosBegin = async (_o, keep, parts, rate) => { begun = { keep, parts, rate: Number(rate) }; return 'psbt'; };
+  s.w.w.drainToEnd = async () => T('f');
+  const rep = await s.w.outputsReport(s.store);
+  assert.equal(rep.rgb.filter((o) => o.state === 'empty').length, 8);
+  assert.equal(rep.rgb.filter((o) => o.state === 'held').length, 1);
+  assert.equal(rep.canFreeSpare, true);
+  const r = await s.w.freeSpare({ feeRate: 2 });
+  assert.deepEqual(begun, { keep: 6, parts: 4, rate: 2 });
+  assert.deepEqual(r, { txid: T('f'), freed: 2, sats: 660 });
+  s.w.w.spareUtxos = () => list.slice(0, 5).map((x) => `${x.utxo.outpoint.txid}:0`);
+  await assert.rejects(s.w.freeSpare({}), /Only 5 spare RGB outputs: MASKED keeps 6/);
+});

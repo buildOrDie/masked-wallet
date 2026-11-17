@@ -7,7 +7,7 @@ import * as btc from '@scure/btc-signer';
 import { hex, base64 } from '@scure/base';
 import { isInvoiceV1, readInvoiceV1, invoiceIdOf, pickEndpoint, newSenderKey, sharedKeys, deliverConsignment, endpointUrl, rpc, PROXY_V1 } from './proxyV1.mjs';
 import { SEAL_SATS, SEAL_OUTPUT, SWAP_SIZE_VB, b64, buyerOutputs, outpointOf, completionBlocker, readOffer, buyerCoinFor, offerable, heldBreakdown, payoutFor, changedTerms, unb64, exactCoinFor, freeSellerCoinFor, sendCoinsFor, instantAmounts, INSTANT_SEAL_OUTPUT, INSTANT_SEAL_SATS, payCoinsFor, txVbytes, OPRET_SCRIPT, P2TR_SCRIPT } from './swap.mjs';
-import { RGB_UTXO_SATS } from './config.mjs';
+import { RGB_UTXO_SATS, RGB_KEEP_SPARE } from './config.mjs';
 
 /** rgb-lib names for our network ids. Utexo's custom Signet uses Signet rules too. */
 const NETWORKS = { mainnet: 'Mainnet', signet: 'Signet', utexo: 'Signet', testnet: 'Testnet', testnet4: 'Testnet4', regtest: 'Regtest' };
@@ -254,6 +254,41 @@ export class LiteWallet {
     else txid = await this.wallet.sendBtcEnd(online, this.sign(await this.wallet.sendBtcBegin(online, String(address), BigInt(Math.floor(Number(sats))), rate, false)), false);
     await this.save();
     return String(txid);
+  }
+
+  /** The engine can free spare RGB outputs (engine: spareUtxos, freeSpareUtxosBegin). */
+  get canFreeSpare() { return typeof this.wallet?.spareUtxos === 'function' && typeof this.wallet?.freeSpareUtxosBegin === 'function'; }
+  /** Spare RGB outputs (nothing on them, nothing pending, not reserved, confirmed), as `txid:vout`; null on an older engine. */
+  spareOutputs() {
+    if (!this.canFreeSpare) return null;
+    try { return new Set((plain(this.wallet.spareUtxos()) || []).map((x) => String(x).toLowerCase())); } catch { return null; }
+  }
+  /**
+   * Free spare RGB outputs: keep `keep` for receiving tokens and turn the rest, with the plain bitcoin of this wallet,
+   * into `parts` plain coins (several buys can go one after another). Outputs holding tokens never move.
+   * @returns {Promise<{ txid: string, freed: number, sats: number }>}
+   */
+  /** @param {{ keep?: number, parts?: number, feeRate?: number }} [o] */
+  async freeSpare({ keep = RGB_KEEP_SPARE, parts = 4, feeRate = 1 } = {}) {
+    if (!this.canFreeSpare) throw new Error('This RGB engine can\'t free spare outputs yet. Update MASKED.');
+    const online = this.requireOnline();
+    const spare = [...(this.spareOutputs() || [])];
+    if (spare.length <= keep) throw new Error(`Only ${spare.length} spare RGB output${spare.length === 1 ? '' : 's'}: MASKED keeps ${keep} for receiving tokens, so there's nothing to free.`);
+    const sats = await this.spareSats(spare.slice(keep));
+    const rate = BigInt(Math.max(1, Math.round(Number(feeRate) || 1)));
+    const psbt = await this.wallet.freeSpareUtxosBegin(online, keep, Math.max(1, Math.min(8, Number(parts) || 4)), rate);
+    const txid = String(await this.wallet.drainToEnd(online, this.sign(psbt)));
+    await this.save();
+    return { txid, freed: spare.length - keep, sats };
+  }
+  /** Sats on the given outputs (from the engine's list). */
+  async spareSats(outpoints) {
+    const want = new Set(outpoints);
+    let n = 0;
+    for (const u of plain(this.wallet.listUnspents(false)) || []) {
+      const o = u.utxo?.outpoint; if (o && want.has(`${String(o.txid).toLowerCase()}:${o.vout}`)) n += Number(u.utxo?.btcAmount ?? 0);
+    }
+    return n;
   }
 
   /** A new asset with a fixed supply, held by this wallet. */
@@ -565,6 +600,7 @@ export class LiteWallet {
     // what each promised output is for
     const promised = new Map();
     try { for (const [id, e] of Object.entries(store?.all?.() || {})) if (e?.role === 'seller' && e.coin && ['moving', 'queued', 'ready', 'cancelling'].includes(e.stage)) promised.set(String(e.coin).toLowerCase(), { offerId: id, stage: e.stage === 'moving' && e.resign && e.templateTxid ? 'ready' : e.stage, assetId: e.assetId, amount: String(e.amount || ''), priceSats: String(e.priceSats || ''), waiting: e.stage === 'moving' && e.waiting ? String(e.waiting).slice(0, 240) : '' }); } catch { /* none */ }
+    const spareSet = this.spareOutputs();
     const rgb = all.map((u) => {
       const o = u.utxo?.outpoint || {};
       const op = `${String(o.txid).toLowerCase()}:${o.vout}`;
@@ -576,7 +612,7 @@ export class LiteWallet {
       const state = p ? (p.stage === 'ready' ? 'on sale' : p.stage === 'cancelling' ? 'cancelling' : 'going live')
         : this.reserved.has(op) ? 'promised'
           : !tokens.length && invoices ? 'invoice'
-          : !tokens.length ? 'empty'
+          : !tokens.length ? (spareSet && !spareSet.has(op) ? 'held' : 'empty')
             : u.utxo?.colorable === false ? 'unusable'
               : tokens.some((t) => !t.settled) || u.utxo?.exists === false ? 'waiting'
                 : 'free';
@@ -589,7 +625,7 @@ export class LiteWallet {
       const spent = this.justSpent();
       coins = vanilla.filter((c) => !c.is_spent).map((c) => { const op = String(outpointOf(c.outpoint) || ''); return { outpoint: op, sats: Number(c.txout?.value ?? 0), confirmed: conf.has(op), justSpent: spent.has(op.toLowerCase()) }; });
     } catch { coins = []; }
-    const order = { 'on sale': 0, 'going live': 1, cancelling: 2, promised: 3, invoice: 4, free: 5, waiting: 6, unusable: 7, empty: 8 };
+    const order = { 'on sale': 0, 'going live': 1, cancelling: 2, promised: 3, invoice: 4, free: 5, waiting: 6, unusable: 7, held: 8, empty: 9 };
     rgb.sort((a, b) => order[a.state] - order[b.state] || b.tokens.length - a.tokens.length);
     coins.sort((a, b) => b.sats - a.sats);
     // per token: where its balance is
@@ -612,7 +648,7 @@ export class LiteWallet {
       }
     } catch { /* none */ }
     activity.sort((a, b) => b.at - a.at);
-    return { at: Date.now(), coins, rgb, tokens: byToken, activity: activity.slice(0, 40) };
+    return { at: Date.now(), coins, rgb, tokens: byToken, activity: activity.slice(0, 40), canFreeSpare: this.canFreeSpare, keepSpare: RGB_KEEP_SPARE };
   }
 
   /** This wallet's plain bitcoin coins: confirmed, and all (with its own unconfirmed change). */

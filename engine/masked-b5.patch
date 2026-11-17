@@ -11,7 +11,7 @@ index 884d686..e2896b5 100644
  rgb-strict-encoding = { version = "=1.0.5", default-features = false, features = [
      "bitcoin",
 diff --git a/bindings/wasm/src/lib.rs b/bindings/wasm/src/lib.rs
-index 51b6efd..f1cf597 100644
+index 51b6efd..5fe18d3 100644
 --- a/bindings/wasm/src/lib.rs
 +++ b/bindings/wasm/src/lib.rs
 @@ -635,6 +635,182 @@ impl WasmWallet {
@@ -197,7 +197,43 @@ index 51b6efd..f1cf597 100644
      /// Send RGB assets (end): broadcast a signed PSBT. Returns an OperationResult JS object.
      #[wasm_bindgen(js_name = "sendEnd")]
      pub async fn send_end(
-@@ -1074,6 +1250,22 @@ impl WasmWallet {
+@@ -763,6 +939,35 @@ impl WasmWallet {
+             .map_err(|e| JsValue::from_str(&e.to_string()))
+     }
+ 
++    /// Spare RGB outputs (no token, nothing pending, not reserved, confirmed), smallest first: ["txid:vout", …].
++    #[wasm_bindgen(js_name = "spareUtxos")]
++    pub fn spare_utxos(&self) -> Result<Vec<String>, JsValue> {
++        self.inner
++            .borrow()
++            .spare_utxos()
++            .map(|v| v.into_iter().map(|o| o.to_string()).collect())
++            .map_err(|e| JsValue::from_str(&e.to_string()))
++    }
++
++    /// Free spare RGB outputs (begin): keep `keep`, spend the rest with the plain bitcoin into `parts` plain coins.
++    /// Returns the unsigned PSBT; end it with `drainToEnd`.
++    #[wasm_bindgen(js_name = "freeSpareUtxosBegin")]
++    pub async fn free_spare_utxos_begin(
++        &self,
++        online_js: JsValue,
++        keep: u8,
++        parts: u8,
++        fee_rate: u64,
++    ) -> Result<String, JsValue> {
++        let online: Online = serde_wasm_bindgen::from_value(online_js)
++            .map_err(|e| JsValue::from_str(&format!("Invalid Online object: {e}")))?;
++        let mut wallet = self.inner.borrow_mut();
++        wallet
++            .free_spare_utxos_begin(online, keep, parts, fee_rate)
++            .await
++            .map_err(|e| JsValue::from_str(&e.to_string()))
++    }
++
+     /// Drain all wallet funds (end): broadcast a signed PSBT. Returns the txid string.
+     #[wasm_bindgen(js_name = "drainToEnd")]
+     pub async fn drain_to_end(
+@@ -1074,6 +1279,22 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -220,7 +256,7 @@ index 51b6efd..f1cf597 100644
      /// Check if the wallet needs a backup. Returns true if modified since last backup.
      #[wasm_bindgen(js_name = "backupInfo")]
      pub fn backup_info(&self) -> Result<bool, JsValue> {
-@@ -1217,7 +1409,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
+@@ -1217,7 +1438,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
  /// Works before the witness transaction is broadcast. Takes the raw consignment
  /// bytes (strict-encoded, not base64), the witness transaction ID, and the Bitcoin network.
  ///
@@ -230,7 +266,7 @@ index 51b6efd..f1cf597 100644
  #[wasm_bindgen(js_name = "validateConsignmentOffchain")]
  pub fn validate_consignment_offchain(
      consignment_bytes: &[u8],
-@@ -1235,3 +1428,43 @@ pub fn validate_consignment_offchain(
+@@ -1235,3 +1457,43 @@ pub fn validate_consignment_offchain(
      .map_err(|e| JsValue::from_str(&e.to_string()))?;
      to_js(&result)
  }
@@ -1075,7 +1111,7 @@ index a3a9f46..bf0a61a 100644
      }
  
 diff --git a/src/wallet/online.rs b/src/wallet/online.rs
-index ca96b4a..9f87256 100644
+index ca96b4a..5fe6fbc 100644
 --- a/src/wallet/online.rs
 +++ b/src/wallet/online.rs
 @@ -791,8 +791,9 @@ pub(crate) struct ConsignmentPayment<'c> {
@@ -1255,7 +1291,140 @@ index ca96b4a..9f87256 100644
              let recipient_id = &recipient.recipient_id;
              let recipient_vk = verifying_key_from_bytes(&recipient.public_key)?;
              let derived = derive_shared(sender_sk, &recipient_vk)?;
-@@ -12074,3 +12132,712 @@ mod bfa_tests {
+@@ -7590,6 +7648,132 @@ impl Wallet {
+         Ok(tx.compute_txid().to_string())
+     }
+ 
++    /// Spare RGB outputs (MASKED): outputs of this wallet with no allocation at all, no blinded receive pending, not
++    /// waiting for a witness transfer, not reserved (an Instant listing, a begun transfer or vanilla operation) and
++    /// confirmed. Smallest first. These are the outputs `free_spare_utxos_begin` may spend.
++    pub fn spare_utxos(&self) -> Result<Vec<Outpoint>, Error> {
++        let unspent_txos = self.database.get_unspent_txos(vec![])?;
++        let unspents = self
++            .database
++            .get_rgb_allocations(unspent_txos, None, None, None, None)?;
++        let reserved: HashSet<Outpoint> = self.get_reserved_outpoints()?.into_iter().collect();
++        let reserved_vanilla: HashSet<BdkOutPoint> =
++            self.get_reserved_vanilla_outpoints()?.into_iter().collect();
++        let confirmed: HashMap<BdkOutPoint, u64> = self
++            .bdk_wallet
++            .list_unspent()
++            .filter(|u| u.keychain == KeychainKind::External && u.chain_position.is_confirmed())
++            .map(|u| (u.outpoint, u.txout.value.to_sat()))
++            .collect();
++        let mut spare: Vec<(u64, Outpoint)> = unspents
++            .into_iter()
++            .filter(|u| u.utxo.exists && !u.utxo.pending_witness)
++            .filter(|u| u.rgb_allocations.is_empty() && u.pending_blinded == 0)
++            .filter_map(|u| {
++                let op = u.utxo.outpoint();
++                let bdk_op = BdkOutPoint::from(u.utxo.clone());
++                if reserved.contains(&op)
++                    || self.reserved_outpoints.contains(&op)
++                    || reserved_vanilla.contains(&bdk_op)
++                {
++                    return None;
++                }
++                confirmed.get(&bdk_op).map(|sats| (*sats, op))
++            })
++            .collect();
++        spare.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.txid.cmp(&b.1.txid)).then(a.1.vout.cmp(&b.1.vout)));
++        Ok(spare.into_iter().map(|(_, op)| op).collect())
++    }
++
++    /// Free spare RGB outputs (begin, MASKED): keep `keep` of them (the smallest) for receiving tokens, and spend the
++    /// rest, together with the plain bitcoin of this wallet, into `parts` plain bitcoin outputs of about the same
++    /// size (several buys can then go one after another). Outputs holding tokens never move. Ended with
++    /// `drain_to_end`. Returns the unsigned PSBT.
++    pub async fn free_spare_utxos_begin(
++        &mut self,
++        online: Online,
++        keep: u8,
++        parts: u8,
++        fee_rate: u64,
++    ) -> Result<String, Error> {
++        info!(self.logger, "Freeing spare UTXOs (begin), keeping {}...", keep);
++        self.check_online(online)?;
++        let fee_rate_checked = self._check_fee_rate(fee_rate)?;
++        self.sync_and_save(false).await?;
++
++        let spare = self.spare_utxos()?;
++        if spare.len() <= keep as usize {
++            return Err(Error::Internal {
++                details: format!("only {} spare RGB outputs: nothing to free", spare.len()),
++            });
++        }
++        let mut inputs: Vec<BdkOutPoint> = spare[keep as usize..]
++            .iter()
++            .map(|op| BdkOutPoint::from_str(&op.to_string()))
++            .collect::<Result<_, _>>()
++            .map_err(|e| Error::Internal { details: e.to_string() })?;
++        let reserved_vanilla = self.get_reserved_vanilla_outpoints()?;
++        let mut total: u64 = 0;
++        let values: HashMap<BdkOutPoint, u64> = self
++            .bdk_wallet
++            .list_unspent()
++            .map(|u| (u.outpoint, u.txout.value.to_sat()))
++            .collect();
++        for u in self.internal_unspents().filter(|u| !reserved_vanilla.contains(&u.outpoint)) {
++            inputs.push(u.outpoint);
++        }
++        for i in &inputs {
++            total += values.get(i).copied().unwrap_or(0);
++        }
++
++        // the fee of one output first, then each extra output's share
++        let build = |wallet: &mut Self, shares: &[(ScriptBuf, u64)], change: ScriptBuf| -> Result<Psbt, Error> {
++            let mut tx_builder = wallet.bdk_wallet.build_tx();
++            tx_builder
++                .add_utxos(&inputs)
++                .map_err(|e| Error::Internal { details: e.to_string() })?
++                .manually_selected_only()
++                .fee_rate(fee_rate_checked);
++            for (script, sats) in shares {
++                tx_builder.add_recipient(script.clone(), BdkAmount::from_sat(*sats));
++            }
++            tx_builder.drain_to(change);
++            tx_builder.finish().map_err(|e| match e {
++                bdk_wallet::error::CreateTxError::CoinSelection(InsufficientFunds { needed, available }) => {
++                    Error::InsufficientBitcoins { needed: needed.to_sat(), available: available.to_sat() }
++                }
++                bdk_wallet::error::CreateTxError::OutputBelowDustLimit(_) => Error::OutputBelowDustLimit,
++                _ => Error::Internal { details: e.to_string() },
++            })
++        };
++        let change = self._get_new_address(KeychainKind::Internal)?.script_pubkey();
++        let one = build(self, &[], change.clone())?;
++        let fee_one = self
++            .bdk_wallet
++            .calculate_fee(&one.unsigned_tx)
++            .map_err(|e| Error::Internal { details: e.to_string() })?
++            .to_sat();
++        let per_output = fee_rate_checked.to_sat_per_vb_ceil() * 43;
++        let mut n = parts.max(1) as u64;
++        while n > 1 && (total.saturating_sub(fee_one + (n - 1) * per_output)) / n < 2000 {
++            n -= 1;
++        }
++        let mut psbt = if n == 1 {
++            one
++        } else {
++            let share = total.saturating_sub(fee_one + (n - 1) * per_output) / n;
++            let mut shares = vec![];
++            for _ in 1..n {
++                shares.push((self._get_new_address(KeychainKind::Internal)?.script_pubkey(), share));
++            }
++            build(self, &shares, change)?
++        };
++        self.add_non_witness_utxos(&mut psbt);
++        self._record_vanilla_begin(&psbt, WalletTransactionType::Drain).await?;
++        info!(self.logger, "Free spare UTXOs (begin) completed");
++        Ok(psbt.to_string())
++    }
++
+     /// Prepare the PSBT to inflate an IFA asset.
+     pub async fn inflate_begin(
+         &mut self,
+@@ -12074,3 +12258,742 @@ mod bfa_tests {
          assert!(options(&format!(r#","evm_chains":{{"mainnet":{chain}}}"#)).is_err());
      }
  }
@@ -1926,6 +2095,36 @@ index ca96b4a..9f87256 100644
 +        assert!(!w.own_unconfirmed_ok(&"ee".repeat(32)), "a transaction the wallet doesn't have never counts");
 +        w.set_own_unconfirmed(vec![]);
 +        assert!(!w.own_unconfirmed_ok(&m));
++    }
++
++    /// Spare RGB outputs: only confirmed outputs of this wallet with nothing on them, nothing pending and not
++    /// reserved; a listing's output, one waiting for a witness transfer and an unconfirmed one never count.
++    #[test]
++    fn spare_utxos_only_empty_confirmed_and_free() {
++        use bdk_wallet::bitcoin::{Block, CompactTarget, TxMerkleNode, block::{Header, Version as BlockVersion}, hashes::Hash};
++        let mut w = make_test_wallet_with_keys(crate::keys::generate_keys(BitcoinNetwork::Regtest), false);
++        let scripts: Vec<ScriptBuf> = (0..4).map(|_| w._get_new_address(KeychainKind::External).unwrap().script_pubkey()).collect();
++        let mut fund = funding(scripts[0].clone(), 330, 0xa1);
++        for s in &scripts[1..] { fund.output.push(TxOut { value: Amount::from_sat(330), script_pubkey: s.clone() }); }
++        let tip = w.bdk_wallet.latest_checkpoint().block_id();
++        let block = Block {
++            header: Header { version: BlockVersion::TWO, prev_blockhash: tip.hash, merkle_root: TxMerkleNode::all_zeros(), time: 0, bits: CompactTarget::from_consensus(0), nonce: 0 },
++            txdata: vec![fund.clone()],
++        };
++        w.bdk_wallet.apply_block_connected_to(&block, tip.height + 1, tip).unwrap();
++        let later = funding(scripts[0].clone(), 330, 0xb2);
++        w.bdk_wallet.apply_unconfirmed_txs([(later.clone(), 5)]);
++        let seed_txo = |w: &Wallet, txid: &str, vout: u32| -> i32 {
++            w.database.set_txo(DbTxoActMod { txid: ActiveValue::Set(txid.to_string()), vout: ActiveValue::Set(vout), btc_amount: ActiveValue::Set(s!("330")), spent: ActiveValue::Set(false), exists: ActiveValue::Set(true), pending_witness: ActiveValue::Set(false), ..Default::default() }).unwrap()
++        };
++        let txid = fund.compute_txid().to_string();
++        for vout in 1..=3 { seed_txo(&w, &txid, vout); }
++        let pw = seed_txo(&w, &txid, 4);
++        w.database.update_txo(DbTxoActMod { idx: ActiveValue::Set(pw), pending_witness: ActiveValue::Set(true), ..Default::default() }).unwrap();
++        seed_txo(&w, &later.compute_txid().to_string(), 1);
++        w.set_reserved_outpoints(vec![format!("{txid}:3")]).unwrap();
++        let spare: Vec<String> = w.spare_utxos().unwrap().into_iter().map(|o| o.to_string()).collect();
++        assert_eq!(spare, vec![format!("{txid}:1"), format!("{txid}:2")]);
 +    }
 +
 +    /// The buyer's wallet signs its coin only with the seller's transaction in hand (BDK wants the previous

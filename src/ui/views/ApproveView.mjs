@@ -5,8 +5,8 @@ import { NEEDS_PREP } from '../../dapp/ApprovalController.mjs';
 import { View } from '../View.mjs';
 import { I, btcLogo, rowKV } from '../html.mjs';
 
-const TITLES = { requestAccounts: 'Connect to MASKED', signMessage: 'Sign message', signPsbt: 'Sign transaction', signPsbts: 'Sign transactions', sendBitcoin: 'Send bitcoin', switchNetwork: 'Switch network', inscribeTransfer: 'Inscribe transfer', shareTrade: 'Trade from Shielded', fundTrade: 'Move BTC to trading', moveToTrade: 'Move tokens to trading', returnToShielded: 'Move back to Shielded', cancelShielded: 'Cancel listing', cashuPay: 'Pay with ecash', cashuPayRequest: 'Pay with ecash', cashuReceive: 'Receive ecash', rgbInvoice: 'Receive RGB tokens', rgbPay: 'Send RGB tokens', rgbSwapAvailable: 'Share what you can sell', rgbListAssets: 'Share your RGB tokens', rgbOutputs: 'Show what\'s in your RGB wallet', rgbBuyPrepare: 'Buy RGB tokens', rgbSalePrepare: 'Sell RGB tokens', rgbBuySign: 'Confirm your purchase', rgbSaleComplete: 'Complete the sale', rgbInstantList: 'Make an Instant listing', rgbInstantListLots: 'List in lots', rgbInstantBuy: 'Buy RGB tokens', rgbInstantBuyMany: 'Buy several listings', rgbInstantCancel: 'Cancel Instant listing' };
-const VERBS = { requestAccounts: 'Connect', sendBitcoin: 'Send', inscribeTransfer: 'Inscribe', switchNetwork: 'Switch', shareTrade: 'Allow', fundTrade: 'Move', moveToTrade: 'Move', returnToShielded: 'Move back', cancelShielded: 'Cancel listing', cashuPay: 'Pay', cashuPayRequest: 'Pay', cashuReceive: 'Claim', rgbInvoice: 'Make invoice', rgbPay: 'Send', rgbSwapAvailable: 'Share', rgbListAssets: 'Share', rgbOutputs: 'Show', rgbBuyPrepare: 'Buy', rgbSalePrepare: 'Sell', rgbBuySign: 'Sign and pay', rgbSaleComplete: 'Complete sale', rgbInstantList: 'Sign listing', rgbInstantListLots: 'Split and list', rgbInstantBuy: 'Buy now', rgbInstantBuyMany: 'Buy all', rgbInstantCancel: 'Cancel listing' };
+const TITLES = { requestAccounts: 'Connect to MASKED', signMessage: 'Sign message', signPsbt: 'Sign transaction', signPsbts: 'Sign transactions', sendBitcoin: 'Send bitcoin', switchNetwork: 'Switch network', inscribeTransfer: 'Inscribe transfer', shareTrade: 'Trade from Shielded', fundTrade: 'Move BTC to trading', moveToTrade: 'Move tokens to trading', returnToShielded: 'Move back to Shielded', cancelShielded: 'Cancel listing', cashuPay: 'Pay with ecash', cashuPayRequest: 'Pay with ecash', cashuReceive: 'Receive ecash', rgbInvoice: 'Receive RGB tokens', rgbPay: 'Send RGB tokens', rgbSwapAvailable: 'Share what you can sell', rgbListAssets: 'Share your RGB tokens', rgbOutputs: 'Show what\'s in your RGB wallet', rgbFreeSpare: 'Free spare RGB outputs', rgbBuyPrepare: 'Buy RGB tokens', rgbSalePrepare: 'Sell RGB tokens', rgbBuySign: 'Confirm your purchase', rgbSaleComplete: 'Complete the sale', rgbInstantList: 'Make an Instant listing', rgbInstantListLots: 'List in lots', rgbInstantBuy: 'Buy RGB tokens', rgbInstantBuyMany: 'Buy several listings', rgbInstantCancel: 'Cancel Instant listing' };
+const VERBS = { requestAccounts: 'Connect', sendBitcoin: 'Send', inscribeTransfer: 'Inscribe', switchNetwork: 'Switch', shareTrade: 'Allow', fundTrade: 'Move', moveToTrade: 'Move', returnToShielded: 'Move back', cancelShielded: 'Cancel listing', cashuPay: 'Pay', cashuPayRequest: 'Pay', cashuReceive: 'Claim', rgbInvoice: 'Make invoice', rgbPay: 'Send', rgbSwapAvailable: 'Share', rgbListAssets: 'Share', rgbOutputs: 'Show', rgbFreeSpare: 'Free them', rgbBuyPrepare: 'Buy', rgbSalePrepare: 'Sell', rgbBuySign: 'Sign and pay', rgbSaleComplete: 'Complete sale', rgbInstantList: 'Sign listing', rgbInstantListLots: 'Split and list', rgbInstantBuy: 'Buy now', rgbInstantBuyMany: 'Buy all', rgbInstantCancel: 'Cancel listing' };
 const SHIELDED = `${I.shieldPlain} Shielded`;
 
 /** The approval window for a dApp request: what it asks, what it costs, Reject / Approve. */
@@ -114,7 +114,7 @@ export class ApproveView extends View {
       }
       case 'rgbInvoice': return this.rgbInvoiceBody(a, P, b);
       case 'rgbPay': return this.rgbPayBody(a, P, b);
-      case 'rgbSwapAvailable': case 'rgbListAssets': case 'rgbOutputs': case 'rgbBuyPrepare': case 'rgbSalePrepare': case 'rgbBuySign': case 'rgbSaleComplete': case 'rgbInstantList': case 'rgbInstantListLots': case 'rgbInstantBuy': case 'rgbInstantBuyMany': case 'rgbInstantCancel': return this.swapBody(a, P, b);
+      case 'rgbSwapAvailable': case 'rgbListAssets': case 'rgbOutputs': case 'rgbFreeSpare': case 'rgbBuyPrepare': case 'rgbSalePrepare': case 'rgbBuySign': case 'rgbSaleComplete': case 'rgbInstantList': case 'rgbInstantListLots': case 'rgbInstantBuy': case 'rgbInstantBuyMany': case 'rgbInstantCancel': return this.swapBody(a, P, b);
       case 'switchNetwork':
         return `<div class="kv">${rowKV('From', esc(account.params.name))}${rowKV('To', `<b>${esc(NETWORKS[P.target]?.name || P.target)}</b>`)}</div>`;
       default: return '';
@@ -160,6 +160,10 @@ export class ApproveView extends View {
       const list = b?.list || [];
       return `<div class="kv">${rowKV('Tokens', b ? (list.length ? list.map((x) => esc(x.ticker || short(x.assetId, 6))).join(', ') : 'none yet') : '…')}${rowKV('Network', esc(this.app.rgb.profile.label))}</div>
       <p class="info">The site sees which RGB tokens you hold, their asset IDs and how much of each. Nothing moves.</p>${this.rgbWait(a)}${this.error(a)}`;
+    }
+    if (a.method === 'rgbFreeSpare') {
+      return `<div class="kv">${rowKV('Spare outputs freed', b ? `${b.freed} (${sats(b.sats)})` : '…')}${rowKV('Kept for receiving', b ? String(b.keep) : '…')}${rowKV('Bitcoin for buys after', b ? `${sats(b.sats + b.coinSats)} in 4 coins, less the fee` : '…')}${rowKV('Fee rate', b ? `${b.rate} sat/vB` : '…')}</div>
+      <p class="info">One transaction inside your RGB wallet: empty RGB outputs become bitcoin you can buy with, split into a few coins so several buys go one after another. Outputs holding tokens never move. Usable after one confirmation.</p>${this.rgbWait(a)}${this.error(a)}`;
     }
     if (a.method === 'rgbOutputs') {
       return `<div class="kv">${rowKV('Network', esc(this.app.rgb.profile.label))}</div>

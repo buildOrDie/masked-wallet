@@ -452,7 +452,7 @@ export class RgbSettings {
         <ul class="rgo-parts">${parts.map(([k, label, v]) => `<li><i class="${k}"></i>${amt({ ...t, amount: v })} ${label}</li>`).join('')}</ul></div>`;
     }).join('');
     // RGB outputs, by what they're doing
-    const STATE = { 'on sale': ['On sale', 'An Instant listing: anyone can buy it, even with MASKED closed.'], 'going live': ['Going live', 'Moved for a listing, waiting to be signed.'], cancelling: ['Cancelling', 'A cancel waiting for its block.'], promised: ['Promised', 'Held for a listing MASKED no longer has a record of.'], free: ['Free', 'Can be listed or sent.'], waiting: ['Waiting for a block', 'A receive or a move not confirmed yet.'], unusable: ['Unusable', 'An output MASKED can\'t use for tokens.'], empty: ['Empty', 'Spare RGB outputs: tokens can be received on them.'] };
+    const STATE = { 'on sale': ['On sale', 'An Instant listing: anyone can buy it, even with MASKED closed.'], 'going live': ['Going live', 'Moved for a listing, waiting to be signed.'], cancelling: ['Cancelling', 'A cancel waiting for its block.'], promised: ['Promised', 'Held for a listing MASKED no longer has a record of.'], free: ['Free', 'Can be listed or sent.'], waiting: ['Waiting for a block', 'A receive or a move not confirmed yet.'], unusable: ['Unusable', 'An output MASKED can\'t use for tokens.'], invoice: ['Kept for an invoice', 'Empty, reserved by an RGB invoice nobody has paid.'], held: ['Empty, held by the engine', 'No token, but the RGB engine doesn\'t count it as free yet (a transfer or operation it began).'], empty: ['Empty', 'Spare RGB outputs: tokens can be received on them.'] };
     const groups = new Map();
     for (const o of rep.rgb || []) { if (!groups.has(o.state)) groups.set(o.state, []); groups.get(o.state).push(o); }
     const rgbList = [...groups].map(([st, list]) => {
@@ -463,6 +463,7 @@ export class RgbSettings {
         <ul class="rgo-list">${list.map((o) => `<li><span>${o.tokens.length ? o.tokens.map((t) => `<b>${amt(t)}</b> ${tick(t)}${t.settled ? '' : ' <small class="muted">(unconfirmed)</small>'}`).join(' · ') : '<span class="muted">no token</span>'}${o.listing?.priceSats ? ` <small class="muted">for ${N(o.listing.priceSats).toLocaleString('en-US')} sats</small>` : ''}</span><span class="rgo-op">${link(o.outpoint)}<small class="muted">${o.sats.toLocaleString('en-US')} sats</small></span></li>`).join('')}</ul></details>`;
     }).join('');
     const coins = rep.coins || [];
+    const spares = (rep.rgb || []).filter((o) => o.state === 'empty'), spareN = spares.length, spareSats = spares.reduce((x, o) => x + o.sats, 0);
     const coinSats = coins.reduce((x, c) => x + c.sats, 0);
     const coinList = coins.length ? `<ul class="rgo-list">${coins.map((c) => `<li><span><b>${c.sats.toLocaleString('en-US')}</b> sats${c.confirmed ? '' : ' <small class="muted">(unconfirmed)</small>'}${c.justSpent ? ' <small class="warn">just spent</small>' : ''}</span><span class="rgo-op">${link(c.outpoint)}</span></li>`).join('')}</ul>` : '<p class="muted small">No bitcoin on the RGB balance. Buying and moving tokens needs some: use Add from Bitcoin on Home.</p>';
     return `<div class="cloud-box rgo">
@@ -471,6 +472,8 @@ export class RgbSettings {
       <div class="rgo-sec"><h4>RGB outputs <span class="muted small">${(rep.rgb || []).length}</span></h4>${rgbList || '<p class="muted small">None.</p>'}</div>
       <div class="rgo-sec"><h4>Bitcoin for fees and buys <span class="muted small">${coins.length} coin${coins.length === 1 ? '' : 's'} · ${fmtBtc(coinSats)} ${unit}</span></h4>${coinList}
         <p class="muted small">Each buy or move spends a coin of its own: a few coins let several go one after another without waiting.</p></div>
+      ${rep.canFreeSpare && spareN > (rep.keepSpare ?? 6) ? `<div class="rgo-sec"><p class="muted small">${spareN} spare RGB outputs hold ${fmtBtc(spareSats)} ${unit}. Keep ${rep.keepSpare ?? 6} for receiving tokens and turn the rest, with your bitcoin here, into 4 coins for buys (one transaction, a small network fee; outputs holding tokens never move).</p>
+        <button class="btn primary wide" data-rgb="freeSpare" ${r.busy ? 'disabled' : ''}>Free ${spareN - (rep.keepSpare ?? 6)} spare outputs</button></div>` : ''}
     </div>`;
   }
   /** Settings → RGB → Instant listings: each one's state (signed listings are bought with MASKED closed). */

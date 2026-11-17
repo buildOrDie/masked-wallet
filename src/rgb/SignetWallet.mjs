@@ -147,6 +147,9 @@ export class SignetWallet {
       return fn(wallet);
     });
   }
+  /** Free spare RGB outputs back to bitcoin, keeping a few (see LiteWallet.freeSpare). */
+  /** @param {{ keep?: number, parts?: number, fee?: any }} [o] */
+  freeSpare({ keep = undefined, parts = undefined, fee = undefined } = {}) { return this.mutate((w) => w.freeSpare({ keep, parts, feeRate: testFee(fee) })); }
   /** Everything this RGB wallet holds, output by output (see LiteWallet.outputsReport). */
   outputsReport() { return this.exclusive(() => this.requireWallet().outputsReport(this.instantStore())); }
   /** Outputs this wallet counts that the chain shows spent; `fix` marks them spent (see LiteWallet.repairFromChain). */

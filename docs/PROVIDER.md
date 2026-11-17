@@ -216,6 +216,10 @@ What's in the RGB wallet, so a site can show what is locked and why (MASKED asks
 - `rgb`: `[{ outpoint, sats, tokens: [{ assetId, ticker, precision, amount, settled }], state, listing }]`, one per RGB output. `state`: `on sale` (a signed Instant listing), `going live` (moved for a listing, being signed), `cancelling`, `promised` (kept for a listing this copy has no record of), `invoice` (no token yet, reserved by an RGB invoice not paid yet: `invoices` counts them), `free`, `waiting` (not confirmed yet), `unusable`, `empty` (a spare output that can receive tokens). `listing`: `{ offerId, stage, assetId, amount, priceSats }` for the first three (enough to call `cancelInstant`).
 - `coins`: `[{ outpoint, sats, confirmed, justSpent }]`: the plain bitcoin coins of the RGB balance (each buy or move spends one).
 - `activity`: the newest 40 of: token transfers `{ type: 'transfer', assetId, ticker, kind, status, amount, txid, at }` and Instant listings/purchases `{ type: 'listing', offerId, role, stage, assetId, amount, priceSats, txid, at }`.
+
+### `rgb.freeSpare({ feeRate? }): Promise<{ txid, freed, sats }>` 🔐 *(2.29.25+, engine with `freeSpareUtxosBegin`)*
+
+Spare RGB outputs (no token, nothing pending, not reserved, confirmed) back to bitcoin: MASKED keeps 6 for receiving tokens and spends the rest, with the plain bitcoin of the RGB wallet, into 4 coins of about the same size (several buys can then go one after another). One transaction; outputs holding tokens never move. MASKED asks first. `getOutputs()` says whether the engine can (`canFreeSpare`) and how many it keeps (`keepSpare`); outputs with no token the engine doesn't count as spare are `held`.
 ### Peer-to-peer swaps: `rgb.offerableAmount`, `prepareBuy`, `prepareSale`, `signBuy`, `completeSale` 🔐
 RGB tokens for BTC in one Bitcoin transaction, wallet to wallet: nobody holds anything in between. The site only passes
 the messages from one wallet to the other. The transaction layout and message fields below are the whole format: any

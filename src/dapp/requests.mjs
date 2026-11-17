@@ -286,6 +286,12 @@ export function makeHandler({ getPublic, getTrade, getSites, setSites, openAppro
       case 'rgbOutputs':
         needConnected();
         return openApproval(origin, 'rgbOutputs', {});
+      case 'rgbFreeSpare': {
+        needConnected();
+        const f = params.feeRate == null ? 0 : Number(params.feeRate);
+        if (f && !(f >= 1 && f <= 500)) throw err(4000, 'feeRate must be between 1 and 500 sat/vB.');
+        return openApproval(origin, 'rgbFreeSpare', { feeRate: f || undefined });
+      }
       case 'rgbSwapAvailable':
         needConnected();
         return openApproval(origin, 'rgbSwapAvailable', { assetId: optAssetId(params.assetId) || (() => { throw err(4000, 'assetId is required.'); })() });

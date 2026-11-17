@@ -119,3 +119,5 @@ export function fromBase(n, precision) {
 
 /** Bitcoin on each output MASKED makes ready for RGB tokens: 330 sats, the smallest a Taproot output can be (UniSat uses the same). */
 export const RGB_UTXO_SATS = 330;
+/** Spare RGB outputs kept for receiving tokens when the rest are freed back to bitcoin (Free spare outputs). */
+export const RGB_KEEP_SPARE = 6;

@@ -3,7 +3,8 @@
 # masked-b5.patch: peer-to-peer swaps (colorSwap, newSwapPsbt, verifySwapPsbt, …), pre-signed listings
 # (presignSale, presignedBuyPsbt, setPresignedReceives, …), lots signed at once (setOwnUnconfirmed: outputs of
 # this wallet's own unconfirmed moves can be moved and listed; setSwapChangeVout: a move keeps the rest of the
-# tokens on its own change output), transfers from RGB 0.11.1 wallets (old-format
+# tokens on its own change output), spare RGB outputs freed back to bitcoin (spareUtxos, freeSpareUtxosBegin),
+# transfers from RGB 0.11.1 wallets (old-format
 # consignments converted on arrival) and the upgrade of wallets saved by MASKED's previous engine
 # (migrateLegacyWallet). Output: vendor/rgb-lib-wasm/, which `npm run build` uses instead of the npm package.
 #
@@ -37,7 +38,7 @@ cp "$work/bindings/wasm/pkg/"rgb_lib_wasm_bindings* "$out/"
 # the bindings import small JS helpers from snippets/ (beta.4: a no-store fetch)
 [[ -d "$work/bindings/wasm/pkg/snippets" ]] && cp -R "$work/bindings/wasm/pkg/snippets" "$out/"
 node -e "require('fs').writeFileSync('$out/package.json', JSON.stringify({name:'@utexo/rgb-lib-wasm',version:'1.0.0-beta.4+masked',type:'module',main:'rgb_lib_wasm_bindings.js',types:'rgb_lib_wasm_bindings.d.ts'},null,2))"
-for f in newSwapPsbt presignSale migrateLegacyWallet setPresignedReceives setOwnUnconfirmed setSwapChangeVout; do
+for f in newSwapPsbt presignSale migrateLegacyWallet setPresignedReceives setOwnUnconfirmed setSwapChangeVout spareUtxos freeSpareUtxosBegin; do
   grep -q "$f" "$out/rgb_lib_wasm_bindings.d.ts" || { echo "The built engine has no $f. Stop."; exit 1; }
 done
 shasum -a 256 "$out/rgb_lib_wasm_bindings_bg.wasm"

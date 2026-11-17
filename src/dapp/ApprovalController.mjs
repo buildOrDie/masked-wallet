@@ -11,13 +11,13 @@ import { toBase, fromBase } from '../rgb/config.mjs';
 import { rgbFundParts, proxyUrl, rgbError, RGB_CONFLICT_MSG } from '../rgb/WalletRgb.mjs';
 
 /** Methods whose approve button waits for a prepared transaction. */
-export const NEEDS_PREP = ['sendBitcoin', 'inscribeTransfer', 'shareTrade', 'fundTrade', 'moveToTrade', 'returnToShielded', 'cancelShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbInvoice', 'rgbPay', 'rgbSwapAvailable', 'rgbListAssets', 'rgbOutputs', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantListLots', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel'];
-const SWAP_METHODS = ['rgbSwapAvailable', 'rgbListAssets', 'rgbOutputs', 'rgbOutputs', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantListLots', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel'];
+export const NEEDS_PREP = ['sendBitcoin', 'inscribeTransfer', 'shareTrade', 'fundTrade', 'moveToTrade', 'returnToShielded', 'cancelShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbInvoice', 'rgbPay', 'rgbSwapAvailable', 'rgbListAssets', 'rgbOutputs', 'rgbFreeSpare', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantListLots', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel'];
+const SWAP_METHODS = ['rgbSwapAvailable', 'rgbListAssets', 'rgbOutputs', 'rgbFreeSpare', 'rgbOutputs', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantListLots', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel'];
 const RGB_METHODS = ['rgbInvoice', 'rgbPay', ...SWAP_METHODS];
 const SWAP_SIZE_VB = 320;
 /** Steps that move this wallet's tokens: stopped while another copy of this wallet saved newer RGB data. */
 // (receiving and buying too: tokens taken in here would be missing from the newer copy, and this copy couldn't back them up)
-const MOVES_TOKENS = ['rgbInvoice', 'rgbPay', 'rgbBuyPrepare', 'rgbBuySign', 'rgbSalePrepare', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantListLots', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel'];
+const MOVES_TOKENS = ['rgbFreeSpare', 'rgbInvoice', 'rgbPay', 'rgbBuyPrepare', 'rgbBuySign', 'rgbSalePrepare', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantListLots', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel'];
 /** Kept on top of a purchase's own cost when topping up the RGB balance (the exact fee depends on the coins). */
 const TOP_UP_MARGIN = 1000;
 const BUYS = ['rgbBuyPrepare', 'rgbInstantBuy', 'rgbInstantBuyMany'];
@@ -217,6 +217,18 @@ export class ApprovalController {
   prepareSwap(a, once) {
     const r = this.app.rgb, P = a.params || {}, m = a.method;
     once(async () => {
+      if (m === 'rgbFreeSpare') {
+        if (typeof r.service?.freeSpare !== 'function') throw new Error('This MASKED version can\'t free spare outputs yet. Update MASKED.');
+        if (r.requireLatest) await r.requireLatest(); else if (r.cloud?.conflict) throw new Error(RGB_CONFLICT_MSG);
+        const rep = await this.rgbBusy(() => r.service.outputsReport());
+        if (!rep.canFreeSpare) throw new Error('This RGB engine can\'t free spare outputs yet. Update MASKED (engine/build.sh).');
+        const spare = (rep.rgb || []).filter((o) => o.state === 'empty');
+        const keep = rep.keepSpare ?? 6;
+        if (spare.length <= keep) throw new Error(`Only ${spare.length} spare RGB outputs: MASKED keeps ${keep} for receiving tokens, so there's nothing to free.`);
+        const freed = spare.slice(keep);
+        const coins = (rep.coins || []).filter((c) => !c.justSpent);
+        return { keep, freed: freed.length, sats: freed.reduce((n, o) => n + o.sats, 0), coinSats: coins.reduce((n, c) => n + c.sats, 0), rate: P.feeRate || Number(r.fee()) };
+      }
       if (m === 'rgbOutputs') return { list: r.assets().map((x) => ({ ticker: x.ticker, assetId: x.assetId })) };
       if (m === 'rgbListAssets') return { list: r.assets().map((x) => ({ ticker: x.ticker, assetId: x.assetId })) };
       if (!r.service?.canSwap) throw new Error('This MASKED version can\'t swap RGB tokens yet. Update MASKED.');
@@ -491,6 +503,14 @@ export class ApprovalController {
         const status = await this.rgbWaitBroadcast(r, b.assetId, res?.batchTransferIdx);
         if (status === 'failed') throw new Error('The other side refused the transfer. Nothing was sent.');
         return { txid: String(res?.txid || ''), batchTransferIdx: res?.batchTransferIdx ?? null, amount: String(amount), status };
+      });
+      case 'rgbFreeSpare': return this.rgbBusy(async () => {
+        const b = prepared(''), r = app.rgb;
+        await this.rgbBackedUp(r);
+        const out = await r.service.freeSpare({ fee: a.params.feeRate || b.rate });
+        await r.refresh().catch(() => {});
+        await this.rgbBackedUp(r).catch(() => {});
+        return out;
       });
       case 'rgbOutputs': return this.rgbBusy(async () => { prepared(''); return app.rgb.service.outputsReport(); });
       case 'rgbListAssets': return this.rgbBusy(async () => { prepared(''); return app.rgb.service.assetList(); });

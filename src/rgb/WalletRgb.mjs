@@ -1124,6 +1124,12 @@ export class WalletRgb {
       // What's in this wallet: every output and coin, what it's doing
       case 'outputs': return this.run(async () => { this.outputs = await this.service.outputsReport(); }, { quiet: true });
       case 'outputsClose': this.outputs = null; return app.render();
+      case 'freeSpare': return this.run(async () => {
+        const r = await this.service.freeSpare({ fee: this.fee() });
+        app.toast(`${r.freed} spare RGB outputs freed: ${r.sats.toLocaleString('en-US')} sats back as bitcoin for buys after one confirmation`);
+        await this.refresh().catch(() => {});
+        this.outputs = await this.service.outputsReport().catch(() => this.outputs);
+      });
       case 'cloudReplace': return this.run(async () => { if (await this.cloudSave({ replace: true })) app.toast('This browser\'s RGB state is now the cloud backup'); });
       case 'betaOff': return this.run(async () => { await this.close(); try { localStorage.setItem(RGB_BETA_KEY, '0'); } catch { /* */ } app.toast('RGB beta is off. Your RGB wallet stays saved in this browser.'); });
       default: return undefined;
