@@ -2,7 +2,7 @@
 // engine and block server; the signature and PSBT checks themselves are Rust (engine/masked-swap.patch).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { LiteWallet } from '../src/rgb/LiteWallet.mjs';
+import { LiteWallet, outspendCacheClear } from '../src/rgb/LiteWallet.mjs';
 import { exactCoinFor, freeSellerCoinFor, b64 } from '../src/rgb/swap.mjs';
 
 const ASSET = 'rgb:2dkSTbr-jFhznbPmo-TQ3Kdm9-SWcFsJA-bFZa5Ef-Q8Fy8oo';
@@ -61,6 +61,7 @@ function wallet({ name, rgb = [], coins = [], lib, chain }) {
   const mem = {};
   const store = { get: (k) => mem[k] || null, set: (k, v) => { mem[k] = v; }, del: (k) => { delete mem[k]; }, all: () => mem };
   w.ownOutputWaitMs = 30; // the fake engine never lists a move's change: don't wait 45 s for it
+  w.spendCheckMs = 0; outspendCacheClear(); // each test asks the fake chain afresh
   return { w, store, mem, log };
 }
 function fakeChain() {
@@ -987,4 +988,21 @@ test('seller: a signed listing whose signature was dropped to free storage is si
   assert.equal(again.sellerOutpoint, coin);
   assert.equal(s.log.filter((x) => x[0] === 'presign').length, 2);
   assert.ok(!s.store.get(args.offerId).resign);
+});
+
+test('outspend answers: "not spent" reused only when allowed (listings: 2 minutes), "spent" always kept', async () => {
+  const chain = fakeChain();
+  const s = wallet({ name: 'seller', lib: fakeLib(), chain, rgb: [] });
+  const real = globalThis.fetch; let asked = 0;
+  globalThis.fetch = async (u, i) => { if (/outspend/.test(String(u))) asked++; return real(u, i); };
+  try {
+    await s.w.outspend(T('a'), 0, 120_000); await s.w.outspend(T('a'), 0, 120_000);
+    assert.equal(asked, 1, 'a listing looked at twice: one request');
+    await s.w.outspend(T('a'), 0);
+    assert.equal(asked, 2, 'before a move: always asked afresh');
+    chain.spends[`${T('a')}:0`] = { spent: true, txid: T('b') };
+    assert.equal((await s.w.outspend(T('a'), 0)).spent, true);
+    assert.equal((await s.w.outspend(T('a'), 0)).spent, true);
+    assert.equal(asked, 3, 'spent stays spent: kept');
+  } finally { globalThis.fetch = real; }
 });

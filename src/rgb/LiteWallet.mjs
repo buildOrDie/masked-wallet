@@ -55,6 +55,29 @@ const OLD_CONSIGNMENT = /ConsignmentVe|unsupported value `0`/i;
 /** How long a lot may wait in the queue for its tokens before it's given up (never moved later). */
 export const LOT_QUEUE_MAX_MS = 6 * 3600_000;
 
+/** How long "this listing hasn't sold" is trusted before the block server is asked again. */
+export const LISTING_SPEND_CHECK_MS = 120_000;
+// outspend answers, kept in browser storage so MASKED's popup and approval windows share them (small: a few hundred)
+const SPENDS_KEY = 'masked.rgb.outspends';
+let spendsMem = null, spendsReadAt = 0;
+function readSpends() {
+  // read again every few seconds: another MASKED window may have asked meanwhile
+  if (spendsMem && Date.now() - spendsReadAt < 3000) return spendsMem;
+  let saved = null;
+  try { saved = JSON.parse(globalThis.localStorage?.getItem(SPENDS_KEY) || 'null'); } catch { saved = null; }
+  spendsMem = saved && typeof saved === 'object' ? saved : spendsMem || {};
+  spendsReadAt = Date.now();
+  return spendsMem;
+}
+function keepSpend(key, v) {
+  const m = readSpends(); m[key] = v;
+  const keys = Object.keys(m);
+  if (keys.length > 600) for (const k of keys.sort((a, b) => m[a].at - m[b].at).slice(0, keys.length - 500)) delete m[k];
+  try { globalThis.localStorage?.setItem(SPENDS_KEY, JSON.stringify(m)); } catch { /* kept in memory only */ }
+}
+/** For tests: forget kept answers. */
+export function outspendCacheClear() { spendsMem = {}; spendsReadAt = Date.now(); try { globalThis.localStorage?.removeItem(SPENDS_KEY); } catch { /* none */ } }
+
 export class LiteWallet {
   /**
    * @param {object} lib  the loaded rgb-lib-wasm module ({ WasmWallet, WasmInvoice, restoreKeys })
@@ -907,6 +930,20 @@ export class LiteWallet {
     if (!r.ok) throw new Error(`Block server: ${(await r.text().catch(() => '')).slice(0, 160) || r.status}`);
     return r;
   }
+  /**
+   * Whether an output is spent ({ spent, txid }), from the block server. A spent output stays spent, so that answer is
+   * kept (10 minutes, across MASKED's windows). "Not spent" is reused only when the caller allows it (`maxAgeMs`):
+   * every refresh asked about each open listing, again in each approval window (hundreds of requests per tap).
+   * @param {string} txid @param {number|string} vout @param {number} [maxAgeMs] how old a "not spent" may be
+   */
+  async outspend(txid, vout, maxAgeMs = 0) {
+    const key = `${String(txid).toLowerCase()}:${vout}`, now = Date.now();
+    const kept = readSpends()[key];
+    if (kept && (kept.spent ? now - kept.at < 600_000 : maxAgeMs > 0 && now - kept.at < maxAgeMs)) return kept;
+    const sp = await (await this.esplora(`/tx/${txid}/outspend/${vout}`)).json();
+    keepSpend(key, { spent: !!sp?.spent, txid: sp?.txid ? String(sp.txid) : '', at: now });
+    return sp;
+  }
   /** Transactions this wallet made itself: its transfers (sends, receives, listing and lot moves), plus `extra`. */
   ownTxids(extra = []) {
     const own = new Set((extra || []).filter(Boolean).map((t) => String(t).toLowerCase()));
@@ -938,7 +975,7 @@ export class LiteWallet {
       for (const u of held.slice(0, 40)) {
         const [txid, vout] = opOf(u).split(':');
         try {
-          const sp = await (await this.esplora(`/tx/${txid}/outspend/${vout}`)).json();
+          const sp = await this.outspend(txid, vout);
           if (sp?.spent) { if (sp.txid && own.has(String(sp.txid).toLowerCase())) mine.add(opOf(u)); else { gone.push(opOf(u)); spentBy[opOf(u)] = String(sp.txid || ''); } }
         } catch { /* the block server didn't answer: not counted */ }
       }
@@ -973,7 +1010,7 @@ export class LiteWallet {
     for (const u of held.slice(0, 100)) {
       const op = `${String(u.utxo.outpoint.txid).toLowerCase()}:${u.utxo.outpoint.vout}`;
       let sp = null;
-      try { sp = await (await this.esplora(`/tx/${u.utxo.outpoint.txid}/outspend/${u.utxo.outpoint.vout}`)).json(); } catch { continue; }
+      try { sp = await this.outspend(u.utxo.outpoint.txid, u.utxo.outpoint.vout); } catch { continue; }
       if (!sp?.spent || (sp.txid && own.has(String(sp.txid).toLowerCase()))) continue;
       gone.push({ outpoint: op, assets: (u.rgbAllocations || []).filter((a) => a.settled).map((a) => ({ assetId: a.assetId, amount: String(a.assignment?.Fungible ?? a.amount ?? 0) })) });
     }
@@ -1655,7 +1692,8 @@ export class LiteWallet {
           changes.push({ offerId: id, stage: 'outdated' });
         } else if ((e.stage === 'ready' || e.stage === 'cancelling') && e.coin) {
           const [txid, vout] = e.coin.split(':');
-          const sp = await (await this.esplora(`/tx/${txid}/outspend/${vout}`)).json();
+          // a sale is noticed within 2 minutes; every refresh and every approval window asking again flooded the server
+          const sp = await this.outspend(txid, vout, /** @type {any} */ (this).spendCheckMs ?? LISTING_SPEND_CHECK_MS);
           if (!sp?.spent) continue;
           const by = String(sp.txid || '');
           if (by && by === e.cancelTxid) { store.set(id, { ...e, stage: 'cancelled', at: Date.now() }); changes.push({ offerId: id, stage: 'cancelled', txid: by }); continue; }
