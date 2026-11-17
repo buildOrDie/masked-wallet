@@ -7,6 +7,16 @@ import { RGB_BLIND_MIN, RGB_EXPIRY, RGB_LOW_BTC } from '../../rgb/WalletRgb.mjs'
 import { View } from '../View.mjs';
 import { I, addrChunks, btcLogo, head, qrSvg, rowKV, tokIcon } from '../html.mjs';
 
+/** Why the engine holds an empty RGB output, in words (engine: emptyUtxos). */
+const HELD_WHY = {
+  'pending witness': 'its transaction carries an RGB transfer whose data never arrived: it may hold tokens',
+  'blinded receive': 'reserved by an invoice',
+  transfer: 'named by a transfer MASKED began',
+  listing: 'kept for a listing',
+  'bitcoin operation': 'named by a bitcoin transaction MASKED began',
+  'not broadcast': 'its transaction isn\'t on the network',
+  unconfirmed: 'waiting for a block',
+};
 export const rgbBadge = '<span class="badge rgb">RGB</span>';
 const rgbIcon = (ticker, big = false) => tokIcon(ticker || 'RG', big).replace('class="tok-ic', 'class="tok-ic rgb');
 const input = (r, key, label, extra = '', right = '') => `<label class="field"><span class="lbl">${label}${right ? ` <span class="lbl-r">${right}</span>` : ''}</span><input data-rgb-field="${key}" value="${esc(r.fields[key])}" autocomplete="off" spellcheck="false" ${extra}></label>`;
@@ -107,7 +117,7 @@ export class RgbHome {
     return `<section class="home-toks">
       <div class="list-h"><b>RGB tokens${r.isMain ? ' <span class="badge">beta</span>' : ''}</b><button class="link small" data-rgb="refresh" ${r.busy ? 'disabled' : ''}>${r.busy ? 'Updating…' : r.data.cached ? 'Last saved · Refresh' : 'Refresh'}</button></div>
       ${backupDue}${fund}
-      <div class="tok-list">${feeRow}${list.map((a) => {
+      <div class="tok-list">${feeRow}${listingsRow(r)}${list.map((a) => {
         const { settled: s, future: fut } = r.bal(a);
         return `<button class="tok-line" data-rgb="token" data-rgb-arg="${esc(a.assetId)}">${rgbIcon(a.ticker)}
         <span class="bal-txt"><b class="tk">${esc(a.ticker)}</b><span>RGB${fut > s ? ' · <span class="pend-t">incoming</span>' : ''}</span></span>
@@ -116,6 +126,19 @@ export class RgbHome {
       ${nftGrid(r)}
     </section>`;
   }
+}
+
+/** Home → RGB tokens: "Your listings" (only when there are any open), opening the listings screen. */
+export function listingsRow(r) {
+  let list = [];
+  try { list = r.service?.instantListings?.() || []; } catch { list = []; }
+  const open = list.filter((e) => listingState(e).open);
+  if (!open.length) return '';
+  const live = open.filter((e) => listingState(e).key === 'ready').length;
+  const stuck = open.filter((e) => listingState(e).key === 'stuck').length;
+  return `<button class="tok-line lst-row" data-rgb="listings"><span class="tok-ic lst-ic" aria-hidden="true">${I.list || '☰'}</span>
+    <span class="bal-txt"><b class="tk">Your listings</b><span><span>${live} on sale</span>${stuck ? ` <span class="warn">${stuck} stuck</span>` : ''}</span></span>
+    <span class="bal-amt"><b>${open.length}</b><span>open</span></span><span class="chev">›</span></button>`;
 }
 
 /** An NFT's picture: the image once loaded from the transfer server (and checked), its number meanwhile. */
@@ -447,12 +470,12 @@ export class RgbSettings {
     const tokens = (rep.tokens || []).map((t) => {
       const parts = [['free', 'free to list or send', t.free], ['listed', 'in your listings', t.listed], ['waiting', 'waiting for a block', t.waiting], ['other', 'on outputs it can\'t use', t.other]].filter(([, , v]) => N(v) > 0);
       const total = parts.reduce((x, [, , v]) => x + N(v), 0);
-      return `<div class="rgo-tok"><div class="rgo-tokh"><b>${tick(t)}</b><span>${amt({ ...t, amount: String(total) })}</span></div>
+      return `<div class="rgo-tok"><div class="rgo-tokh"><b translate="no">${tick(t)}</b><span>${amt({ ...t, amount: String(total) })}</span></div>
         <div class="rgo-bar">${parts.map(([k, , v]) => `<i class="${k}" style="flex-grow:${N(v)}"></i>`).join('')}</div>
         <ul class="rgo-parts">${parts.map(([k, label, v]) => `<li><i class="${k}"></i>${amt({ ...t, amount: v })} ${label}</li>`).join('')}</ul></div>`;
     }).join('');
     // RGB outputs, by what they're doing
-    const STATE = { 'on sale': ['On sale', 'An Instant listing: anyone can buy it, even with MASKED closed.'], 'going live': ['Going live', 'Moved for a listing, waiting to be signed.'], cancelling: ['Cancelling', 'A cancel waiting for its block.'], promised: ['Promised', 'Held for a listing MASKED no longer has a record of.'], free: ['Free', 'Can be listed or sent.'], waiting: ['Waiting for a block', 'A receive or a move not confirmed yet.'], unusable: ['Unusable', 'An output MASKED can\'t use for tokens.'], invoice: ['Kept for an invoice', 'Empty, reserved by an RGB invoice nobody has paid.'], held: ['Empty, held by the engine', 'No token, but the RGB engine doesn\'t count it as free yet (a transfer or operation it began).'], dropped: ['Never arrived', 'The transaction carrying these tokens is gone from the network (never confirmed). They are still with the sender, who has to send them again.'], empty: ['Empty', 'Spare RGB outputs: tokens can be received on them.'] };
+    const STATE = { 'on sale': ['On sale', 'An Instant listing: anyone can buy it, even with MASKED closed.'], 'going live': ['Going live', 'Moved for a listing, waiting to be signed.'], cancelling: ['Cancelling', 'A cancel waiting for its block.'], promised: ['Promised', 'Held for a listing MASKED no longer has a record of.'], free: ['Free', 'Can be listed or sent.'], waiting: ['Waiting for a block', 'A receive or a move not confirmed yet.'], unusable: ['Unusable', 'An output MASKED can\'t use for tokens.'], invoice: ['Kept for an invoice', 'Empty, reserved by an RGB invoice nobody has paid.'], held: ['Kept: may hold tokens', 'No token shows here, but MASKED can\'t be sure none sits on it, so it never spends it.'], dropped: ['Never arrived', 'The transaction carrying these tokens is gone from the network (never confirmed). They are still with the sender, who has to send them again.'], empty: ['Empty', 'Spare RGB outputs: tokens can be received on them.'] };
     const groups = new Map();
     for (const o of rep.rgb || []) { if (!groups.has(o.state)) groups.set(o.state, []); groups.get(o.state).push(o); }
     const rgbList = [...groups].map(([st, list]) => {
@@ -460,7 +483,7 @@ export class RgbSettings {
       const sats = list.reduce((x, o) => x + o.sats, 0);
       return `<details class="rgo-grp" ${['on sale', 'going live', 'free', 'promised', 'unusable'].includes(st) ? 'open' : ''}><summary><span class="rgo-dot ${esc(st.replace(' ', '-'))}"></span><b>${title}</b><span class="muted small">${list.length} output${list.length === 1 ? '' : 's'} · ${fmtBtc(sats)} ${unit}</span></summary>
         <p class="muted small">${hint}</p>
-        <ul class="rgo-list">${list.map((o) => `<li><span>${o.why ? `<small class="muted">${esc(o.why)}</small> ` : ''}${o.tokens.length ? o.tokens.map((t) => `<b>${amt(t)}</b> ${tick(t)}${t.settled ? '' : ' <small class="muted">(unconfirmed)</small>'}`).join(' · ') : '<span class="muted">no token</span>'}${o.listing?.priceSats ? ` <small class="muted">for ${N(o.listing.priceSats).toLocaleString('en-US')} sats</small>` : ''}</span><span class="rgo-op">${link(o.outpoint)}<small class="muted">${o.sats.toLocaleString('en-US')} sats</small></span></li>`).join('')}</ul></details>`;
+        <ul class="rgo-list">${list.map((o) => `<li><span>${o.why ? `<small class="muted">${esc(HELD_WHY[o.why] || o.why)}</small> ` : ''}${o.tokens.length ? o.tokens.map((t) => `<b translate="no">${amt(t)} ${tick(t)}</b>${t.settled ? '' : ' <small class="muted">(unconfirmed)</small>'}`).join(' · ') : '<span class="muted">no token</span>'}${o.listing?.priceSats ? ` <small class="muted">for ${N(o.listing.priceSats).toLocaleString('en-US')} sats</small>` : ''}</span><span class="rgo-op">${link(o.outpoint)}<small class="muted">${o.sats.toLocaleString('en-US')} sats</small></span></li>`).join('')}</ul></details>`;
     }).join('');
     const coins = rep.coins || [];
     const spares = (rep.rgb || []).filter((o) => o.state === 'empty'), spareN = spares.length, spareSats = spares.reduce((x, o) => x + o.sats, 0);
@@ -516,15 +539,11 @@ export class RgbSettings {
   static instant(r) {
     let list = [];
     try { list = r.service?.instantListings?.() || []; } catch { list = []; }
-    list = list.filter((e) => e.stage !== 'cancelled' || Date.now() - (e.at || 0) < 86400_000).slice(0, 20);
     if (!list.length) return '';
-    const label = { outdated: 'signed by an older MASKED: cancel it on the market and list again', moving: 'going live soon: on sale after the next block (about 10 minutes)', ready: 'on sale: anyone can buy it, even with MASKED closed', cancelling: 'cancelling: waiting for the transaction to confirm', cancelled: 'cancelled', sold: 'sold' };
-    const rows = list.map((e) => `<li><span>${(() => { const a = r.find?.(e.assetId); return a ? `${esc(r.amount(a, e.amount))} ${esc(a.ticker)}` : `${esc(Number(e.amount).toLocaleString('en-US'))} <span class="mono">${esc(short(e.assetId, 6))}</span>`; })()} for ${esc(Number(e.priceSats).toLocaleString('en-US'))} sats<small class="muted">${esc(label[e.stage] || e.stage)}</small>${e.waiting ? `<small class="${/couldn't/.test(e.waiting) ? 'warn' : 'muted'}">${esc(e.waiting)}</small>` : ''}</span>${['ready', 'moving', 'outdated'].includes(e.stage) ? (r.cancelAsk === e.offerId
-      ? `<span class="inst-ask"><button class="btn primary sm" data-rgb="instantCancel" data-rgb-arg="${esc(e.offerId)}" ${r.busy ? 'disabled' : ''}>Cancel it</button><button class="btn ghost sm" data-rgb="instantCancelNo">Keep</button></span>`
-      : `<button class="btn ghost sm" data-rgb="instantCancelAsk" data-rgb-arg="${esc(e.offerId)}" ${r.busy ? 'disabled' : ''}>Cancel</button>`) : ''}</li>`).join('');
-    return `<div class="cloud-box"><div class="cloud-h"><b>Instant listings</b><span class="muted small">${list.filter((e) => e.stage === 'ready').length} live</span></div>
-      <p class="muted small">Signed once, bought any time, even with MASKED closed. Cancelling one moves its tokens on chain (a small network fee), so the signature can't be used any more.</p>
-      <ul class="auto-list">${rows}</ul></div>`;
+    const open = list.filter((e) => listingState(e).open).length, live = list.filter((e) => listingState(e).key === 'ready').length;
+    return `<div class="cloud-box"><div class="cloud-h"><b>Instant listings</b><span class="muted small">${live} on sale · ${open} open</span></div>
+      <p class="muted small">Signed once, bought any time, even with MASKED closed. See them all and cancel one in Your listings.</p>
+      <button class="btn ghost wide" data-rgb="listings">Open Your listings</button></div>`;
   }
   /** Settings → RGB → cloud backup: status, and the switch. */
   static cloud(r) {
@@ -545,5 +564,69 @@ export class RgbSettings {
           : `<button class="btn ghost wide" data-rgb="cloudRetry" ${r.busy ? 'disabled' : ''}>Try again</button>`}` : ''}
       ${RgbSettings.cloudVersions(r)}
       <button class="btn ghost wide" data-rgb="cloudOff" ${r.busy ? 'disabled' : ''}>Switch off cloud backup</button></div>`;
+  }
+}
+
+/** A listing's state in words, with its pill tone. Stuck: still "going live" hours later (its tokens never moved). */
+export function listingState(e, now = Date.now()) {
+  const stuck = e.stage === 'moving' && Number(e.at) > 0 && now - Number(e.at) > 6 * 3600_000;
+  if (stuck) return { key: 'stuck', label: 'Stuck', tone: 'warn', open: true, line: 'It hasn\'t gone live in hours. Cancel it: nothing moves, its tokens never left.' };
+  return ({
+    ready: { key: 'ready', label: 'On sale', tone: 'live', open: true, line: 'Anyone can buy it, even with MASKED closed.' },
+    moving: { key: 'moving', label: 'Going live', tone: 'wait', open: true, line: 'On sale after its next block (about 10 minutes).' },
+    outdated: { key: 'outdated', label: 'Can\'t sell', tone: 'warn', open: true, line: 'Signed by an older MASKED. Cancel it and list again.' },
+    cancelling: { key: 'cancelling', label: 'Cancelling', tone: 'wait', open: true, line: 'Your tokens are free again after one confirmation.' },
+    sold: { key: 'sold', label: 'Sold', tone: 'done', open: false, line: '' },
+    cancelled: { key: 'cancelled', label: 'Cancelled', tone: 'off', open: false, line: '' },
+  })[e.stage] || { key: e.stage, label: e.stage, tone: 'off', open: false, line: '' };
+}
+
+/**
+ * Your listings: every Instant listing of this wallet in one place, by token. Open ones first (on sale, going live,
+ * stuck, cancelling), each with its price per token and a Cancel that asks once, in the card itself; finished ones
+ * (sold, cancelled) on their own tab. Reached from Home (RGB tokens) and Settings → RGB.
+ */
+export class RgbListingsView extends View {
+  render() {
+    const r = this.app.rgb;
+    if (!r.ready) { this.state.view = 'home'; return this.app.ui.view('home').render(); }
+    let all = [];
+    try { all = r.service?.instantListings?.() || []; } catch { all = []; }
+    const tab = this.f.listTab === 'done' ? 'done' : 'open';
+    const withState = all.map((e) => ({ ...e, st: listingState(e) })).sort((a, b) => (b.at || 0) - (a.at || 0));
+    const open = withState.filter((e) => e.st.open), done = withState.filter((e) => !e.st.open).slice(0, 50);
+    const shown = tab === 'open' ? open : done;
+    const live = open.filter((e) => e.st.key === 'ready').length;
+    const tokens = new Map();
+    for (const e of shown) { if (!tokens.has(e.assetId)) tokens.set(e.assetId, []); tokens.get(e.assetId).push(e); }
+    const name = (id) => { const a = r.find?.(id); return a ? a.ticker : short(id, 6); };
+    const amt = (e) => { const a = r.find?.(e.assetId); return a ? r.amount(a, e.amount) : Number(e.amount).toLocaleString('en-US'); };
+    const per = (e) => { const a = r.find?.(e.assetId); const whole = Number(e.amount) / 10 ** (a?.precision || 0); return whole > 0 ? Number((Number(e.priceSats) / whole).toPrecision(4)).toLocaleString('en-US') : '–'; };
+    const explorer = this.account?.explorer, onChain = r.profile.id === 'public' || r.isMain;
+    const card = (e) => {
+      const asking = r.cancelAsk === e.offerId;
+      const canCancel = ['ready', 'moving', 'outdated', 'stuck'].includes(e.st.key);
+      return `<article class="lst-card t-${esc(e.st.tone)}">
+        <div class="lst-top"><b class="lst-amt" translate="no">${esc(amt(e))} ${esc(name(e.assetId))}</b><span class="lst-pill ${esc(e.st.tone)}">${esc(e.st.label)}</span></div>
+        <div class="lst-price"><span>${Number(e.priceSats).toLocaleString('en-US')} sats</span><span class="muted">${per(e)} sats each</span></div>
+        ${e.st.line ? `<p class="lst-line">${e.st.line}</p>` : ''}
+        ${e.waiting && e.st.key !== 'stuck' ? `<p class="lst-line ${/couldn't/.test(e.waiting) ? 'warn' : ''}">${esc(e.waiting)}</p>` : ''}
+        <div class="lst-meta"><span class="muted small">${e.at ? ago(e.at) : ''}</span>${e.txid && onChain && explorer ? `<a class="small" href="${explorer.tx(e.txid)}" target="_blank" rel="noopener">View transaction ${I.ext}</a>` : ''}</div>
+        ${canCancel ? (asking ? `<div class="lst-ask">
+            <p class="small">${e.st.key === 'ready' || e.st.key === 'outdated' ? 'MASKED moves these tokens to a new output of yours, so the signed listing can\'t be used any more. A small network fee.' : 'Nothing moves: the listing is just dropped.'}</p>
+            <button class="btn primary wide" data-rgb="instantCancel" data-rgb-arg="${esc(e.offerId)}" ${r.busy ? 'disabled' : ''}>${r.busy ? 'Cancelling…' : 'Cancel this listing'}</button>
+            <button class="btn ghost wide" data-rgb="instantCancelNo">Keep it</button></div>`
+          : `<button class="btn ghost wide lst-cancel" data-rgb="instantCancelAsk" data-rgb-arg="${esc(e.offerId)}" ${r.busy ? 'disabled' : ''}>Cancel listing</button>`) : ''}
+      </article>`;
+    };
+    return `${head('Your listings')}
+      <p class="muted small lst-intro">Instant listings sell even when MASKED is closed. Cancel one here to get its tokens back.</p>
+      <div class="seg lst-tabs" role="tablist">
+        <button role="tab" aria-selected="${tab === 'open'}" data-rgb="listTab" data-rgb-arg="open">Open · ${open.length}</button>
+        <button role="tab" aria-selected="${tab === 'done'}" data-rgb="listTab" data-rgb-arg="done">Finished · ${done.length}</button>
+      </div>
+      ${tab === 'open' && open.length ? `<p class="lst-sum"><b>${live}</b> on sale${open.length > live ? ` · <b>${open.length - live}</b> other open` : ''}</p>` : ''}
+      ${shown.length ? [...tokens].map(([id, list]) => `<section class="lst-tok"><h3 class="lst-tokh">${rgbIcon(name(id))}<span translate="no">${esc(name(id))}</span><span class="muted small">${list.length}</span></h3>${list.map(card).join('')}</section>`).join('')
+        : `<div class="lst-empty"><p>${tab === 'open' ? 'No open listings.' : 'Nothing finished yet.'}</p>${tab === 'open' ? '<p class="muted small">List a token on the RGB market: it shows up here.</p>' : ''}</div>`}`;
   }
 }

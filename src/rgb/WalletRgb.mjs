@@ -1161,6 +1161,8 @@ export class WalletRgb {
       case 'outputs': return this.run(async () => { this.outputs = this.withoutDropped(await this.service.outputsReport()); }, { quiet: true });
       case 'outputsClose': this.outputs = null; return app.render();
       // Settings → RGB → Instant listings: cancel one here, also one the market doesn't show (asks once first)
+      case 'listings': this.cancelAsk = null; state.view = 'rgblist'; return app.render();
+      case 'listTab': state.f.listTab = arg === 'done' ? 'done' : 'open'; this.cancelAsk = null; return app.render();
       case 'instantCancelAsk': this.cancelAsk = arg; return app.render();
       case 'instantCancelNo': this.cancelAsk = null; return app.render();
       case 'instantCancel': return this.run(async () => {
