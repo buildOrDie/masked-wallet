@@ -1440,4 +1440,5 @@ export const ZH_CN = {
   "Moved back to a new output of yours: the old listing can't be used.": "已转回你的一个新输出：旧挂单无法再使用。",
   "To an output of your own (a listing or a lot). Nothing left your wallet.": "转到你自己的一个输出（挂单或分批挂单）。没有任何东西离开你的钱包。",
   "For {0}, on the RGB market": "在 RGB 市场成交，价格 {0}",
+  "Next in line: it moves after the block of the lot before it (about 10 minutes), then goes on sale.": "排队中：等前一份的区块确认后（约 10 分钟）再转移，然后上架。",
 };

@@ -1064,9 +1064,11 @@ export class LiteWallet {
   async waitOwnOutput(online, outpoint, onStep = (_t) => {}, txHex = '', assetId = null, ms = /** @type {any} */ (this).ownOutputWaitMs ?? 60_000) {
     const want = String(outpoint).toLowerCase(), txid = want.split(':')[0];
     const end = Date.now() + ms;
-    const listed = () => (plain(this.wallet.listUnspents(false)) || []).some((u) => `${String(u.utxo?.outpoint?.txid).toLowerCase()}:${u.utxo?.outpoint?.vout}` === want);
-    // an engine that moves from an own move's change before taking the move in (ownMovesChain) needs only the output
     const chains = typeof this.wallet?.ownMovesChain === 'function';
+    // listed by the engine, and seen on the block server by its last sync (`exists`): the engine moves an own move's
+    // output only once it has that move's transaction
+    const listed = () => (plain(this.wallet.listUnspents(false)) || []).some((u) => `${String(u.utxo?.outpoint?.txid).toLowerCase()}:${u.utxo?.outpoint?.vout}` === want && (!chains || u.utxo?.exists !== false));
+    // an engine that moves from an own move's change before taking the move in (ownMovesChain) needs only the output
     const ready = () => {
       if (!assetId || chains) return true;
       let list = [];
@@ -1357,9 +1359,17 @@ export class LiteWallet {
       onStep(`Moving lot ${k + 1} of ${list.length} to an output of its own…`);
       let moved;
       try { moved = await this.instantMove(assetId, l.amount, from, rate, onStep, { feeFromInputs: k > 0 }); } catch (err) {
-        // what moved stays listed (signed below); the lots not moved yet are taken off by the market with the error
         if (k === 0) throw err;
-        for (const r of list.slice(k)) failed.set(r.offerId, `Not listed: ${String(err?.message || err).slice(0, 160)}`);
+        const text = String(err?.message || err);
+        // the previous move isn't usable yet (the engine needs its block): the rest wait their turn and move one per
+        // block, signed as they go, instead of being taken off the market
+        if (/none of its inputs is an RGB output|isn't a settled RGB output|insufficient ?allocation/i.test(text)) {
+          for (const [j, r] of list.slice(k).entries()) store.set(r.offerId, { role: 'seller', assetId, amount: String(r.amount), priceSats: String(r.priceSats), market: String(market), token: r.token, at: Date.now(), stage: 'queued', lotGroup: group, lotNo: k + j, lots: list.length, feeRate: rate, waiting: 'Next in line: it moves after the block of the lot before it (about 10 minutes), then goes on sale.' });
+          await this.save();
+          break;
+        }
+        // what moved stays listed (signed below); the lots not moved yet are taken off by the market with the error
+        for (const r of list.slice(k)) failed.set(r.offerId, `Not listed: ${text.slice(0, 160)}`);
         break;
       }
       this.syncOwnUnconfirmed(store, [moved.txid]);

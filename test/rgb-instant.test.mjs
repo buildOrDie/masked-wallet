@@ -952,3 +952,22 @@ test('lots at once: the next lot waits until the previous move is taken in (refr
   assert.equal(ok, true);
   assert.ok(refreshed >= 2, 'refreshed until the move waits only for its block');
 });
+
+test('lots all at once: a lot the engine can\'t chain yet waits its turn (one per block) instead of leaving the market', async () => {
+  const chain = fakeChain();
+  const from = `${T('b')}:0`, fee = `${T('c')}:2`;
+  chain.outs[from] = { sats: 1000, script: '5120rgb', tx: 'aa' };
+  chain.outs[fee] = { sats: 20000, script: '5120btc', tx: 'bb' };
+  chain.outs[`${T('5')}:2`] = { sats: 18000, script: '5120own', tx: 'cc' };
+  const s = wallet({ name: 'seller', lib: fakeLib(), chain, rgb: [unspent('b', 0, [tok(1500)])], coins: [{ outpoint: fee, txout: { value: 20000 }, is_spent: false }] });
+  let n = 0;
+  const color = s.w.w.colorSwap;
+  s.w.w.colorSwap = async (...a) => { if (++n === 2) throw new Error('Internal error: swap PSBT: none of its inputs is an RGB output of this wallet'); return color(...a); };
+  s.w.w.setOwnUnconfirmed = () => {};
+  s.w.w.setSwapChangeVout = () => {};
+  const lots = ['a', 'b', 'c'].map((c) => ({ offerId: `sw${c.repeat(12)}`, token: 'ab'.repeat(24), amount: '500', priceSats: '5000' }));
+  const r = await s.w.instantListLots({ assetId: ASSET, lots, feeRate: 2 }, s.store);
+  assert.deepEqual(r.lots.map((v) => v.stage), ['ready', 'moving', 'moving'], 'none taken off');
+  assert.deepEqual([1, 2].map((k) => s.store.get(lots[k].offerId).stage), ['queued', 'queued']);
+  assert.match(r.lots[1].waiting, /moves after the block of the lot before it/);
+});
