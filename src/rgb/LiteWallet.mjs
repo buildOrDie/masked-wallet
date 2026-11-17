@@ -6,7 +6,7 @@
 import * as btc from '@scure/btc-signer';
 import { hex, base64 } from '@scure/base';
 import { isInvoiceV1, readInvoiceV1, invoiceIdOf, pickEndpoint, newSenderKey, sharedKeys, deliverConsignment, endpointUrl, rpc, PROXY_V1 } from './proxyV1.mjs';
-import { SEAL_SATS, SEAL_OUTPUT, SWAP_SIZE_VB, b64, buyerOutputs, outpointOf, completionBlocker, readOffer, buyerCoinFor, offerable, payoutFor, changedTerms, unb64, exactCoinFor, freeSellerCoinFor, sendCoinsFor, instantAmounts, INSTANT_SEAL_OUTPUT, INSTANT_SEAL_SATS, payCoinsFor, txVbytes, OPRET_SCRIPT, P2TR_SCRIPT } from './swap.mjs';
+import { SEAL_SATS, SEAL_OUTPUT, SWAP_SIZE_VB, b64, buyerOutputs, outpointOf, completionBlocker, readOffer, buyerCoinFor, offerable, heldBreakdown, payoutFor, changedTerms, unb64, exactCoinFor, freeSellerCoinFor, sendCoinsFor, instantAmounts, INSTANT_SEAL_OUTPUT, INSTANT_SEAL_SATS, payCoinsFor, txVbytes, OPRET_SCRIPT, P2TR_SCRIPT } from './swap.mjs';
 import { RGB_UTXO_SATS } from './config.mjs';
 
 /** rgb-lib names for our network ids. Utexo's custom Signet uses Signet rules too. */
@@ -539,10 +539,13 @@ export class LiteWallet {
    */
   async assetList() {
     try { await this.wallet.sync(this.requireOnline()); } catch { /* last known figures */ }
-    const unspents = (plain(this.wallet.listUnspents(false)) || []).filter((u) => { const o = u.utxo?.outpoint; return !o || !this.reserved.has(`${String(o.txid).toLowerCase()}:${o.vout}`); });
+    // (tokens left on this wallet's own unconfirmed moves count as free: listings can use them, see `listable`)
+    const everything = this.listable(plain(this.wallet.listUnspents(false)) || []);
+    const unspents = everything.filter((u) => { const o = u.utxo?.outpoint; return !o || !this.reserved.has(`${String(o.txid).toLowerCase()}:${o.vout}`); });
     const { nia, ifa } = await this.listAssets();
-    // instant: amounts that sit alone on an output, so an Instant listing of exactly that is live at once (no move)
-    return [...nia, ...ifa].map((a) => ({ assetId: a.assetId, ticker: a.ticker, name: a.name, precision: a.precision, spendable: String(a.balance.spendable), max: offerable(unspents, a.assetId).max, maxInstant: offerable(unspents, a.assetId).total, instant: instantAmounts(unspents, a.assetId) }))
+    // instant: amounts that sit alone on an output, so an Instant listing of exactly that is live at once (no move);
+    // held: where the balance is (free, in listings, waiting for a block, unusable)
+    return [...nia, ...ifa].map((a) => ({ assetId: a.assetId, ticker: a.ticker, name: a.name, precision: a.precision, spendable: String(a.balance.spendable), max: offerable(unspents, a.assetId).max, maxInstant: offerable(unspents, a.assetId).total, instant: instantAmounts(unspents, a.assetId), held: heldBreakdown(everything, a.assetId, this.reserved) }))
       .filter((a) => BigInt(a.spendable) > 0n || BigInt(a.max) > 0n);
   }
 

@@ -180,6 +180,29 @@ export const INSTANT_SEAL_OUTPUT = 2;
 export const INSTANT_SEAL_SATS = 330;
 
 /** How much of an asset can be offered: in total, and the most on one output (one swap uses one output). */
+/**
+ * Where a token's balance is, in base units: free to list or send (settled, on an output no listing holds), in this
+ * wallet's listings (outputs promised to Instant listings, on sale or going live), waiting for a block (a receive or
+ * a move not confirmed yet), and on an output the engine can't use (not colorable). For "why can I only list this
+ * much?".
+ */
+export function heldBreakdown(unspents, assetId, reserved = new Set()) {
+  const r = { free: 0n, listed: 0n, waiting: 0n, other: 0n };
+  for (const u of unspents || []) {
+    const o = u.utxo?.outpoint;
+    const op = o ? `${String(o.txid).toLowerCase()}:${o.vout}` : '';
+    for (const a of u.rgbAllocations || []) {
+      if (a.assetId !== assetId || a.assignment?.Fungible == null) continue;
+      const v = BigInt(String(a.assignment.Fungible));
+      if (reserved.has(op)) r.listed += v;
+      else if (!a.settled || u.utxo?.exists === false) r.waiting += v;
+      else if (!u.utxo?.colorable) r.other += v;
+      else r.free += v;
+    }
+  }
+  return { free: String(r.free), listed: String(r.listed), waiting: String(r.waiting), other: String(r.other) };
+}
+
 export function offerable(unspents, assetId) {
   let total = 0n, max = 0n;
   for (const u of unspents || []) {

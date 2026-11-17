@@ -793,3 +793,10 @@ test('two Instant buys in a row never spend the same coin, even before the block
   assert.deepEqual(next.all.map((c) => c.outpoint), [`${T('d')}:0`], 'the coin just spent is left out');
   assert.deepEqual(next.confirmed.map((c) => c.outpoint), [`${T('d')}:0`]);
 });
+
+test('where a token\'s balance is: free, in listings, waiting for a block, unusable', async () => {
+  const { heldBreakdown } = await import('../src/rgb/swap.mjs');
+  const u = (t, vout, v, { settled = true, colorable = true, exists = true } = {}) => ({ utxo: { outpoint: { txid: T(t), vout }, colorable, exists }, rgbAllocations: [{ assetId: ASSET, settled, assignment: { Fungible: v } }] });
+  const list = [u('a', 0, 36), u('b', 1, 100), u('c', 1, 60), u('d', 2, 37, { settled: false }), u('e', 0, 40, { colorable: false })];
+  assert.deepEqual(heldBreakdown(list, ASSET, new Set([`${T('b')}:1`, `${T('c')}:1`])), { free: '36', listed: '160', waiting: '37', other: '40' });
+});
