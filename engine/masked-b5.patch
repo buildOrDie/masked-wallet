@@ -11,10 +11,10 @@ index 884d686..e2896b5 100644
  rgb-strict-encoding = { version = "=1.0.5", default-features = false, features = [
      "bitcoin",
 diff --git a/bindings/wasm/src/lib.rs b/bindings/wasm/src/lib.rs
-index 51b6efd..4c0af8c 100644
+index 51b6efd..3dc2621 100644
 --- a/bindings/wasm/src/lib.rs
 +++ b/bindings/wasm/src/lib.rs
-@@ -635,6 +635,188 @@ impl WasmWallet {
+@@ -635,6 +635,195 @@ impl WasmWallet {
          to_js(&result)
      }
  
@@ -117,6 +117,13 @@ index 51b6efd..4c0af8c 100644
 +        Ok(())
 +    }
 +
++    /// Learn the outputs of this wallet's own transactions just broadcast, with no request to the block server.
++    #[wasm_bindgen(js_name = "learnOwnOutputs")]
++    pub async fn learn_own_outputs(&self) -> Result<(), JsValue> {
++        let mut wallet = self.inner.borrow_mut();
++        wallet.learn_own_outputs().await.map_err(|e| JsValue::from_str(&e.to_string()))
++    }
++
 +    /// This engine moves from an own unconfirmed move's change before this wallet took that move in (lots chain at once).
 +    #[wasm_bindgen(js_name = "ownMovesChain")]
 +    pub fn own_moves_chain(&self) -> bool {
@@ -203,7 +210,7 @@ index 51b6efd..4c0af8c 100644
      /// Send RGB assets (end): broadcast a signed PSBT. Returns an OperationResult JS object.
      #[wasm_bindgen(js_name = "sendEnd")]
      pub async fn send_end(
-@@ -763,6 +945,56 @@ impl WasmWallet {
+@@ -763,6 +952,56 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -260,7 +267,7 @@ index 51b6efd..4c0af8c 100644
      /// Drain all wallet funds (end): broadcast a signed PSBT. Returns the txid string.
      #[wasm_bindgen(js_name = "drainToEnd")]
      pub async fn drain_to_end(
-@@ -1074,6 +1306,22 @@ impl WasmWallet {
+@@ -1074,6 +1313,22 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -283,7 +290,7 @@ index 51b6efd..4c0af8c 100644
      /// Check if the wallet needs a backup. Returns true if modified since last backup.
      #[wasm_bindgen(js_name = "backupInfo")]
      pub fn backup_info(&self) -> Result<bool, JsValue> {
-@@ -1217,7 +1465,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
+@@ -1217,7 +1472,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
  /// Works before the witness transaction is broadcast. Takes the raw consignment
  /// bytes (strict-encoded, not base64), the witness transaction ID, and the Bitcoin network.
  ///
@@ -293,7 +300,7 @@ index 51b6efd..4c0af8c 100644
  #[wasm_bindgen(js_name = "validateConsignmentOffchain")]
  pub fn validate_consignment_offchain(
      consignment_bytes: &[u8],
-@@ -1235,3 +1484,43 @@ pub fn validate_consignment_offchain(
+@@ -1235,3 +1491,43 @@ pub fn validate_consignment_offchain(
      .map_err(|e| JsValue::from_str(&e.to_string()))?;
      to_js(&result)
  }
@@ -1138,7 +1145,7 @@ index a3a9f46..bf0a61a 100644
      }
  
 diff --git a/src/wallet/online.rs b/src/wallet/online.rs
-index ca96b4a..a3e4fd5 100644
+index ca96b4a..ab22a28 100644
 --- a/src/wallet/online.rs
 +++ b/src/wallet/online.rs
 @@ -791,8 +791,9 @@ pub(crate) struct ConsignmentPayment<'c> {
@@ -1253,7 +1260,45 @@ index ca96b4a..a3e4fd5 100644
          });
          Ok(input_unspents)
      }
-@@ -2815,11 +2855,11 @@ impl Wallet {
+@@ -2699,6 +2739,16 @@ impl Wallet {
+             })?;
+         self.bdk_wallet.persist(&mut self.bdk_database)?;
+ 
++        self._save_new_txos()?;
++
++        debug!(self.logger, "Synced TXOs");
++
++        Ok(())
++    }
++
++    /// Record in the database the RGB-side outputs BDK's graph has and the database doesn't yet (after a sync, or
++    /// after this wallet's own broadcast, which puts the transaction in the graph).
++    fn _save_new_txos(&mut self) -> Result<(), Error> {
+         let pending_witness_scripts = self._reconcile_pending_witness()?;
+ 
+         let db_txos = self.database.iter_txos()?;
+@@ -2730,12 +2780,17 @@ impl Wallet {
+             }
+             self.database.set_txo(new_db_utxo.clone())?;
+         }
+-
+-        debug!(self.logger, "Synced TXOs");
+-
+         Ok(())
+     }
+ 
++    /// MASKED: learn the outputs of this wallet's own transactions just broadcast, without asking the block server
++    /// (a sync asks it about every address this wallet ever used: hundreds of requests). The broadcast already put
++    /// the transaction in BDK's graph.
++    pub async fn learn_own_outputs(&mut self) -> Result<(), Error> {
++        self._save_new_txos()?;
++        self.flush().await
++    }
++
+     /// Sync and save the state, also when the sync fails part way.
+     async fn sync_and_save(&mut self, full_scan: bool) -> Result<(), Error> {
+         let res = self.sync_db_txos(full_scan).await;
+@@ -2815,11 +2870,11 @@ impl Wallet {
              if internal_unspents_outpoints.contains(&(txid.clone(), vout)) {
                  continue;
              }
@@ -1270,7 +1315,7 @@ index ca96b4a..a3e4fd5 100644
              db_txo.spent = ActiveValue::Set(true);
              self.database.update_txo(db_txo)?;
          }
-@@ -4723,6 +4763,22 @@ impl Wallet {
+@@ -4723,6 +4778,22 @@ impl Wallet {
                  &data.consignment_hash,
              ) {
                  Ok(bytes) => {
@@ -1293,7 +1338,7 @@ index ca96b4a..a3e4fd5 100644
                      self.received_consignments
                          .insert(recipient_id.clone(), bytes);
                  }
-@@ -4871,7 +4927,14 @@ impl Wallet {
+@@ -4871,7 +4942,14 @@ impl Wallet {
                  .await;
          };
          let blinding = derive_shared(&ed25519_from_seed(&seed), &sender_vk)?.seal_blinding;
@@ -1309,7 +1354,7 @@ index ca96b4a..a3e4fd5 100644
          let spent = Self::known_spent_opouts(&consignment);
          let mut payments: Vec<_> = self.find_payments(&consignment, &matcher, &spent).collect();
          if payments.len() != 1 {
-@@ -5805,6 +5868,8 @@ impl Wallet {
+@@ -5805,6 +5883,8 @@ impl Wallet {
                      details: s!("consignment not found in memory"),
                  })?
                  .clone();
@@ -1318,7 +1363,7 @@ index ca96b4a..a3e4fd5 100644
              let consignment =
                  RgbTransfer::load(&consignment_bytes[..]).map_err(InternalError::from)?;
  
-@@ -7053,6 +7118,10 @@ impl Wallet {
+@@ -7053,6 +7133,10 @@ impl Wallet {
          batch: bool,
      ) -> Result<(), Error> {
          for recipient in recipients {
@@ -1329,7 +1374,7 @@ index ca96b4a..a3e4fd5 100644
              let recipient_id = &recipient.recipient_id;
              let recipient_vk = verifying_key_from_bytes(&recipient.public_key)?;
              let derived = derive_shared(sender_sk, &recipient_vk)?;
-@@ -7590,6 +7659,246 @@ impl Wallet {
+@@ -7590,6 +7674,246 @@ impl Wallet {
          Ok(tx.compute_txid().to_string())
      }
  
@@ -1576,7 +1621,7 @@ index ca96b4a..a3e4fd5 100644
      /// Prepare the PSBT to inflate an IFA asset.
      pub async fn inflate_begin(
          &mut self,
-@@ -12074,3 +12383,839 @@ mod bfa_tests {
+@@ -12074,3 +12398,839 @@ mod bfa_tests {
          assert!(options(&format!(r#","evm_chains":{{"mainnet":{chain}}}"#)).is_err());
      }
  }

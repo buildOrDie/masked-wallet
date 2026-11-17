@@ -1079,14 +1079,22 @@ export class LiteWallet {
       const mine = list.filter((t) => String(t?.txid || '').toLowerCase() === txid && t?.kind === 'Send');
       return !mine.length || mine.every((t) => ['WaitingConfirmations', 'Settled'].includes(String(t.status)));
     };
-    let told = false, refreshedAt = 0;
+    let told = false, refreshedAt = 0, syncedAt = 0;
+    // an engine that learns its own broadcasts (learnOwnOutputs) needs no block server at all: the move's
+    // transaction is already in its graph
+    if (typeof this.wallet?.learnOwnOutputs === 'function') {
+      try { await this.wallet.learnOwnOutputs(); } catch { /* a sync below */ }
+      if (listed() && ready()) return true;
+    }
     while (Date.now() < end) {
       // make sure the server the engine syncs with has it (the broadcast may have gone to another one)
       if (txHex && !(await this.knowsTx(txid))) await this.ensureBroadcast(txHex, txid).catch(() => {});
       // a refresh asks the transfer server about every transfer still waiting (dozens of requests): only an engine
       // that needs this wallet to take the move in first gets one, at most every 15 s. A chaining engine never does.
       if (!chains && Date.now() - refreshedAt > Math.min(15_000, ms / 4)) { refreshedAt = Date.now(); try { await this.wallet.refresh(online, null, [], true); } catch { /* again */ } }
-      try { await this.wallet.sync(online); } catch { /* again */ }
+      // a sync asks the block server about every address this wallet used (hundreds of requests): at most every 10 s
+      if (Date.now() - syncedAt > Math.min(10_000, ms / 4)) { syncedAt = Date.now(); try { await this.wallet.sync(online); } catch { /* again */ } }
+      if (typeof this.wallet?.learnOwnOutputs === 'function') { try { await this.wallet.learnOwnOutputs(); } catch { /* next */ } }
       if (listed() && ready()) return true;
       if (!told) { onStep('Waiting for the move to reach your wallet before the next lot…'); told = true; }
       await new Promise((r) => setTimeout(r, Math.min(2000, Math.max(10, ms / 20))));
@@ -1396,8 +1404,9 @@ export class LiteWallet {
     const views = [];
     for (let pass = 0; pass < 3; pass++) {
       try { await this.wallet.refresh(online, null, [], true); } catch { /* signed below if it can */ }
-      // the outputs the moves made (the lots' own): the engine's records learn them on a scan
-      try { await this.wallet.sync(online); } catch { /* signed below if it can */ }
+      // the outputs the moves made (the lots' own): learned from the engine's own graph if it can, else on a scan
+      if (typeof this.wallet?.learnOwnOutputs === 'function') { try { await this.wallet.learnOwnOutputs(); } catch { /* signed below if it can */ } }
+      else { try { await this.wallet.sync(online); } catch { /* signed below if it can */ } }
       for (const l of list) {
         const e = store.get(l.offerId);
         if (e?.stage !== 'moving') continue;
