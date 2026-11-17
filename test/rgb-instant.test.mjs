@@ -808,6 +808,7 @@ test('what\'s in this RGB wallet: every output with its tokens and what it is do
   s.w.w.listUnspents = () => [u('a', 0, 36), u('b', 1, 100), u('d', 2, 37, { settled: false }), u('e', 0, 40, { colorable: false }), u('f', 0, null, { sats: 600 }), { ...u('h', 0, null), pendingBlinded: 1 }, u('c', 0, null, { colorable: false, sats: 50000 })];
   s.w.w.listUnspentsVanilla = async (_o, min) => min ? [{ outpoint: `${T('c')}:0`, txout: { value: 50000 }, is_spent: false }] : [{ outpoint: `${T('c')}:0`, txout: { value: 50000 }, is_spent: false }, { outpoint: `${T('g')}:1`, txout: { value: 7000 }, is_spent: false }];
   s.w.listAssets = async () => ({ nia: [{ assetId: ASSET, ticker: 'MASKED', precision: 0 }], ifa: [] });
+  s.w.txMissing = async () => false; // every transaction known to the block server
   // signed data dropped for storage by an earlier build (marked moving): still on sale
   s.store.set('o1', { role: 'seller', assetId: ASSET, amount: '100', priceSats: '5000', stage: 'moving', resign: true, templateTxid: T('6'), coin: `${T('b')}:1` });
   const r = await s.w.outputsReport(s.store);
@@ -864,9 +865,10 @@ test('why an empty output is held, and tokens on a transaction the network dropp
   s.w.listAssets = async () => ({ nia: [{ assetId: ASSET, ticker: 'MASKED', precision: 0 }], ifa: [] });
   s.w.w.spareUtxos = () => [`${T('1')}:0`];
   s.w.w.freeSpareUtxosBegin = async () => 'psbt';
+  s.w.engineTransfers = (id) => (id ? [] : [{ kind: 'ReceiveWitness', status: 'WaitingCounterparty', batchTransferIdx: 7, createdAt: 1700000000, expiration: 1700086400, recipientId: 'r' }, { kind: 'ReceiveWitness', status: 'Settled', batchTransferIdx: 8 }]);
   s.w.w.emptyUtxos = () => JSON.stringify([{ outpoint: `${T('1')}:0`, sats: 330, why: '' }, { outpoint: `${T('2')}:0`, sats: 330, why: 'pending witness' }]);
   const was = globalThis.fetch;
-  globalThis.fetch = async (url) => new Response('Transaction not found', { status: String(url).includes(`/tx/${T('3')}/status`) ? 404 : 500 });
+  globalThis.fetch = async (url) => new Response('Transaction not found', { status: String(url).endsWith(`/tx/${T('3')}`) ? 404 : 500 });
   try {
     const r = await s.w.outputsReport(s.store);
     const by = Object.fromEntries(r.rgb.map((o) => [o.outpoint, o]));
@@ -874,5 +876,6 @@ test('why an empty output is held, and tokens on a transaction the network dropp
     assert.equal(by[`${T('2')}:0`].why, 'pending witness');
     assert.equal(by[`${T('1')}:0`].state, 'empty');
     assert.equal(by[`${T('3')}:2`].state, 'dropped');
+    assert.deepEqual(r.pendingReceives.map((x) => [x.batchTransferIdx, x.witness, x.at, x.expires]), [[7, true, 1700000000000, 1700086400000]]);
   } finally { globalThis.fetch = was; }
 });

@@ -665,7 +665,20 @@ export class LiteWallet {
       }
     } catch { /* none */ }
     activity.sort((a, b) => b.at - a.at);
-    return { at: Date.now(), coins, rgb, tokens: byToken, activity: activity.slice(0, 40), canFreeSpare: this.canFreeSpare, keepSpare: RGB_KEEP_SPARE };
+    // receives still waiting for the other side (their transfer data): an output paying one stays "pending witness"
+    const pendingReceives = [];
+    for (const id of [null, ...meta.keys()]) {
+      let list = [];
+      try { list = plain(this.engineTransfers(id)) || []; } catch { list = []; }
+      for (const t of list) {
+        if (!/^Receive/.test(String(t.kind || '')) || String(t.status) !== 'WaitingCounterparty') continue;
+        const m = id ? meta.get(id) : null;
+        const sec = (v) => Number(v || 0) * (Number(v) < 1e12 ? 1000 : 1);
+        pendingReceives.push({ batchTransferIdx: t.batchTransferIdx ?? null, assetId: id || '', ticker: m?.ticker || '', precision: m?.precision ?? 0, kind: String(t.kind), witness: String(t.kind) === 'ReceiveWitness', amount: String((t.requestedAssignment && (t.requestedAssignment.Fungible ?? '')) || ''), recipientId: String(t.recipientId || ''), txid: t.txid ? String(t.txid) : '', at: sec(t.createdAt), expires: sec(t.expiration) });
+      }
+    }
+    pendingReceives.sort((a, b) => b.at - a.at);
+    return { at: Date.now(), coins, rgb, tokens: byToken, activity: activity.slice(0, 40), pendingReceives: pendingReceives.slice(0, 100), canFreeSpare: this.canFreeSpare, keepSpare: RGB_KEEP_SPARE };
   }
 
   /** This wallet's plain bitcoin coins: confirmed, and all (with its own unconfirmed change). */
@@ -1015,7 +1028,11 @@ export class LiteWallet {
    */
   /** The block server in use answers that it doesn't have this transaction at all (404): not in a block, not in its mempool. */
   async txMissing(txid) {
-    try { const r = await fetch(`${this.indexer || this.indexers()[0]}/tx/${txid}/status`); return r.status === 404; } catch { return false; }
+    try {
+      const r = await fetch(`${this.indexer || this.indexers()[0]}/tx/${txid}`);
+      if (r.ok) return false;
+      return r.status === 404 || (r.status === 400 && /not found/i.test(await r.text().catch(() => '')));
+    } catch { return false; }
   }
   async knowsTx(txid) {
     try {
