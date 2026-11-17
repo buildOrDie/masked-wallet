@@ -472,8 +472,8 @@ export class RgbSettings {
       <div class="rgo-sec"><h4>RGB outputs <span class="muted small">${(rep.rgb || []).length}</span></h4>${rgbList || '<p class="muted small">None.</p>'}</div>
       <div class="rgo-sec"><h4>Bitcoin for fees and buys <span class="muted small">${coins.length} coin${coins.length === 1 ? '' : 's'} · ${fmtBtc(coinSats)} ${unit}</span></h4>${coinList}
         <p class="muted small">Each buy or move spends a coin of its own: a few coins let several go one after another without waiting.</p></div>
-      ${rep.canFreeSpare && spareN > (rep.keepSpare ?? 6) ? `<div class="rgo-sec"><p class="muted small">${spareN} spare RGB outputs hold ${fmtBtc(spareSats)} ${unit}. Keep ${rep.keepSpare ?? 6} for receiving tokens and turn the rest, with your bitcoin here, into 4 coins for buys (one transaction, a small network fee; outputs holding tokens never move).</p>
-        <button class="btn primary wide" data-rgb="freeSpare" ${r.busy ? 'disabled' : ''}>Free ${spareN - (rep.keepSpare ?? 6)} spare outputs</button></div>` : ''}
+      ${rep.canFreeSpare && (spareN > (rep.keepSpare ?? 6) || rep.unpaidReceives) ? `<div class="rgo-sec"><p class="muted small">${spareN} spare RGB outputs hold ${fmtBtc(spareSats)} ${unit}. Keep ${rep.keepSpare ?? 6} for receiving tokens and turn the rest, with your bitcoin here, into 4 coins for buys (one transaction, a small network fee; outputs holding tokens never move).</p>
+        ${rep.unpaidReceives ? `<p class="muted small">${rep.unpaidReceives} invoices of yours no transaction pays (moves that never went out) are given up first.</p>` : ''}<button class="btn primary wide" data-rgb="freeSpare" ${r.busy ? 'disabled' : ''}>${spareN > (rep.keepSpare ?? 6) ? `Free ${spareN - (rep.keepSpare ?? 6)} spare outputs` : `Give up ${rep.unpaidReceives} unused invoices`}</button></div>` : ''}
     </div>`;
   }
   /** Settings → RGB → Instant listings: each one's state (signed listings are bought with MASKED closed). */

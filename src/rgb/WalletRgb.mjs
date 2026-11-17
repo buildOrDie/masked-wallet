@@ -1130,7 +1130,7 @@ export class WalletRgb {
       case 'outputsClose': this.outputs = null; return app.render();
       case 'freeSpare': return this.run(async () => {
         const r = await this.service.freeSpare({ fee: this.fee() });
-        app.toast(`${r.freed} spare RGB outputs freed: ${r.sats.toLocaleString('en-US')} sats back as bitcoin for buys after one confirmation`);
+        app.toast([r.freed ? `${r.freed} spare RGB outputs freed: ${r.sats.toLocaleString('en-US')} sats back as bitcoin for buys after one confirmation.` : '', r.cancelled ? `${r.cancelled} unused invoices given up.` : ''].filter(Boolean).join(' '));
         await this.refresh().catch(() => {});
         this.outputs = await this.service.outputsReport().catch(() => this.outputs);
       });

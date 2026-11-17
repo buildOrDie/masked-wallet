@@ -224,10 +224,10 @@ export class ApprovalController {
         if (!rep.canFreeSpare) throw new Error('This RGB engine can\'t free spare outputs yet. Update MASKED (engine/build.sh).');
         const spare = (rep.rgb || []).filter((o) => o.state === 'empty');
         const keep = rep.keepSpare ?? 6;
-        if (spare.length <= keep) throw new Error(`Only ${spare.length} spare RGB outputs: MASKED keeps ${keep} for receiving tokens, so there's nothing to free.`);
+        if (spare.length <= keep && !rep.unpaidReceives) throw new Error(`Only ${spare.length} spare RGB outputs: MASKED keeps ${keep} for receiving tokens, so there's nothing to free.`);
         const freed = spare.slice(keep);
         const coins = (rep.coins || []).filter((c) => !c.justSpent);
-        return { keep, freed: freed.length, sats: freed.reduce((n, o) => n + o.sats, 0), coinSats: coins.reduce((n, c) => n + c.sats, 0), rate: P.feeRate || Number(r.fee()) };
+        return { keep, freed: freed.length, sats: freed.reduce((n, o) => n + o.sats, 0), coinSats: coins.reduce((n, c) => n + c.sats, 0), unpaid: rep.unpaidReceives || 0, rate: P.feeRate || Number(r.fee()) };
       }
       if (m === 'rgbOutputs') return { list: r.assets().map((x) => ({ ticker: x.ticker, assetId: x.assetId })) };
       if (m === 'rgbListAssets') return { list: r.assets().map((x) => ({ ticker: x.ticker, assetId: x.assetId })) };

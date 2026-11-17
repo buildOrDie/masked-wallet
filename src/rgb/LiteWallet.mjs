@@ -281,14 +281,32 @@ export class LiteWallet {
   async freeSpare({ keep = RGB_KEEP_SPARE, parts = 4, feeRate = 1 } = {}) {
     if (!this.canFreeSpare) throw new Error('This RGB engine can\'t free spare outputs yet. Update MASKED.');
     const online = this.requireOnline();
+    // invoices of this wallet no transaction pays (moves that never went out): given up first, they hold nothing
+    const cancelled = await this.cancelUnpaidReceives();
     const spare = [...(this.spareOutputs() || [])];
+    if (spare.length <= keep && cancelled) return { txid: '', freed: 0, sats: 0, cancelled };
     if (spare.length <= keep) throw new Error(`Only ${spare.length} spare RGB output${spare.length === 1 ? '' : 's'}: MASKED keeps ${keep} for receiving tokens, so there's nothing to free.`);
     const sats = await this.spareSats(spare.slice(keep));
     const rate = BigInt(Math.max(1, Math.round(Number(feeRate) || 1)));
     const psbt = await this.wallet.freeSpareUtxosBegin(online, keep, Math.max(1, Math.min(8, Number(parts) || 4)), rate);
     const txid = String(await this.wallet.drainToEnd(online, this.sign(psbt)));
     await this.save();
-    return { txid, freed: spare.length - keep, sats };
+    return { txid, freed: spare.length - keep, sats, cancelled };
+  }
+  /** Witness invoices of this wallet still waiting that no transaction pays (engine: unpaidWitnessReceives). */
+  unpaidReceives() {
+    if (typeof this.wallet?.unpaidWitnessReceives !== 'function') return [];
+    try { return (plain(this.wallet.unpaidWitnessReceives()) || []).map(Number); } catch { return []; }
+  }
+  /** Give up those invoices: nothing pays them, so nothing is lost. @returns {Promise<number>} how many */
+  async cancelUnpaidReceives() {
+    const idx = this.unpaidReceives();
+    if (!idx.length) return 0;
+    const online = this.requireOnline();
+    let n = 0;
+    for (const i of idx) { try { if (await this.wallet.failTransfers(online, i, false, true)) n++; } catch { /* next */ } }
+    await this.save().catch(() => {});
+    return n;
   }
   /** Sats on the given outputs (from the engine's list). */
   async spareSats(outpoints) {
@@ -674,11 +692,13 @@ export class LiteWallet {
         if (!/^Receive/.test(String(t.kind || '')) || String(t.status) !== 'WaitingCounterparty') continue;
         const m = id ? meta.get(id) : null;
         const sec = (v) => Number(v || 0) * (Number(v) < 1e12 ? 1000 : 1);
-        pendingReceives.push({ batchTransferIdx: t.batchTransferIdx ?? null, assetId: id || '', ticker: m?.ticker || '', precision: m?.precision ?? 0, kind: String(t.kind), witness: String(t.kind) === 'ReceiveWitness', amount: String((t.requestedAssignment && (t.requestedAssignment.Fungible ?? '')) || ''), recipientId: String(t.recipientId || ''), txid: t.txid ? String(t.txid) : '', at: sec(t.createdAt), expires: sec(t.expiration) });
+        pendingReceives.push({ batchTransferIdx: t.batchTransferIdx ?? null, assetId: id || '', ticker: m?.ticker || '', precision: m?.precision ?? 0, kind: String(t.kind), witness: String(t.kind) === 'ReceiveWitness', amount: String((t.requestedAssignment && (t.requestedAssignment.Fungible ?? '')) || ''), recipientId: String(t.recipientId || ''), txid: t.txid ? String(t.txid) : '', at: sec(t.createdAt), expires: sec(t.expiration), unpaid: false });
       }
     }
+    const unpaid = new Set(this.unpaidReceives());
+    for (const p of pendingReceives) p.unpaid = p.witness && unpaid.has(Number(p.batchTransferIdx));
     pendingReceives.sort((a, b) => b.at - a.at);
-    return { at: Date.now(), coins, rgb, tokens: byToken, activity: activity.slice(0, 40), pendingReceives: pendingReceives.slice(0, 100), canFreeSpare: this.canFreeSpare, keepSpare: RGB_KEEP_SPARE };
+    return { at: Date.now(), coins, rgb, tokens: byToken, activity: activity.slice(0, 40), pendingReceives: pendingReceives.slice(0, 100), unpaidReceives: unpaid.size, canFreeSpare: this.canFreeSpare, keepSpare: RGB_KEEP_SPARE };
   }
 
   /** This wallet's plain bitcoin coins: confirmed, and all (with its own unconfirmed change). */
@@ -971,6 +991,14 @@ export class LiteWallet {
     const fis = await Promise.all(pay.coins.map((c) => this.outpointInfo(c.outpoint)));
     const infos = [...sis, ...fis];
     const r = await this.onchainReceive({ assetId, amount: Number(amount), durationSeconds: 86400, witness: true });
+    // nothing went out: give the invoice up, so a retry doesn't leave one more waiting forever (96 of them on Signet)
+    const dropInvoice = async () => {
+      if (r?.batchTransferIdx == null) return;
+      try { await this.wallet.failTransfers(this.requireOnline(), r.batchTransferIdx, false, true); } catch { /* it expires */ }
+      await this.save().catch(() => {});
+    };
+    let stage = 'build'; // build → send (the engine has it, maybe out) → refused (the engine rolled back)
+    try {
     const seal = this.lib.WasmWallet.witnessSealScript(r.invoice);
     // the real size, from the real scripts
     const own = await this.ownScript();
@@ -1003,15 +1031,24 @@ export class LiteWallet {
     let txHex = '';
     try { txHex = this.extractHex(signed); } catch { /* the engine broadcasts it; checked below when we have the hex */ }
     let sent = null, sendErr = null;
+    stage = 'send';
     onStep(`Sending the transaction to ${hostOf(this.indexer)}…`);
     try { sent = plain(await this.wallet.sendEnd(online, signed, true)); } catch (e) { sendErr = e; }
     await this.save();
     const id = String(sent?.txid || txid);
+    // The engine refused the transfer itself (not just the broadcast): it rolled its records back, so it would never
+    // count tokens this transaction moves. Never broadcast it then: the tokens would land where the wallet can't see.
+    if (sendErr && !/broadcast|esplora|fetch|network|timed? ?out|50[0-9]|429|too many|connection/i.test(String(sendErr?.message || sendErr))) { stage = 'refused'; throw sendErr; }
     // the engine's broadcast can fail quietly on a busy server: make sure a block server has it
     if (txHex) await this.ensureBroadcast(txHex, id);
     else if (sendErr) throw sendErr;
     this.spentNow([...froms.map((c) => c.outpoint), ...pay.coins.map((c) => c.outpoint)]);
     return { txid: id, txHex };
+    } catch (err) {
+      // given up before anything could go out: the invoice goes too (once sent, it stays: its transfer is on the way)
+      if (stage !== 'send') await dropInvoice();
+      throw err;
+    }
   }
   /** Wait until the block server in use has `txid` (at most `ms`). */
   async waitKnown(txid, ms = 15_000) {

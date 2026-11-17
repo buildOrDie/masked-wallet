@@ -162,7 +162,7 @@ export class ApproveView extends View {
       <p class="info">The site sees which RGB tokens you hold, their asset IDs and how much of each. Nothing moves.</p>${this.rgbWait(a)}${this.error(a)}`;
     }
     if (a.method === 'rgbFreeSpare') {
-      return `<div class="kv">${rowKV('Spare outputs freed', b ? `${b.freed} (${sats(b.sats)})` : '…')}${rowKV('Kept for receiving', b ? String(b.keep) : '…')}${rowKV('Bitcoin for buys after', b ? `${sats(b.sats + b.coinSats)} in 4 coins, less the fee` : '…')}${rowKV('Fee rate', b ? `${b.rate} sat/vB` : '…')}</div>
+      return `<div class="kv">${rowKV('Spare outputs freed', b ? `${b.freed} (${sats(b.sats)})` : '…')}${rowKV('Kept for receiving', b ? String(b.keep) : '…')}${rowKV('Bitcoin for buys after', b ? `${sats(b.sats + b.coinSats)} in 4 coins, less the fee` : '…')}${b?.unpaid ? rowKV('Unused invoices given up', String(b.unpaid)) : ''}${b?.freed ? rowKV('Fee rate', `${b.rate} sat/vB`) : ''}</div>
       <p class="info">One transaction inside your RGB wallet: empty RGB outputs become bitcoin you can buy with, split into a few coins so several buys go one after another. Outputs holding tokens never move. Usable after one confirmation.</p>${this.rgbWait(a)}${this.error(a)}`;
     }
     if (a.method === 'rgbOutputs') {

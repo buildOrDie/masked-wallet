@@ -850,7 +850,7 @@ test('free spare RGB outputs: keeps 6, frees the rest into coins; empty outputs 
   assert.equal(rep.canFreeSpare, true);
   const r = await s.w.freeSpare({ feeRate: 2 });
   assert.deepEqual(begun, { keep: 6, parts: 4, rate: 2 });
-  assert.deepEqual(r, { txid: T('f'), freed: 2, sats: 660 });
+  assert.deepEqual(r, { txid: T('f'), freed: 2, sats: 660, cancelled: 0 });
   s.w.w.spareUtxos = () => list.slice(0, 5).map((x) => `${x.utxo.outpoint.txid}:0`);
   await assert.rejects(s.w.freeSpare({}), /Only 5 spare RGB outputs: MASKED keeps 6/);
 });
@@ -878,4 +878,48 @@ test('why an empty output is held, and tokens on a transaction the network dropp
     assert.equal(by[`${T('3')}:2`].state, 'dropped');
     assert.deepEqual(r.pendingReceives.map((x) => [x.batchTransferIdx, x.witness, x.at, x.expires]), [[7, true, 1700000000000, 1700086400000]]);
   } finally { globalThis.fetch = was; }
+});
+
+test('a move the engine refuses is never broadcast, and its invoice is given up', async () => {
+  const chain = fakeChain();
+  const from = `${T('b')}:0`, fee = `${T('c')}:2`;
+  chain.outs[from] = { sats: 1000, script: '5120rgb', tx: 'aa' };
+  chain.outs[fee] = { sats: 5000, script: '5120btc', tx: 'bb' };
+  const rgb = [unspent('b', 0, [tok(800)])];
+  const s = wallet({ name: 'seller', lib: fakeLib(), chain, rgb, coins: [{ outpoint: fee, txout: { value: 5000 }, is_spent: false }] });
+  const failed = [];
+  s.w.w.failTransfers = async (_o, idx) => { failed.push(idx); return true; };
+  s.w.w.sendEnd = async () => { throw new Error('Invalid RGB transition'); };
+  let broadcasts = 0;
+  s.w.ensureBroadcast = async () => { broadcasts++; };
+  const args = { offerId: 'sw0123456789ab', assetId: ASSET, amount: '500', priceSats: '20000', feeRate: 2 };
+  await assert.rejects(s.w.instantList(args, s.store), /Invalid RGB transition/);
+  assert.equal(broadcasts, 0, 'not broadcast: the engine rolled its records back');
+  assert.equal(failed.length, 1, 'its invoice is given up');
+  // a broadcast that failed on the network is still sent again, and its invoice kept
+  failed.length = 0;
+  s.w.w.sendEnd = async () => { throw new Error('Failed broadcast: Esplora async error'); };
+  await s.w.instantList(args, s.store).catch(() => {});
+  assert.equal(broadcasts, 1);
+  assert.equal(failed.length, 0);
+});
+
+test('free spare outputs gives up the invoices no transaction pays first', async () => {
+  const s = wallet({ name: 'unpaid', lib: fakeLib(), chain: fakeChain() });
+  s.w.w.sync = () => {};
+  s.w.w.listUnspents = () => [];
+  s.w.w.listUnspentsVanilla = async () => [];
+  s.w.listAssets = async () => ({ nia: [], ifa: [] });
+  s.w.w.spareUtxos = () => [];
+  s.w.w.freeSpareUtxosBegin = async () => 'psbt';
+  s.w.w.unpaidWitnessReceives = () => [12, 13];
+  s.w.engineTransfers = (id) => (id ? [] : [12, 13, 14].map((i) => ({ kind: 'ReceiveWitness', status: 'WaitingCounterparty', batchTransferIdx: i })));
+  const failed = [];
+  s.w.w.failTransfers = async (_o, idx) => { failed.push(idx); return true; };
+  const rep = await s.w.outputsReport(s.store);
+  assert.equal(rep.unpaidReceives, 2);
+  assert.deepEqual(rep.pendingReceives.map((p) => [p.batchTransferIdx, p.unpaid]), [[12, true], [13, true], [14, false]]);
+  const r = await s.w.freeSpare({});
+  assert.deepEqual(failed, [12, 13], 'only the unpaid ones');
+  assert.deepEqual(r, { txid: '', freed: 0, sats: 0, cancelled: 2 });
 });

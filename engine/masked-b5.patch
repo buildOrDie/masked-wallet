@@ -11,7 +11,7 @@ index 884d686..e2896b5 100644
  rgb-strict-encoding = { version = "=1.0.5", default-features = false, features = [
      "bitcoin",
 diff --git a/bindings/wasm/src/lib.rs b/bindings/wasm/src/lib.rs
-index 51b6efd..77fa891 100644
+index 51b6efd..0804e20 100644
 --- a/bindings/wasm/src/lib.rs
 +++ b/bindings/wasm/src/lib.rs
 @@ -635,6 +635,182 @@ impl WasmWallet {
@@ -197,7 +197,7 @@ index 51b6efd..77fa891 100644
      /// Send RGB assets (end): broadcast a signed PSBT. Returns an OperationResult JS object.
      #[wasm_bindgen(js_name = "sendEnd")]
      pub async fn send_end(
-@@ -763,6 +939,50 @@ impl WasmWallet {
+@@ -763,6 +939,56 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -226,6 +226,12 @@ index 51b6efd..77fa891 100644
 +        serde_json::to_string(&list).map_err(|e| JsValue::from_str(&e.to_string()))
 +    }
 +
++    /// Witness receives still waiting that no known transaction pays: [batchTransferIdx, …] (safe to fail).
++    #[wasm_bindgen(js_name = "unpaidWitnessReceives")]
++    pub fn unpaid_witness_receives(&self) -> Result<Vec<i32>, JsValue> {
++        self.inner.borrow().unpaid_witness_receives().map_err(|e| JsValue::from_str(&e.to_string()))
++    }
++
 +    /// Free spare RGB outputs (begin): keep `keep`, spend the rest with the plain bitcoin into `parts` plain coins.
 +    /// Returns the unsigned PSBT; end it with `drainToEnd`.
 +    #[wasm_bindgen(js_name = "freeSpareUtxosBegin")]
@@ -248,7 +254,7 @@ index 51b6efd..77fa891 100644
      /// Drain all wallet funds (end): broadcast a signed PSBT. Returns the txid string.
      #[wasm_bindgen(js_name = "drainToEnd")]
      pub async fn drain_to_end(
-@@ -1074,6 +1294,22 @@ impl WasmWallet {
+@@ -1074,6 +1300,22 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -271,7 +277,7 @@ index 51b6efd..77fa891 100644
      /// Check if the wallet needs a backup. Returns true if modified since last backup.
      #[wasm_bindgen(js_name = "backupInfo")]
      pub fn backup_info(&self) -> Result<bool, JsValue> {
-@@ -1217,7 +1453,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
+@@ -1217,7 +1459,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
  /// Works before the witness transaction is broadcast. Takes the raw consignment
  /// bytes (strict-encoded, not base64), the witness transaction ID, and the Bitcoin network.
  ///
@@ -281,7 +287,7 @@ index 51b6efd..77fa891 100644
  #[wasm_bindgen(js_name = "validateConsignmentOffchain")]
  pub fn validate_consignment_offchain(
      consignment_bytes: &[u8],
-@@ -1235,3 +1472,43 @@ pub fn validate_consignment_offchain(
+@@ -1235,3 +1478,43 @@ pub fn validate_consignment_offchain(
      .map_err(|e| JsValue::from_str(&e.to_string()))?;
      to_js(&result)
  }
@@ -1126,7 +1132,7 @@ index a3a9f46..bf0a61a 100644
      }
  
 diff --git a/src/wallet/online.rs b/src/wallet/online.rs
-index ca96b4a..9bdc625 100644
+index ca96b4a..cd01cb7 100644
 --- a/src/wallet/online.rs
 +++ b/src/wallet/online.rs
 @@ -791,8 +791,9 @@ pub(crate) struct ConsignmentPayment<'c> {
@@ -1306,7 +1312,7 @@ index ca96b4a..9bdc625 100644
              let recipient_id = &recipient.recipient_id;
              let recipient_vk = verifying_key_from_bytes(&recipient.public_key)?;
              let derived = derive_shared(sender_sk, &recipient_vk)?;
-@@ -7590,6 +7648,171 @@ impl Wallet {
+@@ -7590,6 +7648,246 @@ impl Wallet {
          Ok(tx.compute_txid().to_string())
      }
  
@@ -1325,17 +1331,53 @@ index ca96b4a..9bdc625 100644
 +    /// The transaction can't have put tokens anywhere: every input is this wallet's and it has no OP_RETURN (this
 +    /// engine commits RGB transfers only with OP_RETURN, `OpretFirst`). An output of it waiting for a witness transfer
 +    /// then holds nothing, whatever the invoice it pays still expects. Unknown transactions: false.
-+    fn _carries_no_rgb(&self, txid: &bdk_wallet::bitcoin::Txid) -> bool {
++    fn _carries_no_rgb(&self, txid: &bdk_wallet::bitcoin::Txid, token_txos: &HashSet<(String, u32)>) -> bool {
 +        let graph = self.bdk_wallet.tx_graph();
 +        let Some(tx) = graph.get_tx(*txid) else { return false };
-+        if tx.output.iter().any(|o| o.script_pubkey.is_op_return()) {
-+            return false;
-+        }
-+        tx.input.iter().all(|i| {
++        let all_mine = tx.input.iter().all(|i| {
 +            graph
 +                .get_txout(i.previous_output)
 +                .is_some_and(|o| self.bdk_wallet.is_mine(o.script_pubkey.clone()))
-+        })
++        });
++        if !all_mine {
++            return false;
++        }
++        // no commitment: nothing moved. A commitment, but no input of it ever held a token (by this wallet's
++        // records, a failed transfer aside): it closed no token seal, so it put no token anywhere either
++        !tx.output.iter().any(|o| o.script_pubkey.is_op_return())
++            || !tx
++                .input
++                .iter()
++                .any(|i| token_txos.contains(&(i.previous_output.txid.to_string(), i.previous_output.vout)))
++    }
++
++    /// The outputs (spent or not) this wallet's records say held a token at some point, failed transfers aside.
++    fn _token_txos(&self) -> Result<HashSet<(String, u32)>, Error> {
++        let db = self.database.get_db_data(false)?;
++        let failed: HashSet<i32> = db
++            .batch_transfers
++            .iter()
++            .filter(|b| b.status == TransferStatus::Failed)
++            .map(|b| b.idx)
++            .collect();
++        let live: HashSet<i32> = db
++            .asset_transfers
++            .iter()
++            .filter(|a| !failed.contains(&a.batch_transfer_idx))
++            .map(|a| a.idx)
++            .collect();
++        let txos: HashSet<i32> = db
++            .colorings
++            .iter()
++            .filter(|c| live.contains(&c.asset_transfer_idx))
++            .map(|c| c.txo_idx)
++            .collect();
++        Ok(db
++            .txos
++            .iter()
++            .filter(|t| txos.contains(&t.idx))
++            .map(|t| (t.txid.clone(), t.vout))
++            .collect())
 +    }
 +
 +    /// This wallet's outputs with no live allocation (a failed transfer's allocation doesn't count), smallest first,
@@ -1349,6 +1391,7 @@ index ca96b4a..9bdc625 100644
 +        let reserved: HashSet<Outpoint> = self.get_reserved_outpoints()?.into_iter().collect();
 +        let reserved_vanilla: HashSet<BdkOutPoint> =
 +            self.get_reserved_vanilla_outpoints()?.into_iter().collect();
++        let token_txos = self._token_txos()?;
 +        let bdk: HashMap<BdkOutPoint, (u64, bool)> = self
 +            .bdk_wallet
 +            .list_unspent()
@@ -1364,7 +1407,7 @@ index ca96b4a..9bdc625 100644
 +                let known = bdk.get(&bdk_op).copied();
 +                let why = if !u.utxo.exists || known.is_none() {
 +                    "not broadcast"
-+                } else if u.utxo.pending_witness && !self._carries_no_rgb(&bdk_op.txid) {
++                } else if u.utxo.pending_witness && !self._carries_no_rgb(&bdk_op.txid, &token_txos) {
 +                    "pending witness"
 +                } else if u.pending_blinded > 0 {
 +                    "blinded receive"
@@ -1383,6 +1426,44 @@ index ca96b4a..9bdc625 100644
 +            })
 +            .collect();
 +        out.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.txid.cmp(&b.1.txid)).then(a.1.vout.cmp(&b.1.vout)));
++        Ok(out)
++    }
++
++    /// Witness receives still waiting for the other side that no transaction known to this wallet pays (MASKED):
++    /// their batch transfer indexes. Failing them frees nothing on chain and loses nothing: no output carries them.
++    pub fn unpaid_witness_receives(&self) -> Result<Vec<i32>, Error> {
++        let paid: HashSet<ScriptBuf> = self
++            .bdk_wallet
++            .tx_graph()
++            .full_txs()
++            .flat_map(|t| t.tx.output.iter().map(|o| o.script_pubkey.clone()).collect::<Vec<_>>())
++            .collect();
++        let db = self.database.get_db_data(false)?;
++        let mut out = vec![];
++        for batch_transfer in &db.batch_transfers {
++            if batch_transfer.status != TransferStatus::WaitingCounterparty
++                || !batch_transfer.incoming(&db.asset_transfers, &db.transfers)?
++            {
++                continue;
++            }
++            let data = batch_transfer.get_transfers(&db.asset_transfers, &db.transfers)?;
++            let mut scripts = vec![];
++            let mut all_witness = true;
++            for transfer in data.asset_transfers_data.into_iter().flat_map(|atd| atd.transfers) {
++                if !matches!(transfer.recipient_type, Some(RecipientTypeFull::Witness { .. })) {
++                    all_witness = false;
++                    continue;
++                }
++                if let Some(recipient_id) = transfer.recipient_id
++                    && let Some(script) = script_buf_from_recipient_id(recipient_id)?
++                {
++                    scripts.push(script);
++                }
++            }
++            if all_witness && !scripts.is_empty() && scripts.iter().all(|s| !paid.contains(s)) {
++                out.push(batch_transfer.idx);
++            }
++        }
 +        Ok(out)
 +    }
 +
@@ -1478,7 +1559,7 @@ index ca96b4a..9bdc625 100644
      /// Prepare the PSBT to inflate an IFA asset.
      pub async fn inflate_begin(
          &mut self,
-@@ -12074,3 +12297,780 @@ mod bfa_tests {
+@@ -12074,3 +12372,825 @@ mod bfa_tests {
          assert!(options(&format!(r#","evm_chains":{{"mainnet":{chain}}}"#)).is_err());
      }
  }
@@ -2215,8 +2296,53 @@ index ca96b4a..9bdc625 100644
 +        let pw3 = seed_txo(&w, &com_txid, 1);
 +        w.database.update_txo(DbTxoActMod { idx: ActiveValue::Set(pw3), pending_witness: ActiveValue::Set(true), ..Default::default() }).unwrap();
 +        let why: HashMap<String, &str> = w.empty_utxos().unwrap().into_iter().map(|(_, o, y)| (o.to_string(), y)).collect();
-+        assert_eq!(why[&format!("{com_txid}:1")], "pending witness");
++        assert_eq!(why[&format!("{com_txid}:1")], "", "a commitment, but no input of it ever held a token: nothing moved in it");
++        // a commitment spending an output that held a token: tokens may be on its outputs, kept
++        let tok_in = seed_txo(&w, &txid, 3); // fund:3 held 10 of a token (a settled receive)
++        let bt = w.database.set_batch_transfer(DbBatchTransferActMod { txid: ActiveValue::Set(Some(txid.clone())), status: ActiveValue::Set(TransferStatus::Settled), min_confirmations: ActiveValue::Set(1), ..Default::default() }).unwrap();
++        let at = w.database.set_asset_transfer(DbAssetTransferActMod { user_driven: ActiveValue::Set(true), batch_transfer_idx: ActiveValue::Set(bt), asset_id: ActiveValue::Set(Some(s!("asset"))), ..Default::default() }).unwrap();
++        w.database.set_coloring(DbColoringActMod { txo_idx: ActiveValue::Set(tok_in), asset_transfer_idx: ActiveValue::Set(at), r#type: ActiveValue::Set(ColoringType::Receive), assignment: ActiveValue::Set(Assignment::Fungible(10)), ..Default::default() }).unwrap();
++        let mut moved = com.clone();
++        moved.input[0].previous_output.vout = 3;
++        moved.output[1].value = Amount::from_sat(331);
++        let tip4 = w.bdk_wallet.latest_checkpoint().block_id();
++        let block4 = Block {
++            header: Header { version: BlockVersion::TWO, prev_blockhash: tip4.hash, merkle_root: TxMerkleNode::all_zeros(), time: 3, bits: CompactTarget::from_consensus(0), nonce: 0 },
++            txdata: vec![moved.clone()],
++        };
++        w.bdk_wallet.apply_block_connected_to(&block4, tip4.height + 1, tip4).unwrap();
++        let moved_txid = moved.compute_txid().to_string();
++        let pw4 = seed_txo(&w, &moved_txid, 1);
++        w.database.update_txo(DbTxoActMod { idx: ActiveValue::Set(pw4), pending_witness: ActiveValue::Set(true), ..Default::default() }).unwrap();
++        let why: HashMap<String, &str> = w.empty_utxos().unwrap().into_iter().map(|(_, o, y)| (o.to_string(), y)).collect();
++        assert_eq!(why[&format!("{moved_txid}:1")], "pending witness", "it closed a token seal: tokens may be on it");
 +        assert_eq!(why[&format!("{}:1", later.compute_txid())], "unconfirmed");
++    }
++
++    /// A witness receive no transaction pays is listed (it can be failed); one a known transaction pays is not.
++    #[test]
++    fn unpaid_witness_receives_only_without_a_paying_tx() {
++        let mut w = make_test_wallet_with_keys(crate::keys::generate_keys(BitcoinNetwork::Regtest), false);
++        let paid_script = w._get_new_address(KeychainKind::External).unwrap().script_pubkey();
++        let unpaid_script = w._get_new_address(KeychainKind::External).unwrap().script_pubkey();
++        let fund = funding(paid_script.clone(), 330, 0xc3);
++        w.bdk_wallet.apply_unconfirmed_txs([(fund, 1)]);
++        let receive = |w: &Wallet, script: &ScriptBuf| -> i32 {
++            let bt = w.database.set_batch_transfer(DbBatchTransferActMod { status: ActiveValue::Set(TransferStatus::WaitingCounterparty), min_confirmations: ActiveValue::Set(1), ..Default::default() }).unwrap();
++            let at = w.database.set_asset_transfer(DbAssetTransferActMod { user_driven: ActiveValue::Set(true), batch_transfer_idx: ActiveValue::Set(bt), asset_id: ActiveValue::Set(None), ..Default::default() }).unwrap();
++            w.database.set_transfer(DbTransferActMod {
++                asset_transfer_idx: ActiveValue::Set(at),
++                incoming: ActiveValue::Set(true),
++                recipient_type: ActiveValue::Set(Some(RecipientTypeFull::Witness { vout: None })),
++                recipient_id: ActiveValue::Set(Some(crate::utils::recipient_id_from_script_buf(script.clone(), BitcoinNetwork::Regtest))),
++                ..Default::default()
++            }).unwrap();
++            bt
++        };
++        let paid = receive(&w, &paid_script);
++        let unpaid = receive(&w, &unpaid_script);
++        assert_eq!(w.unpaid_witness_receives().unwrap(), vec![unpaid]);
++        assert_ne!(paid, unpaid);
 +    }
 +
 +    /// The buyer's wallet signs its coin only with the seller's transaction in hand (BDK wants the previous
