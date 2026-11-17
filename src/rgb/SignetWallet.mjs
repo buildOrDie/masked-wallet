@@ -4,6 +4,9 @@ import { b64, unb64 } from './bytes.mjs';
 
 /** How many of the RGB states replaced by loading a backup this browser keeps. */
 export const BEFORE_LOADS = 5;
+// The undo copies are whole RGB backups (hundreds of KB each). Five of them filled browser storage on Signet (3 MB),
+// and the Instant listings store then dropped signed lots the market never got. Kept under this size, newest first.
+export const BEFORE_LOADS_MAX_CHARS = 1_000_000;
 
 /** One dedicated test wallet per RGB network. No MASKED mnemonic, coin store or mainnet state enters this service. */
 export class SignetWallet {
@@ -42,6 +45,7 @@ export class SignetWallet {
         this.storage.setItem(this.vaultKey, JSON.stringify(await encryptRgb(payload, password, net)));
         this.storage.setItem(this.dirtyKey, '1');
       }
+      try { this.trimBeforeLoads(); } catch { /* storage unreadable: nothing to trim */ }
       const sdk = await this.loadSdk();
       const wallet = new sdk.UTEXOWallet({ ...this.profile.sdk, mnemonic: payload.mnemonic, password });
       this.wallet = wallet;
@@ -91,9 +95,22 @@ export class SignetWallet {
   keepBeforeLoad(backup) {
     let list = [{ at: Date.now(), backup }, ...this.readBeforeLoads()].slice(0, BEFORE_LOADS);
     // browser storage is small: fewer if they don't fit, never the newest dropped for an older one
+    while (list.length > 1 && JSON.stringify(list).length > BEFORE_LOADS_MAX_CHARS) list = list.slice(0, -1);
     while (list.length) {
       try { this.storage.setItem(this.beforeLoadsKey, JSON.stringify(list)); return; } catch { list = list.slice(0, -1); }
     }
+  }
+  /**
+   * Make room in browser storage: the oldest undo copies go first (down to `keep`). Returns whether anything went.
+   * Called when a listing doesn't fit, and on open for a list saved before the size limit.
+   */
+  trimBeforeLoads(keep = 1, maxChars = BEFORE_LOADS_MAX_CHARS) {
+    const list = this.readBeforeLoads();
+    let n = list.length;
+    while (n > keep && JSON.stringify(list.slice(0, n)).length > maxChars) n--;
+    if (n === list.length) return false;
+    try { this.storage.setItem(this.beforeLoadsKey, JSON.stringify(list.slice(0, n))); } catch { this.storage.removeItem(this.beforeLoadsKey); }
+    return true;
   }
   /** The kept states: [{ at }] newest first; `beforeLoad(i)` is one of them as a backup to load. */
   beforeLoads() { return this.readBeforeLoads().map((x) => ({ at: x.at })); }
@@ -266,6 +283,10 @@ export class SignetWallet {
       for (const [k] of Object.entries(m).filter(([, x]) => finished(x)).sort((a, b) => (a[1]?.at || 0) - (b[1]?.at || 0))) {
         delete m[k];
         try { return put(); } catch { /* next */ }
+      }
+      // then the undo copies of earlier loads (all but the newest, then that too): a listing matters more
+      for (const keep of [1, 0]) {
+        if (this.trimBeforeLoads(keep, 0)) try { return put(); } catch { /* next */ }
       }
       // then the transfer data of open listings, oldest first, never the one being saved (signed again if asked)
       for (const [k, x] of Object.entries(m).filter(([k2, x]) => x?.consignment && k2 !== saving).sort((a, b) => (a[1]?.at || 0) - (b[1]?.at || 0))) {

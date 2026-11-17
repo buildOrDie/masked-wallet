@@ -298,3 +298,24 @@ test('Instant records: a full browser storage never stops listings; finished ent
   assert.ok(Object.values(all).filter((x) => x.resign).every((x) => x.stage === 'ready'), 'still on sale (the market keeps the signed listing), so its sale is still seen');
   assert.ok(JSON.stringify(all).length <= 3000);
 });
+
+test('undo copies of loads stay small, and give their room to listings before any signed listing is dropped', async () => {
+  const { BEFORE_LOADS_MAX_CHARS } = await import('../src/rgb/SignetWallet.mjs');
+  const big = (t) => ({ format: 'x', ciphertext: t + 'x'.repeat(400_000) });
+  const storage = new MemoryStorage();
+  const service = new SignetWallet({ loadSdk: async () => ({}), storage });
+  for (let k = 1; k <= 5; k++) service.keepBeforeLoad(big(`s${k}`));
+  assert.ok(storage.getItem(service.beforeLoadsKey).length <= BEFORE_LOADS_MAX_CHARS, 'kept under the limit');
+  assert.equal(service.beforeLoad(0).ciphertext.slice(0, 2), 's5', 'the newest kept');
+  // a whole storage of 1,000,000 characters: the undo copy fills most of it
+  const quota = new MemoryStorage(); const set = quota.setItem.bind(quota);
+  const used = () => { let n = 0; for (const [k, v] of quota.map) n += k.length + v.length; return n; };
+  quota.setItem = (k, v) => { const before = quota.getItem(k); if (used() - (before ? k.length + before.length : 0) + k.length + String(v).length > 1_000_000) throw new Error('QuotaExceededError'); set(k, v); };
+  const s2 = new SignetWallet({ loadSdk: async () => ({}), storage: quota });
+  s2.keepBeforeLoad(big('u1'));
+  const store = s2.instantStore();
+  const listing = (n) => ({ role: 'seller', stage: 'ready', coin: `${'a'.repeat(64)}:${n}`, psbt: 'p'.repeat(150_000), consignment: 'c'.repeat(150_000), at: n });
+  store.set('lot1', listing(1)); store.set('lot2', listing(2));
+  assert.ok(store.get('lot1').psbt && store.get('lot2').psbt, 'both signed lots kept');
+  assert.equal(s2.beforeLoads().length, 0, 'the undo copy made room');
+});
