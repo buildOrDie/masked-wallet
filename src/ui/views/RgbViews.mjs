@@ -519,9 +519,11 @@ export class RgbSettings {
     list = list.filter((e) => e.stage !== 'cancelled' || Date.now() - (e.at || 0) < 86400_000).slice(0, 20);
     if (!list.length) return '';
     const label = { outdated: 'signed by an older MASKED: cancel it on the market and list again', moving: 'going live soon: on sale after the next block (about 10 minutes)', ready: 'on sale: anyone can buy it, even with MASKED closed', cancelling: 'cancelling: waiting for the transaction to confirm', cancelled: 'cancelled', sold: 'sold' };
-    const rows = list.map((e) => `<li><span>${(() => { const a = r.find?.(e.assetId); return a ? `${esc(r.amount(a, e.amount))} ${esc(a.ticker)}` : `${esc(Number(e.amount).toLocaleString('en-US'))} <span class="mono">${esc(short(e.assetId, 6))}</span>`; })()} for ${esc(Number(e.priceSats).toLocaleString('en-US'))} sats<small class="muted">${esc(label[e.stage] || e.stage)}</small>${e.waiting ? `<small class="${/couldn't/.test(e.waiting) ? 'warn' : 'muted'}">${esc(e.waiting)}</small>` : ''}</span></li>`).join('');
+    const rows = list.map((e) => `<li><span>${(() => { const a = r.find?.(e.assetId); return a ? `${esc(r.amount(a, e.amount))} ${esc(a.ticker)}` : `${esc(Number(e.amount).toLocaleString('en-US'))} <span class="mono">${esc(short(e.assetId, 6))}</span>`; })()} for ${esc(Number(e.priceSats).toLocaleString('en-US'))} sats<small class="muted">${esc(label[e.stage] || e.stage)}</small>${e.waiting ? `<small class="${/couldn't/.test(e.waiting) ? 'warn' : 'muted'}">${esc(e.waiting)}</small>` : ''}</span>${['ready', 'moving', 'outdated'].includes(e.stage) ? (r.cancelAsk === e.offerId
+      ? `<span class="inst-ask"><button class="btn primary sm" data-rgb="instantCancel" data-rgb-arg="${esc(e.offerId)}" ${r.busy ? 'disabled' : ''}>Cancel it</button><button class="btn ghost sm" data-rgb="instantCancelNo">Keep</button></span>`
+      : `<button class="btn ghost sm" data-rgb="instantCancelAsk" data-rgb-arg="${esc(e.offerId)}" ${r.busy ? 'disabled' : ''}>Cancel</button>`) : ''}</li>`).join('');
     return `<div class="cloud-box"><div class="cloud-h"><b>Instant listings</b><span class="muted small">${list.filter((e) => e.stage === 'ready').length} live</span></div>
-      <p class="muted small">Signed once, bought any time, even with MASKED closed. Cancel one on the market: that moves its tokens so the signature can't be used.</p>
+      <p class="muted small">Signed once, bought any time, even with MASKED closed. Cancelling one moves its tokens on chain (a small network fee), so the signature can't be used any more.</p>
       <ul class="auto-list">${rows}</ul></div>`;
   }
   /** Settings → RGB → cloud backup: status, and the switch. */

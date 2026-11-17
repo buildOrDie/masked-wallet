@@ -136,6 +136,8 @@ export class WalletRgb {
     this.cloudAsk = false; // the "switch off cloud backup?" panel is open
     this.cloudPick = 0; // Earlier backups: the version picked, waiting for the second tap
     this.outputs = null; // Settings → RGB → What's in this wallet (LiteWallet.outputsReport)
+    /** @type {string|null} the Instant listing whose Cancel was tapped (asks once) */
+    this.cancelAsk = null;
     /** @type {any} */ this.cloudTimer = null;
     this.cloudApi = new RgbCloud();
     /** sell automatically: the setting (read from Chrome at start) and the offers set to it */
@@ -1158,6 +1160,18 @@ export class WalletRgb {
       // What's in this wallet: every output and coin, what it's doing
       case 'outputs': return this.run(async () => { this.outputs = this.withoutDropped(await this.service.outputsReport()); }, { quiet: true });
       case 'outputsClose': this.outputs = null; return app.render();
+      // Settings → RGB → Instant listings: cancel one here, also one the market doesn't show (asks once first)
+      case 'instantCancelAsk': this.cancelAsk = arg; return app.render();
+      case 'instantCancelNo': this.cancelAsk = null; return app.render();
+      case 'instantCancel': return this.run(async () => {
+        this.cancelAsk = null;
+        const e = this.service.instantStore().get(arg);
+        const v = await this.service.instantCancel({ offerId: arg, fee: this.fee(), feeRate: Number(this.fee()) || 1 });
+        // tell the market too, when this browser has the listing's market address and step token
+        if (e?.market && e?.token) fetch(`${e.market}/api/swap/offers/${encodeURIComponent(arg)}/cancel`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-swap-token': String(e.token) }, body: '{}' }).catch(() => {});
+        app.toast(v?.stage === 'cancelling' ? 'Cancelling: the tokens move to a new output and are free again after one confirmation.' : 'Listing cancelled. Nothing moved.');
+        await this.refresh().catch(() => {});
+      });
       case 'freeSpare': return this.run(async () => {
         const r = await this.service.freeSpare({ fee: this.fee() });
         app.toast([r.freed ? `${r.freed} spare RGB outputs freed: ${r.sats.toLocaleString('en-US')} sats back as bitcoin for buys after one confirmation.` : '', r.cancelled ? `${r.cancelled} unused invoices given up.` : ''].filter(Boolean).join(' '));
