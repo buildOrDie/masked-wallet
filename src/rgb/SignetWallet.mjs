@@ -119,6 +119,12 @@ export class SignetWallet {
       }
       // A send signed before a restore can't be broadcast: the engine keeps the signed transaction in this
       // browser only, never in backups. Once the other wallet accepts, refresh reports it missing.
+      // invoices no transaction pays, made over an hour ago (moves that never went out): every refresh asks the
+      // transfer server about each one, so they go (at most once in 10 minutes; nothing pays them, nothing is lost)
+      if (typeof wallet.cancelUnpaidReceives === 'function' && Date.now() - (this.unpaidAt || 0) > 600_000) {
+        this.unpaidAt = Date.now();
+        try { await wallet.cancelUnpaidReceives(); } catch { /* next time */ }
+      }
       const refreshed = await wallet.refreshWallet() || {};
       const stranded = Object.entries(refreshed).filter(([, r]) => /signed PSBT not found/i.test(JSON.stringify(r?.failure ?? ''))).map(([idx]) => Number(idx));
       // Sequential: the WASM wallet has a shared RefCell and does not support overlapping calls.

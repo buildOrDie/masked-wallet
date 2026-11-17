@@ -302,8 +302,11 @@ export class LiteWallet {
     try { return (plain(this.wallet.unpaidWitnessReceives()) || []).map(Number); } catch { return []; }
   }
   /** Give up those invoices: nothing pays them, so nothing is lost. @returns {Promise<number>} how many */
-  async cancelUnpaidReceives() {
-    const idx = this.unpaidReceives();
+  async cancelUnpaidReceives({ olderThanMs = 3600_000 } = {}) {
+    // only old ones: a move or purchase made a moment ago may not be in this wallet's view of the chain yet
+    const made = new Map();
+    try { for (const t of plain(this.engineTransfers(null)) || []) made.set(Number(t.batchTransferIdx), Number(t.createdAt || 0) * (Number(t.createdAt) < 1e12 ? 1000 : 1)); } catch { /* none known: none old */ }
+    const idx = this.unpaidReceives().filter((i) => made.has(i) && made.get(i) > 0 && Date.now() - made.get(i) > olderThanMs);
     if (!idx.length) return 0;
     const online = this.requireOnline();
     let n = 0;
@@ -1076,11 +1079,13 @@ export class LiteWallet {
       const mine = list.filter((t) => String(t?.txid || '').toLowerCase() === txid && t?.kind === 'Send');
       return !mine.length || mine.every((t) => ['WaitingConfirmations', 'Settled'].includes(String(t.status)));
     };
-    let told = false;
+    let told = false, refreshedAt = 0;
     while (Date.now() < end) {
       // make sure the server the engine syncs with has it (the broadcast may have gone to another one)
       if (txHex && !(await this.knowsTx(txid))) await this.ensureBroadcast(txHex, txid).catch(() => {});
-      try { await this.wallet.refresh(online, null, [], true); } catch { /* again */ }
+      // a refresh asks the transfer server about every transfer still waiting (dozens of requests): only an engine
+      // that needs this wallet to take the move in first gets one, at most every 15 s. A chaining engine never does.
+      if (!chains && Date.now() - refreshedAt > Math.min(15_000, ms / 4)) { refreshedAt = Date.now(); try { await this.wallet.refresh(online, null, [], true); } catch { /* again */ } }
       try { await this.wallet.sync(online); } catch { /* again */ }
       if (listed() && ready()) return true;
       if (!told) { onStep('Waiting for the move to reach your wallet before the next lot…'); told = true; }
@@ -1350,6 +1355,8 @@ export class LiteWallet {
    */
   async lotsAtOnce({ list, assetId, coins, feeRate, market, at, group, onStep }, store) {
     const online = this.requireOnline();
+    // unused invoices of earlier moves are asked about on every refresh: give the old ones up first
+    try { await this.cancelUnpaidReceives(); } catch { /* still works, just slower */ }
     const rate = Math.max(1, Number(feeRate) || 1);
     this.syncOwnUnconfirmed(store);
     /** @type {Map<string, string>} lots not moved (the market takes them off) */

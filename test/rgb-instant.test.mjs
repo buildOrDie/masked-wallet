@@ -914,15 +914,15 @@ test('free spare outputs gives up the invoices no transaction pays first', async
   s.w.w.spareUtxos = () => [];
   s.w.w.freeSpareUtxosBegin = async () => 'psbt';
   s.w.w.unpaidWitnessReceives = () => [12, 13];
-  s.w.engineTransfers = (id) => (id ? [] : [12, 13, 14].map((i) => ({ kind: 'ReceiveWitness', status: 'WaitingCounterparty', batchTransferIdx: i })));
+  s.w.engineTransfers = (id) => (id ? [] : [12, 13, 14].map((i) => ({ kind: 'ReceiveWitness', status: 'WaitingCounterparty', batchTransferIdx: i, createdAt: i === 13 ? Math.floor(Date.now() / 1000) : 1700000000 })));
   const failed = [];
   s.w.w.failTransfers = async (_o, idx) => { failed.push(idx); return true; };
   const rep = await s.w.outputsReport(s.store);
   assert.equal(rep.unpaidReceives, 2);
-  assert.deepEqual(rep.pendingReceives.map((p) => [p.batchTransferIdx, p.unpaid]), [[12, true], [13, true], [14, false]]);
+  assert.deepEqual(rep.pendingReceives.map((p) => [p.batchTransferIdx, p.unpaid]).sort((x, y) => x[0] - y[0]), [[12, true], [13, true], [14, false]]);
   const r = await s.w.freeSpare({});
-  assert.deepEqual(failed, [12, 13], 'only the unpaid ones');
-  assert.deepEqual(r, { txid: '', freed: 0, sats: 0, cancelled: 2 });
+  assert.deepEqual(failed, [12], 'only the unpaid ones made over an hour ago (13 is a moment old: its transaction may not be seen yet)');
+  assert.deepEqual(r, { txid: '', freed: 0, sats: 0, cancelled: 1 });
 });
 
 test('a lot queued for hours is given up, never moved with tokens that arrive later', async () => {
