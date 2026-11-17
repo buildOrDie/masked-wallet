@@ -217,6 +217,12 @@ export class ApprovalController {
   prepareSwap(a, once) {
     const r = this.app.rgb, P = a.params || {}, m = a.method;
     once(async () => {
+      // the market works from what this wallet knows: catch up first (a claim, a purchase or a sale that arrived, a
+      // move that confirmed), unless that was just done. Without it, a wallet that was closed a while trips on its
+      // own stale records ("none of its inputs…", "not settled and free", wrong balances)
+      if (r.ready && typeof r.refresh === 'function' && Date.now() - (r.refreshedAt || 0) > 30_000) {
+        try { await this.rgbBusy(() => r.refresh()); } catch { /* the step itself says what's wrong */ }
+      }
       if (m === 'rgbFreeSpare') {
         if (typeof r.service?.freeSpare !== 'function') throw new Error('This MASKED version can\'t free spare outputs yet. Update MASKED.');
         if (r.requireLatest) await r.requireLatest(); else if (r.cloud?.conflict) throw new Error(RGB_CONFLICT_MSG);

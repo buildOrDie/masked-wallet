@@ -142,6 +142,8 @@ export class WalletRgb {
     this.cloudAsk = false; // the "switch off cloud backup?" panel is open
     this.cloudPick = 0; // Earlier backups: the version picked, waiting for the second tap
     this.outputs = null; // Settings → RGB → What's in this wallet (LiteWallet.outputsReport)
+    /** when RGB last caught up with the chain (ms) */
+    this.refreshedAt = 0;
     /** @type {string|null} the Instant listing whose Cancel was tapped (asks once) */
     this.cancelAsk = null;
     /** @type {any} */ this.cloudTimer = null;
@@ -510,6 +512,7 @@ export class WalletRgb {
   async refresh(full = false) {
     full ||= this.needsScan();
     this.data = await this.service.snapshot({ full }); this.saved = false;
+    this.refreshedAt = Date.now();
     try { localStorage.setItem(this.snapshotKey, JSON.stringify(this.data, (_, v) => typeof v === 'bigint' ? v.toString() : v)); } catch { /* shown live only */ }
     if (full) try { localStorage.setItem(`${this.profile.vaultKey}.scanned-v3`, '1'); } catch { /* scans again next time */ }
     await this.instantCheck();
