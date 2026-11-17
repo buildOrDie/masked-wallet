@@ -808,7 +808,8 @@ test('what\'s in this RGB wallet: every output with its tokens and what it is do
   s.w.w.listUnspents = () => [u('a', 0, 36), u('b', 1, 100), u('d', 2, 37, { settled: false }), u('e', 0, 40, { colorable: false }), u('f', 0, null, { sats: 600 })];
   s.w.w.listUnspentsVanilla = async (_o, min) => min ? [{ outpoint: `${T('c')}:0`, txout: { value: 50000 }, is_spent: false }] : [{ outpoint: `${T('c')}:0`, txout: { value: 50000 }, is_spent: false }, { outpoint: `${T('g')}:1`, txout: { value: 7000 }, is_spent: false }];
   s.w.listAssets = async () => ({ nia: [{ assetId: ASSET, ticker: 'MASKED', precision: 0 }], ifa: [] });
-  s.store.set('o1', { role: 'seller', assetId: ASSET, amount: '100', priceSats: '5000', stage: 'ready', coin: `${T('b')}:1` });
+  // signed data dropped for storage by an earlier build (marked moving): still on sale
+  s.store.set('o1', { role: 'seller', assetId: ASSET, amount: '100', priceSats: '5000', stage: 'moving', resign: true, templateTxid: T('6'), coin: `${T('b')}:1` });
   const r = await s.w.outputsReport(s.store);
   const st = Object.fromEntries(r.rgb.map((o) => [o.outpoint.split(':')[0].slice(0, 4) + ':' + o.outpoint.split(':')[1], o.state]));
   assert.deepEqual(r.rgb.map((o) => o.state), ['on sale', 'free', 'waiting', 'unusable', 'empty'], JSON.stringify(st));
@@ -816,4 +817,15 @@ test('what\'s in this RGB wallet: every output with its tokens and what it is do
   assert.deepEqual(r.coins.map((c) => [c.sats, c.confirmed]), [[50000, true], [7000, false]]);
   assert.equal(r.tokens[0].ticker, 'MASKED');
   assert.ok(r.activity.some((a) => a.type === 'listing' && a.offerId === 'o1' && a.stage === 'ready'), 'the listing shows in the activity');
+});
+
+test('a listing whose signed data was dropped for storage is still watched for its sale', async () => {
+  const s = wallet({ name: 'resign', lib: fakeLib(), chain: fakeChain() });
+  const coin = `${T('b')}:1`;
+  s.store.set('o9', { role: 'seller', assetId: ASSET, amount: '10', priceSats: '5000', stage: 'moving', resign: true, templateTxid: T('6'), coin });
+  s.w.esplora = async (path) => ({ json: async () => (path.includes('outspend') ? { spent: true, txid: T('9') } : {}) });
+  s.w.wallet.markOutpointSpent = () => {};
+  const changes = await s.w.instantProgress(s.store, s.store.all());
+  assert.deepEqual(changes, [{ offerId: 'o9', stage: 'sold', txid: T('9') }]);
+  assert.equal(s.store.get('o9').stage, 'sold');
 });

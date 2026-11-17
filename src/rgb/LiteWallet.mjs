@@ -564,7 +564,7 @@ export class LiteWallet {
     const meta = new Map([...nia, ...ifa].map((a) => [a.assetId, { ticker: a.ticker, precision: a.precision }]));
     // what each promised output is for
     const promised = new Map();
-    try { for (const [id, e] of Object.entries(store?.all?.() || {})) if (e?.role === 'seller' && e.coin && ['moving', 'queued', 'ready', 'cancelling'].includes(e.stage)) promised.set(String(e.coin).toLowerCase(), { offerId: id, stage: e.stage, assetId: e.assetId, amount: String(e.amount || ''), priceSats: String(e.priceSats || '') }); } catch { /* none */ }
+    try { for (const [id, e] of Object.entries(store?.all?.() || {})) if (e?.role === 'seller' && e.coin && ['moving', 'queued', 'ready', 'cancelling'].includes(e.stage)) promised.set(String(e.coin).toLowerCase(), { offerId: id, stage: e.stage === 'moving' && e.resign && e.templateTxid ? 'ready' : e.stage, assetId: e.assetId, amount: String(e.amount || ''), priceSats: String(e.priceSats || ''), waiting: e.stage === 'moving' && e.waiting ? String(e.waiting).slice(0, 240) : '' }); } catch { /* none */ }
     const rgb = all.map((u) => {
       const o = u.utxo?.outpoint || {};
       const op = `${String(o.txid).toLowerCase()}:${o.vout}`;
@@ -604,7 +604,7 @@ export class LiteWallet {
       for (const [id, e] of Object.entries(store?.all?.() || {})) {
         if (!e || !['seller', 'buyer'].includes(e.role)) continue;
         const m = meta.get(e.assetId) || { ticker: '', precision: 0 };
-        activity.push({ type: 'listing', offerId: id, role: e.role, stage: String(e.stage || ''), assetId: e.assetId || '', ticker: m.ticker || '', precision: m.precision ?? 0, amount: String(e.amount || '0'), priceSats: String(e.priceSats || ''), coin: e.coin || '', txid: String(e.soldTxid || e.cancelTxid || e.txid || e.moveTxid || ''), at: Number(e.at || 0) });
+        activity.push({ type: 'listing', offerId: id, role: e.role, stage: String(e.stage === 'moving' && e.resign && e.templateTxid ? 'ready' : e.stage || ''), assetId: e.assetId || '', ticker: m.ticker || '', precision: m.precision ?? 0, amount: String(e.amount || '0'), priceSats: String(e.priceSats || ''), coin: e.coin || '', txid: String(e.soldTxid || e.cancelTxid || e.txid || e.moveTxid || ''), at: Number(e.at || 0) });
       }
     } catch { /* none */ }
     activity.sort((a, b) => b.at - a.at);
@@ -1406,7 +1406,10 @@ export class LiteWallet {
       try { await this.lotsAdvance(store, g, rate); } catch { /* next refresh */ }
     }
     if (groups.size) all = store.all();
-    for (const [id, e] of Object.entries(all)) {
+    for (let [id, e] of Object.entries(all)) {
+      // a signed listing whose data was dropped to free storage was marked "moving" by 2.29.25 builds before v13: it
+      // is still on sale (the market keeps it), so it's watched for its sale again
+      if (e?.role === 'seller' && e.stage === 'moving' && e.resign && e.templateTxid && e.coin) { e = { ...e, stage: 'ready', waiting: '' }; store.set(id, e); }
       if (e?.role === 'buyer') {
         try { const c = await this.purchaseProgress(id, e, store); if (c) changes.push(c); } catch { /* next refresh */ }
         continue;

@@ -260,7 +260,7 @@ export class SignetWallet {
       }
       // then the transfer data of open listings, oldest first, never the one being saved (signed again if asked)
       for (const [k, x] of Object.entries(m).filter(([k2, x]) => x?.consignment && k2 !== saving).sort((a, b) => (a[1]?.at || 0) - (b[1]?.at || 0))) {
-        m[k] = { ...x, consignment: undefined, psbt: undefined, stage: x.stage === 'ready' ? 'moving' : x.stage, resign: true };
+        m[k] = { ...x, consignment: undefined, psbt: undefined, resign: true }; // still on sale: the market keeps the signed listing
         try { return put(); } catch { /* next */ }
       }
       return put();

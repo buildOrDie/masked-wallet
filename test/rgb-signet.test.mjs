@@ -295,5 +295,6 @@ test('Instant records: a full browser storage never stops listings; finished ent
   assert.equal(all.o3.stage, 'ready', 'the newest listing is kept whole');
   assert.ok(!all.sold1 && !all.c1, 'finished entries went first');
   assert.ok(Object.values(all).filter((x) => x.resign).length >= 1, 'then an open listing\'s data (signed again if asked)');
+  assert.ok(Object.values(all).filter((x) => x.resign).every((x) => x.stage === 'ready'), 'still on sale (the market keeps the signed listing), so its sale is still seen');
   assert.ok(JSON.stringify(all).length <= 3000);
 });
