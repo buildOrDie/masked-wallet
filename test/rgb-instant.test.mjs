@@ -60,6 +60,7 @@ function wallet({ name, rgb = [], coins = [], lib, chain }) {
   w.extractHex = (p) => JSON.stringify({ seal: JSON.parse(p).seal });
   const mem = {};
   const store = { get: (k) => mem[k] || null, set: (k, v) => { mem[k] = v; }, del: (k) => { delete mem[k]; }, all: () => mem };
+  w.ownOutputWaitMs = 30; // the fake engine never lists a move's change: don't wait 45 s for it
   return { w, store, mem, log };
 }
 function fakeChain() {

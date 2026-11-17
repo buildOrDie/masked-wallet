@@ -1058,7 +1058,7 @@ export class LiteWallet {
    * Wait (at most `ms`) until the engine lists `outpoint` among this wallet's outputs: the block server in use has the
    * transaction, and a sync took it in. Says what it waits for. @returns {Promise<boolean>}
    */
-  async waitOwnOutput(online, outpoint, onStep = (_t) => {}, txHex = '', ms = 45_000) {
+  async waitOwnOutput(online, outpoint, onStep = (_t) => {}, txHex = '', ms = /** @type {any} */ (this).ownOutputWaitMs ?? 45_000) {
     const want = String(outpoint).toLowerCase(), txid = want.split(':')[0];
     const end = Date.now() + ms;
     const has = () => (plain(this.wallet.listUnspents(false)) || []).some((u) => `${String(u.utxo?.outpoint?.txid).toLowerCase()}:${u.utxo?.outpoint?.vout}` === want);
@@ -1069,7 +1069,7 @@ export class LiteWallet {
       if (!told) { onStep(`Waiting for ${hostOf(this.indexer)} to see the move…`); told = true; }
       // make sure the server the engine syncs with has it (the broadcast may have gone to another one)
       if (txHex && !(await this.knowsTx(txid))) await this.ensureBroadcast(txHex, txid).catch(() => {});
-      await new Promise((r) => setTimeout(r, 1500));
+      await new Promise((r) => setTimeout(r, Math.min(1500, Math.max(10, ms / 20))));
     }
     return false;
   }
