@@ -106,6 +106,9 @@ async function publishInstant(e, v) {
   return r.ok;
 }
 
+/** A refresh this recent, by any MASKED window, is used as is when RGB opens. */
+export const OPEN_FRESH_MS = 60_000;
+
 export class WalletRgb {
   constructor(app) {
     this.app = app;
@@ -480,6 +483,11 @@ export class WalletRgb {
       this.startTimer(); // its first tick also looks whether another copy saved newer RGB data
     } catch (error) { await this.close(); throw error; }
     // Balances: a slow or busy server must not close RGB. Keep it open and retry with the minute timer.
+    // Another MASKED window (the popup, or the last approval) refreshed under a minute ago and saved: this one starts
+    // from that. Before, every approval window synced and checked everything again on open (the "Checking…" wait and
+    // hundreds of block server requests on each tap on the market).
+    const shared = this.sharedRefreshAt();
+    if (!backup && !this.needsScan() && this.data && Date.now() - shared < OPEN_FRESH_MS) { this.refreshedAt = shared; return; }
     try {
       await this.refresh(!!backup || this.needsScan());
     } catch (error) {
@@ -504,6 +512,12 @@ export class WalletRgb {
   // v3: once more after the move to the RGB 0.11.2 engine (an upgraded wallet may rebuild its bitcoin view)
   needsScan() { try { return localStorage.getItem(`${this.profile.vaultKey}.scanned-v3`) !== '1'; } catch { return true; } }
   get snapshotKey() { return `${this.profile.vaultKey}.snapshot`; }
+  /** When any MASKED window last refreshed RGB (and saved it): this window's own, or one kept in browser storage. */
+  sharedRefreshAt() {
+    let kept = 0;
+    try { kept = Number(localStorage.getItem(`${this.profile.vaultKey}.refreshed-at`)) || 0; } catch { kept = 0; }
+    return Math.max(this.refreshedAt || 0, kept > Date.now() ? 0 : kept);
+  }
   /** The balances of the last refresh on this browser (tokens, BTC, history): null if there are none. */
   cachedSnapshot() {
     try { const d = JSON.parse(localStorage.getItem(this.snapshotKey) || 'null'); return d && typeof d === 'object' && d.groups ? { ...d, cached: true } : null; } catch { return null; }
@@ -513,6 +527,7 @@ export class WalletRgb {
     full ||= this.needsScan();
     this.data = await this.service.snapshot({ full }); this.saved = false;
     this.refreshedAt = Date.now();
+    try { localStorage.setItem(`${this.profile.vaultKey}.refreshed-at`, String(this.refreshedAt)); } catch { /* this window only */ }
     try { localStorage.setItem(this.snapshotKey, JSON.stringify(this.data, (_, v) => typeof v === 'bigint' ? v.toString() : v)); } catch { /* shown live only */ }
     if (full) try { localStorage.setItem(`${this.profile.vaultKey}.scanned-v3`, '1'); } catch { /* scans again next time */ }
     await this.instantCheck();

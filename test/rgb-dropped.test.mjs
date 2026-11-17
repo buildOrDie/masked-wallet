@@ -21,3 +21,21 @@ test('tokens on a dropped receive are not "waiting for a block" on the page', ()
   assert.deepEqual(rep.rgb.map((o) => o.state), ['dropped', 'waiting']);
   assert.equal(rep.tokens[0].waiting, '7'); assert.equal(rep.tokens[0].dropped, '500');
 });
+
+test('a refresh by another MASKED window is shared: the next window starts from it instead of syncing again', async () => {
+  const { OPEN_FRESH_MS } = await import('../src/rgb/WalletRgb.mjs');
+  const mem = new Map();
+  const prev = globalThis.localStorage;
+  globalThis.localStorage = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, String(v)), removeItem: (k) => mem.delete(k) };
+  try {
+    const me = { profile: { vaultKey: 'v' }, refreshedAt: 0 };
+    const at = WalletRgb.prototype.sharedRefreshAt;
+    assert.equal(at.call(me), 0, 'never refreshed');
+    const t = Date.now() - 20_000;
+    mem.set('v.refreshed-at', String(t));
+    assert.equal(at.call(me), t, 'another window\'s refresh');
+    assert.ok(Date.now() - at.call(me) < OPEN_FRESH_MS);
+    mem.set('v.refreshed-at', String(Date.now() + 3600_000));
+    assert.equal(at.call(me), 0, 'a time in the future is ignored');
+  } finally { globalThis.localStorage = prev; }
+});

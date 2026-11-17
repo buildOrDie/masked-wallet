@@ -223,7 +223,7 @@ export class ApprovalController {
       // the market works from what this wallet knows: catch up first (a claim, a purchase or a sale that arrived, a
       // move that confirmed), unless that was just done. Without it, a wallet that was closed a while trips on its
       // own stale records ("none of its inputs…", "not settled and free", wrong balances)
-      if (r.ready && typeof r.refresh === 'function' && Date.now() - (r.refreshedAt || 0) > 30_000) {
+      if (r.ready && typeof r.refresh === 'function' && Date.now() - (r.sharedRefreshAt ? r.sharedRefreshAt() : r.refreshedAt || 0) > 60_000) {
         try { await this.rgbBusy(() => r.refresh()); } catch { /* the step itself says what's wrong */ }
       }
       if (m === 'rgbFreeSpare') {

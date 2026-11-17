@@ -54,7 +54,32 @@ function cacheKey(input, init) {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : /** @type {any} */ (input)?.url || '';
   try { const u = new URL(url); return TX_PATH.test(u.pathname) && !u.search ? u.href : ''; } catch { return ''; }
 }
+// Kept across MASKED's windows too (each approval is a new page that would ask about every transaction again): a
+// transaction for good, a confirmed status for 10 minutes, in the browser's Cache Storage (not the small localStorage).
+const SHARED = 'masked-rgb-tx-v1';
+async function sharedGet(key) {
+  try {
+    if (!globalThis.caches) return null;
+    const r = await (await caches.open(SHARED)).match(key);
+    if (!r) return null;
+    const until = Number(r.headers.get('x-kept-until') || 0);
+    if (until < Date.now()) return null;
+    return { status: r.status, type: r.headers.get('content-type') || '', body: await r.arrayBuffer(), url: key, until };
+  } catch { return null; }
+}
+function sharedPut(key, e) {
+  try {
+    if (!globalThis.caches || e.status !== 200) return;
+    caches.open(SHARED).then((c) => c.put(key, new Response(e.body.slice(0), { status: 200, headers: { 'content-type': e.type || 'application/octet-stream', 'x-kept-until': String(e.until) } }))).catch(() => {});
+  } catch { /* this window only */ }
+}
 async function fetchAndKeep(key, input, init) {
+  const kept = await sharedGet(key);
+  if (kept) {
+    if (txCache.size >= MAX_CACHED) txCache.delete(txCache.keys().next().value);
+    txCache.set(key, kept);
+    return kept;
+  }
   const r = await send(input, init);
   const body = await r.arrayBuffer();
   const type = r.headers.get('content-type') || '';
@@ -71,6 +96,8 @@ async function fetchAndKeep(key, input, init) {
   if (keepMs) {
     if (txCache.size >= MAX_CACHED) txCache.delete(txCache.keys().next().value);
     txCache.set(key, entry);
+    // only what lasts: a transaction, or a confirmed status (an unconfirmed one is good for 5 s, this window only)
+    if (keepMs >= 600_000) sharedPut(key, entry);
   }
   return entry;
 }
@@ -82,7 +109,7 @@ const answer = (e) => {
   return r;
 };
 /** For tests: forget what was kept. */
-export function rgbCacheClear() { txCache.clear(); inflight.clear(); }
+export function rgbCacheClear() { txCache.clear(); inflight.clear(); try { globalThis.caches?.delete(SHARED).catch(() => {}); } catch { /* none */ } }
 
 async function send(input, init) {
   await slot();
