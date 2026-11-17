@@ -173,7 +173,7 @@ export class RgbHome {
         <span class="bal-amt"><b>${fmtBtc(settled)}</b><span>${pending ? `<span class="pend-t" title="Waiting for a block">+${fmtBtc(pending)} pending</span>` : unit}</span></span></div>
       <div class="rgb-bal-act"><button class="btn ghost sm" data-rgb="fund">${I.plus}<span>Add from Bitcoin</span></button><button class="btn ghost sm" data-rgb="${r.withdraw ? 'withdrawClose' : 'withdraw'}" ${settled + pending ? '' : 'disabled'}>${I.send}<span>Move to Bitcoin</span></button></div>${wd}`;
     return `<section class="home-toks">
-      <div class="list-h"><b>RGB tokens${r.isMain ? ' <span class="badge">beta</span>' : ''}</b><button class="link small" data-rgb="refresh" ${r.busy ? 'disabled' : ''}>${r.busy ? 'Updating…' : r.data.cached ? 'Last saved · Refresh' : 'Refresh'}</button></div>
+      <div class="list-h"><b>RGB tokens${r.isMain ? ' <span class="badge">beta</span>' : ''}</b><button class="link small" data-rgb="refresh" ${r.busy ? 'disabled' : ''}>${r.busy ? r.busyLabel : r.data.cached ? 'Last saved · Refresh' : 'Refresh'}</button></div>
       ${backupDue}${fund}
       <div class="tok-list">${feeRow}${listingsRow(r)}${list.map((a) => {
         const { settled: s, future: fut } = r.bal(a);
@@ -414,7 +414,7 @@ export class RgbReceive {
     const list = r.invoices().slice(0, 10);
     if (!list.length) return '';
     const share = r.canShareInvoice;
-    return `<section class="card"><div class="list-h"><b>Your invoices</b><button class="link small" data-rgb="refresh" ${r.busy ? 'disabled' : ''}>${r.busy ? 'Updating…' : 'Refresh'}</button></div>
+    return `<section class="card"><div class="list-h"><b>Your invoices</b><button class="link small" data-rgb="refresh" ${r.busy ? 'disabled' : ''}>${r.busy ? r.busyLabel : 'Refresh'}</button></div>
       ${list.map((inv) => {
         const st = r.invoiceStatus(inv);
         const what = inv.amount ? `${inv.amount} ${inv.ticker}` : inv.ticker ? `Any amount of ${inv.ticker}` : 'Any RGB token';

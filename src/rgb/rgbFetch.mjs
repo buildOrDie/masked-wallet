@@ -6,6 +6,12 @@
 
 export const RGB_MAX_REQUESTS = 3;
 const RETRIES = 4;
+// a request that never answers held one of the 3 places for good: after three of them every RGB step waited
+// forever ("Updating…" that never ends). Each try gets this long, then counts as a busy server.
+export const RGB_REQUEST_TIMEOUT_MS = 30_000;
+let timeoutMs = RGB_REQUEST_TIMEOUT_MS;
+/** For tests. */
+export function rgbSetTimeout(ms) { timeoutMs = ms; }
 let active = 0;
 const queue = [];
 
@@ -38,9 +44,9 @@ export async function rgbFetch(input, init) {
 // ---- the transaction cache (block server GETs about one transaction) ----
 const TX_PATH = /\/tx\/([0-9a-f]{64})(\/(raw|hex|status))?$/i;
 const MAX_CACHED = 5000;
-/** @type {Map<string, { status: number, type: string, body: ArrayBuffer, until: number }>} */
+/** @type {Map<string, { status: number, type: string, body: ArrayBuffer, url: string, until: number }>} */
 const txCache = new Map();
-/** @type {Map<string, Promise<{ status: number, type: string, body: ArrayBuffer, until: number }>>} */
+/** @type {Map<string, Promise<{ status: number, type: string, body: ArrayBuffer, url: string, until: number }>>} */
 const inflight = new Map();
 function cacheKey(input, init) {
   const method = String(init?.method || (typeof Request !== 'undefined' && input instanceof Request ? input.method : 'GET')).toUpperCase();
@@ -61,14 +67,20 @@ async function fetchAndKeep(key, input, init) {
       keepMs = confirmed ? 600_000 : 5_000;
     } else keepMs = 24 * 3600_000; // the transaction itself never changes
   }
-  const entry = { status: r.status, type, body, until: Date.now() + keepMs };
+  const entry = { status: r.status, type, body, url: r.url || key, until: Date.now() + keepMs };
   if (keepMs) {
     if (txCache.size >= MAX_CACHED) txCache.delete(txCache.keys().next().value);
     txCache.set(key, entry);
   }
   return entry;
 }
-const answer = (e) => new Response(e.body.slice(0), { status: e.status, headers: e.type ? { 'content-type': e.type } : {} });
+// The engine (reqwest) reads response.url and stops dead on an empty one ("url parse": an uncaught throw that left
+// the step hanging forever). A Response built here has no url of its own, so it gets the address it answers.
+const answer = (e) => {
+  const r = new Response(e.body.slice(0), { status: e.status, headers: e.type ? { 'content-type': e.type } : {} });
+  Object.defineProperty(r, 'url', { value: e.url, configurable: true });
+  return r;
+};
 /** For tests: forget what was kept. */
 export function rgbCacheClear() { txCache.clear(); inflight.clear(); }
 
@@ -78,8 +90,13 @@ async function send(input, init) {
     for (let i = 0; ; i++) {
       const [url, opts] = await unpack(input, init);
       let r;
-      try { r = await globalThis.fetch(url, opts); } catch (e) {
-        console.warn('[RGB] request failed', /** @type {any} */ (input)?.url || String(input), e?.name, e?.message || e);
+      const limit = AbortSignal.timeout(timeoutMs);
+      const signal = opts?.signal ? /** @type {any} */ (AbortSignal).any([opts.signal, limit]) : limit;
+      try { r = await globalThis.fetch(url, { ...(opts || {}), signal }); } catch (e) {
+        const timedOut = limit.aborted && !opts?.signal?.aborted;
+        console.warn('[RGB] request failed', /** @type {any} */ (input)?.url || String(input), timedOut ? 'no answer in time' : e?.name, e?.message || e);
+        if (timedOut && i < 1) continue; // once more: a server can drop one request
+        if (timedOut) throw new Error('The block server did not answer in time.');
         throw e;
       }
       if ([429, 502, 503, 504].includes(r.status) && i < RETRIES) { await pause(1000 * 2 ** i); continue; }

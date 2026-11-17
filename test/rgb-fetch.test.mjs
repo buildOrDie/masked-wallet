@@ -1,7 +1,7 @@
 // RGB's requests: a few at a time, and polite retries when the block server is busy.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { rgbFetch, rgbInFlight, RGB_MAX_REQUESTS } from '../src/rgb/rgbFetch.mjs';
+import { rgbFetch, rgbInFlight, RGB_MAX_REQUESTS, rgbSetTimeout, RGB_REQUEST_TIMEOUT_MS } from '../src/rgb/rgbFetch.mjs';
 
 test('at most a few RGB requests at once', async () => {
   let peak = 0, now = 0;
@@ -70,4 +70,27 @@ test('transaction lookups are answered from memory: a transaction once, a confir
     await rgbFetch('https://signet-api.example/api/blocks/tip/height'); await rgbFetch('https://signet-api.example/api/blocks/tip/height');
     assert.equal(asked.filter((u) => u.endsWith('/tip/height')).length, 2);
   } finally { globalThis.fetch = was; rgbCacheClear(); }
+});
+
+test('a request that never answers gives up (and frees its place) instead of holding RGB forever', async () => {
+  const real = globalThis.fetch; let calls = 0;
+  globalThis.fetch = (url, opts) => { calls++; return new Promise((_, rej) => opts.signal.addEventListener('abort', () => rej(opts.signal.reason))); };
+  rgbSetTimeout(30);
+  const keep = setTimeout(() => {}, 2000); // AbortSignal.timeout doesn't keep Node's event loop alive
+  try {
+    await assert.rejects(rgbFetch('https://x.test/blocks/tip/height'), /did not answer in time/);
+    assert.equal(calls, 2, 'tried once more');
+    assert.equal(rgbInFlight(), 0);
+  } finally { clearTimeout(keep); globalThis.fetch = real; rgbSetTimeout(RGB_REQUEST_TIMEOUT_MS); }
+});
+
+test('an answer from memory carries its address (the engine stops dead on an empty response.url)', async () => {
+  const real = globalThis.fetch;
+  const u = 'https://x.test/tx/' + 'ab'.repeat(32) + '/hex';
+  globalThis.fetch = async () => new Response('00', { status: 200 });
+  try {
+    const a = await rgbFetch(u), b = await rgbFetch(u);
+    assert.equal(a.url, u); assert.equal(b.url, u);
+    assert.doesNotThrow(() => new URL(b.url));
+  } finally { globalThis.fetch = real; }
 });

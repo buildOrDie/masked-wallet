@@ -699,9 +699,11 @@ export class WalletRgb {
   async run(fn, { quiet = false } = {}) {
     // a tap while RGB is working: say so, instead of doing nothing
     if (this.busy) { if (!quiet) this.app.toast('RGB is still updating. One moment…', 2500); return; }
-    this.busy = true;
-    // show "Updating…" at once (the button is disabled until it's done)
+    this.busy = true; this.busySince = Date.now();
+    // show "Updating…" at once (the button is disabled until it's done), then how long it has been working
     if (!quiet) this.app.render();
+    const tick = setInterval(() => { if (Date.now() - this.busySince >= 10_000) this.app.render(); }, 5000);
+    /** @type {any} */ (tick).unref?.(); // Node (tests): a step left waiting must not keep the process alive
     try {
       await fn();
       // Try to save user changes immediately. Receive keeps invoice sharing locked until a backup succeeds.
@@ -716,7 +718,12 @@ export class WalletRgb {
       this.message = rgbError(error, this.profile);
       if (!this.ready && this.phase === 'opening') this.phase = 'error';
       if (!quiet) this.app.toast(this.message, 6000);
-    } finally { this.busy = false; this.app.render(); }
+    } finally { clearInterval(tick); this.busy = false; this.busySince = 0; this.app.render(); }
+  }
+  /** The refresh link's words: "Updating… 0:45" once it has been working a while. */
+  get busyLabel() {
+    const s = Math.floor((Date.now() - (this.busySince || Date.now())) / 1000);
+    return s < 10 ? 'Updating…' : `Updating… ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   }
 
   /**
