@@ -656,8 +656,11 @@ export class WalletRgb {
 
   /** Run an RGB step: one at a time, errors shown as a message and a toast. */
   async run(fn, { quiet = false } = {}) {
-    if (this.busy) return;
+    // a tap while RGB is working: say so, instead of doing nothing
+    if (this.busy) { if (!quiet) this.app.toast('RGB is still updating. One moment…', 2500); return; }
     this.busy = true;
+    // show "Updating…" at once (the button is disabled until it's done)
+    if (!quiet) this.app.render();
     try {
       await fn();
       // Try to save user changes immediately. Receive keeps invoice sharing locked until a backup succeeds.
@@ -821,7 +824,8 @@ export class WalletRgb {
           this.service.password = key; // backups from now on use the wallet key too
         });
       }
-      case 'refresh': return this.run(() => this.refresh(true));
+      // a tap: a quick sync (a full rescan only when it's due), then say it's done
+      case 'refresh': return this.run(async () => { await this.refresh(); app.toast('RGB balances updated', 2000); });
       case 'withdraw': this.withdraw = { open: true }; this.message = ''; return app.render();
       case 'withdrawClose': this.withdraw = null; this.message = ''; return app.render();
       case 'withdrawGo': {
