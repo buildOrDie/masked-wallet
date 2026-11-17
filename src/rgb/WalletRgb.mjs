@@ -613,6 +613,8 @@ export class WalletRgb {
     try { changes = await this.service.instantProgress(); } catch { return; }
     // several listings signed at once (lots): one message for them all
     const readyN = changes.filter((c) => c.stage === 'ready').length;
+    const expiredN = changes.filter((c) => c.expired).length;
+    if (expiredN) this.app.toast(`${expiredN} lot${expiredN === 1 ? '' : 's'} that waited too long for ${expiredN === 1 ? 'its' : 'their'} tokens ${expiredN === 1 ? 'was' : 'were'} not listed. Nothing moved; list again if you still want to sell.`, 6000);
     let live = 0, refused = 0, unsent = 0;
     for (const c of changes) {
       if (c.stage === 'sold') this.app.toast(this.service.instantStore().get(c.offerId)?.payoutPublic ? 'Instant listing sold. The bitcoin is in your Public balance once the transaction confirms.' : 'Instant listing sold. The bitcoin is in your RGB wallet once the transaction confirms.');
@@ -627,7 +629,7 @@ export class WalletRgb {
             : ok ? 'Instant listing is live: buyers can buy it now, even with MASKED closed.' : 'Instant listing signed. Open the market and tap Finish listing on it.');
         }
       }
-      if (c.stage === 'cancelled') this.app.toast('Listing cancelled. Your tokens moved to a new output.');
+      if (c.stage === 'cancelled' && !c.expired) this.app.toast('Listing cancelled. Your tokens moved to a new output.');
       if (c.stage === 'purchase-failed') this.app.toast(`An Instant purchase didn't go through, and nothing was paid: ${c.why}`);
       if (c.stage === 'outdated') this.app.toast('An Instant listing was signed by an older MASKED and can\'t sell. Cancel it on the market, then list again.');
     }

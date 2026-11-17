@@ -635,7 +635,7 @@ test('seller: the previous lot\'s own move (waiting for its block) isn\'t "behin
   const s = wallet({ name: 'seller', lib: fakeLib(), chain, rgb: [unspent('b', 0, [tok(500)]), unspent('c', 2, [tok(250)])] });
   s.w.w.refresh = async () => ({});
   s.store.set('lot1', { role: 'seller', assetId: ASSET, amount: '250', priceSats: '5000', stage: 'moving', lotGroup: 'g1', lotNo: 0, lots: 2, at: 1, moveTxid: T('m'), coin: `${T('m')}:1` });
-  s.store.set('lot2', { role: 'seller', assetId: ASSET, amount: '250', priceSats: '5000', stage: 'queued', lotGroup: 'g1', lotNo: 1, lots: 2, at: 1 });
+  s.store.set('lot2', { role: 'seller', assetId: ASSET, amount: '250', priceSats: '5000', stage: 'queued', lotGroup: 'g1', lotNo: 1, lots: 2, at: Date.now() });
   chain.spends[`${T('b')}:0`] = { spent: true, txid: T('m') }; // spent by this wallet's own lot move
   assert.deepEqual(await s.w.lotsAdvance(s.store, 'g1', 2), []);
   assert.equal(s.mem.lot2.stage, 'moving', 'not stopped as "behind the chain"');
@@ -649,7 +649,7 @@ test('seller: a lot never moves while the wallet is behind the chain; it waits a
   const chain = fakeChain();
   const s = wallet({ name: 'seller', lib: fakeLib(), chain, rgb: [unspent('b', 0, [tok(1000)])] });
   s.w.w.refresh = async () => ({});
-  s.store.set('lot1', { role: 'seller', assetId: ASSET, amount: '500', priceSats: '5000', stage: 'queued', lotGroup: 'g1', lotNo: 0, lots: 2, at: 1 });
+  s.store.set('lot1', { role: 'seller', assetId: ASSET, amount: '500', priceSats: '5000', stage: 'queued', lotGroup: 'g1', lotNo: 0, lots: 2, at: Date.now() });
   chain.spends[`${T('b')}:0`] = { spent: true, txid: T('e') };
   assert.deepEqual(await s.w.lotsAdvance(s.store, 'g1', 2), []);
   assert.equal(s.mem.lot1.stage, 'queued');
@@ -922,4 +922,18 @@ test('free spare outputs gives up the invoices no transaction pays first', async
   const r = await s.w.freeSpare({});
   assert.deepEqual(failed, [12, 13], 'only the unpaid ones');
   assert.deepEqual(r, { txid: '', freed: 0, sats: 0, cancelled: 2 });
+});
+
+test('a lot queued for hours is given up, never moved with tokens that arrive later', async () => {
+  const { LOT_QUEUE_MAX_MS } = await import('../src/rgb/LiteWallet.mjs');
+  const s = wallet({ name: 'stale', lib: fakeLib(), chain: fakeChain() });
+  const old = Date.now() - LOT_QUEUE_MAX_MS - 60_000;
+  s.store.set('lotA', { role: 'seller', assetId: ASSET, amount: '250', priceSats: '5000', stage: 'queued', lotGroup: 'g', lotNo: 1, lots: 4, at: old });
+  let advanced = 0;
+  s.w.instantMove = async () => { advanced++; return { txid: T('7') }; };
+  const changes = await s.w.instantProgress(s.store, s.store.all());
+  assert.equal(advanced, 0, 'not moved');
+  assert.equal(s.store.get('lotA').stage, 'cancelled');
+  assert.equal(s.store.get('lotA').expired, true);
+  assert.deepEqual(changes, [{ offerId: 'lotA', stage: 'cancelled', expired: true }]);
 });

@@ -52,6 +52,9 @@ const hostOf = (u) => { try { return new URL(String(u)).host; } catch { return '
 
 const OLD_CONSIGNMENT = /ConsignmentVe|unsupported value `0`/i;
 
+/** How long a lot may wait in the queue for its tokens before it's given up (never moved later). */
+export const LOT_QUEUE_MAX_MS = 6 * 3600_000;
+
 export class LiteWallet {
   /**
    * @param {object} lib  the loaded rgb-lib-wasm module ({ WasmWallet, WasmInvoice, restoreKeys })
@@ -1378,7 +1381,7 @@ export class LiteWallet {
    * change needs its block before the next move can use it. Returns the txids moved now.
    */
   async lotsAdvance(store, group, feeRate, onStep = (_t) => {}) {
-    const queued = Object.entries(store.all()).filter(([, e]) => e?.role === 'seller' && e.lotGroup === group && e.stage === 'queued').sort((a, b) => a[1].lotNo - b[1].lotNo);
+    const queued = Object.entries(store.all()).filter(([, e]) => e?.role === 'seller' && e.lotGroup === group && e.stage === 'queued' && !(Date.now() - Number(e.at) > LOT_QUEUE_MAX_MS)).sort((a, b) => a[1].lotNo - b[1].lotNo);
     if (!queued.length) return [];
     const [id, e] = queued[0];
     // never move a lot while this wallet is behind the chain (another copy spent outputs it still counts)
@@ -1515,6 +1518,16 @@ export class LiteWallet {
     const changes = [];
     this.syncOwnUnconfirmed(store);
     // lots split step by step: move the next lot of each group whose tokens are free
+    // A lot still queued hours after it was made is given up, never moved later: it would take whatever tokens arrive
+    // next (a claim, a purchase) and put them on sale without asking. Seen on Signet: a 250 MASKED lot queued two days
+    // went on sale from a claim that had just arrived.
+    for (const [id, e] of Object.entries(all)) {
+      if (e?.role === 'seller' && e.stage === 'queued' && Number(e.at) > 0 && Date.now() - Number(e.at) > LOT_QUEUE_MAX_MS) {
+        store.set(id, { ...e, stage: 'cancelled', expired: true, waiting: 'Not listed: it waited too long for its tokens. List again if you still want to sell.', at: Date.now() });
+        changes.push({ offerId: id, stage: 'cancelled', expired: true });
+      }
+    }
+    all = store.all();
     const groups = new Set(Object.values(all).filter((e) => e?.role === 'seller' && e.stage === 'queued' && e.lotGroup).map((e) => e.lotGroup));
     for (const g of groups) {
       const rate = Object.values(all).find((e) => e?.lotGroup === g)?.feeRate || this.lotsFeeRate || 1;
