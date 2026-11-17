@@ -1126,7 +1126,7 @@ index a3a9f46..bf0a61a 100644
      }
  
 diff --git a/src/wallet/online.rs b/src/wallet/online.rs
-index ca96b4a..82ff828 100644
+index ca96b4a..9bdc625 100644
 --- a/src/wallet/online.rs
 +++ b/src/wallet/online.rs
 @@ -791,8 +791,9 @@ pub(crate) struct ConsignmentPayment<'c> {
@@ -1306,7 +1306,7 @@ index ca96b4a..82ff828 100644
              let recipient_id = &recipient.recipient_id;
              let recipient_vk = verifying_key_from_bytes(&recipient.public_key)?;
              let derived = derive_shared(sender_sk, &recipient_vk)?;
-@@ -7590,6 +7648,155 @@ impl Wallet {
+@@ -7590,6 +7648,171 @@ impl Wallet {
          Ok(tx.compute_txid().to_string())
      }
  
@@ -1320,6 +1320,22 @@ index ca96b4a..82ff828 100644
 +            .filter(|(_, _, why)| why.is_empty())
 +            .map(|(_, op, _)| op)
 +            .collect())
++    }
++
++    /// The transaction can't have put tokens anywhere: every input is this wallet's and it has no OP_RETURN (this
++    /// engine commits RGB transfers only with OP_RETURN, `OpretFirst`). An output of it waiting for a witness transfer
++    /// then holds nothing, whatever the invoice it pays still expects. Unknown transactions: false.
++    fn _carries_no_rgb(&self, txid: &bdk_wallet::bitcoin::Txid) -> bool {
++        let graph = self.bdk_wallet.tx_graph();
++        let Some(tx) = graph.get_tx(*txid) else { return false };
++        if tx.output.iter().any(|o| o.script_pubkey.is_op_return()) {
++            return false;
++        }
++        tx.input.iter().all(|i| {
++            graph
++                .get_txout(i.previous_output)
++                .is_some_and(|o| self.bdk_wallet.is_mine(o.script_pubkey.clone()))
++        })
 +    }
 +
 +    /// This wallet's outputs with no live allocation (a failed transfer's allocation doesn't count), smallest first,
@@ -1348,7 +1364,7 @@ index ca96b4a..82ff828 100644
 +                let known = bdk.get(&bdk_op).copied();
 +                let why = if !u.utxo.exists || known.is_none() {
 +                    "not broadcast"
-+                } else if u.utxo.pending_witness {
++                } else if u.utxo.pending_witness && !self._carries_no_rgb(&bdk_op.txid) {
 +                    "pending witness"
 +                } else if u.pending_blinded > 0 {
 +                    "blinded receive"
@@ -1462,7 +1478,7 @@ index ca96b4a..82ff828 100644
      /// Prepare the PSBT to inflate an IFA asset.
      pub async fn inflate_begin(
          &mut self,
-@@ -12074,3 +12281,746 @@ mod bfa_tests {
+@@ -12074,3 +12297,780 @@ mod bfa_tests {
          assert!(options(&format!(r#","evm_chains":{{"mainnet":{chain}}}"#)).is_err());
      }
  }
@@ -2166,6 +2182,40 @@ index ca96b4a..82ff828 100644
 +        let why: HashMap<String, &str> = w.empty_utxos().unwrap().into_iter().map(|(_, o, y)| (o.to_string(), y)).collect();
 +        assert_eq!(why[&format!("{txid}:3")], "listing");
 +        assert_eq!(why[&format!("{txid}:4")], "pending witness");
++        // a transaction of this wallet only, with no OP_RETURN: its output waiting for a witness transfer holds nothing
++        let own = BdkTransaction {
++            version: Version::TWO,
++            lock_time: LockTime::ZERO,
++            input: vec![TxIn { previous_output: bdk_wallet::bitcoin::OutPoint { txid: fund.compute_txid(), vout: 4 }, script_sig: ScriptBuf::new(), sequence: Sequence::ENABLE_RBF_NO_LOCKTIME, witness: Witness::new() }],
++            output: vec![TxOut { value: Amount::from_sat(330), script_pubkey: scripts[3].clone() }],
++        };
++        let tip2 = w.bdk_wallet.latest_checkpoint().block_id();
++        let block2 = Block {
++            header: Header { version: BlockVersion::TWO, prev_blockhash: tip2.hash, merkle_root: TxMerkleNode::all_zeros(), time: 1, bits: CompactTarget::from_consensus(0), nonce: 0 },
++            txdata: vec![own.clone()],
++        };
++        w.bdk_wallet.apply_block_connected_to(&block2, tip2.height + 1, tip2).unwrap();
++        let own_txid = own.compute_txid().to_string();
++        let pw2 = seed_txo(&w, &own_txid, 0);
++        w.database.update_txo(DbTxoActMod { idx: ActiveValue::Set(pw2), pending_witness: ActiveValue::Set(true), ..Default::default() }).unwrap();
++        let why: HashMap<String, &str> = w.empty_utxos().unwrap().into_iter().map(|(_, o, y)| (o.to_string(), y)).collect();
++        assert_eq!(why[&format!("{own_txid}:0")], "", "no RGB could have moved in it: spare");
++        assert!(w.spare_utxos().unwrap().iter().any(|o| o.to_string() == format!("{own_txid}:0")));
++        // the same with an OP_RETURN: it may carry a transfer, kept
++        let mut com = own.clone();
++        com.input[0].previous_output.vout = 2;
++        com.output.insert(0, TxOut { value: Amount::from_sat(0), script_pubkey: ScriptBuf::new_op_return([7u8; 32]) });
++        let tip3 = w.bdk_wallet.latest_checkpoint().block_id();
++        let block3 = Block {
++            header: Header { version: BlockVersion::TWO, prev_blockhash: tip3.hash, merkle_root: TxMerkleNode::all_zeros(), time: 2, bits: CompactTarget::from_consensus(0), nonce: 0 },
++            txdata: vec![com.clone()],
++        };
++        w.bdk_wallet.apply_block_connected_to(&block3, tip3.height + 1, tip3).unwrap();
++        let com_txid = com.compute_txid().to_string();
++        let pw3 = seed_txo(&w, &com_txid, 1);
++        w.database.update_txo(DbTxoActMod { idx: ActiveValue::Set(pw3), pending_witness: ActiveValue::Set(true), ..Default::default() }).unwrap();
++        let why: HashMap<String, &str> = w.empty_utxos().unwrap().into_iter().map(|(_, o, y)| (o.to_string(), y)).collect();
++        assert_eq!(why[&format!("{com_txid}:1")], "pending witness");
 +        assert_eq!(why[&format!("{}:1", later.compute_txid())], "unconfirmed");
 +    }
 +
