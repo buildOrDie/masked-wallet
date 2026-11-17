@@ -11,8 +11,8 @@ import { toBase, fromBase } from '../rgb/config.mjs';
 import { rgbFundParts, proxyUrl, rgbError, RGB_CONFLICT_MSG } from '../rgb/WalletRgb.mjs';
 
 /** Methods whose approve button waits for a prepared transaction. */
-export const NEEDS_PREP = ['sendBitcoin', 'inscribeTransfer', 'shareTrade', 'fundTrade', 'moveToTrade', 'returnToShielded', 'cancelShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbInvoice', 'rgbPay', 'rgbSwapAvailable', 'rgbListAssets', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantListLots', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel'];
-const SWAP_METHODS = ['rgbSwapAvailable', 'rgbListAssets', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantListLots', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel'];
+export const NEEDS_PREP = ['sendBitcoin', 'inscribeTransfer', 'shareTrade', 'fundTrade', 'moveToTrade', 'returnToShielded', 'cancelShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbInvoice', 'rgbPay', 'rgbSwapAvailable', 'rgbListAssets', 'rgbOutputs', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantListLots', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel'];
+const SWAP_METHODS = ['rgbSwapAvailable', 'rgbListAssets', 'rgbOutputs', 'rgbOutputs', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantListLots', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel'];
 const RGB_METHODS = ['rgbInvoice', 'rgbPay', ...SWAP_METHODS];
 const SWAP_SIZE_VB = 320;
 /** Steps that move this wallet's tokens: stopped while another copy of this wallet saved newer RGB data. */
@@ -217,6 +217,7 @@ export class ApprovalController {
   prepareSwap(a, once) {
     const r = this.app.rgb, P = a.params || {}, m = a.method;
     once(async () => {
+      if (m === 'rgbOutputs') return { list: r.assets().map((x) => ({ ticker: x.ticker, assetId: x.assetId })) };
       if (m === 'rgbListAssets') return { list: r.assets().map((x) => ({ ticker: x.ticker, assetId: x.assetId })) };
       if (!r.service?.canSwap) throw new Error('This MASKED version can\'t swap RGB tokens yet. Update MASKED.');
       if (MOVES_TOKENS.includes(m)) { if (r.requireLatest) await r.requireLatest(); else if (r.cloud?.conflict) throw new Error(RGB_CONFLICT_MSG); }
@@ -491,6 +492,7 @@ export class ApprovalController {
         if (status === 'failed') throw new Error('The other side refused the transfer. Nothing was sent.');
         return { txid: String(res?.txid || ''), batchTransferIdx: res?.batchTransferIdx ?? null, amount: String(amount), status };
       });
+      case 'rgbOutputs': return this.rgbBusy(async () => { prepared(''); return app.rgb.service.outputsReport(); });
       case 'rgbListAssets': return this.rgbBusy(async () => { prepared(''); return app.rgb.service.assetList(); });
       case 'rgbSwapAvailable': return this.rgbBusy(async () => { prepared(''); return app.rgb.service.offerableAmount({ assetId: a.params.assetId }); });
       case 'rgbBuyPrepare': return this.rgbBusy(async () => {

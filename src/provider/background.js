@@ -5,7 +5,7 @@
 import { NETS, chainInfo, err, makeHandler, tradeView } from '../dapp/requests.mjs';
 import { RGB_PENDING, rgbWindowBounds } from '../app/Platform.mjs';
 
-const _APPROVAL = new Set(['requestAccounts', 'signMessage', 'signPsbt', 'signPsbts', 'sendBitcoin', 'switchNetwork', 'switchChain', 'inscribeTransfer', 'getTradeAccount', 'fundTradeAccount', 'moveToTradeAccount', 'returnToShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbRequestInvoice', 'rgbPayInvoice', 'rgbSwapAvailable', 'rgbListAssets', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantListLots', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel']);
+const _APPROVAL = new Set(['requestAccounts', 'signMessage', 'signPsbt', 'signPsbts', 'sendBitcoin', 'switchNetwork', 'switchChain', 'inscribeTransfer', 'getTradeAccount', 'fundTradeAccount', 'moveToTradeAccount', 'returnToShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbRequestInvoice', 'rgbPayInvoice', 'rgbSwapAvailable', 'rgbListAssets', 'rgbOutputs', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantListLots', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel']);
 
 const pending = new Map(); // id -> { origin, method, params, resolve, reject, windowId }
 const ports = new Set();   // { port, origin }

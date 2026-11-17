@@ -88,6 +88,8 @@
       // peer-to-peer swaps: tokens for BTC in one transaction, wallet to wallet (docs/PROVIDER.md)
       /** The RGB tokens this wallet holds (asks the person first): [{ assetId, ticker, name, precision, spendable, max }] */
       getAssets: () => request('rgbListAssets'),
+      /** What's in the RGB wallet (asks the person first): { coins, rgb, tokens, activity } (docs/PROVIDER.md) */
+      getOutputs: () => request('rgbOutputs'),
       /** { assetId } → { total, max } in base units */
       offerableAmount: (o = {}) => request('rgbSwapAvailable', o),
       /** buyer: { offerId, network, offer, feeRate? } → session for the seller */

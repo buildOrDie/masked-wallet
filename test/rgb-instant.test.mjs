@@ -815,4 +815,5 @@ test('what\'s in this RGB wallet: every output with its tokens and what it is do
   assert.equal(r.rgb[0].listing.priceSats, '5000');
   assert.deepEqual(r.coins.map((c) => [c.sats, c.confirmed]), [[50000, true], [7000, false]]);
   assert.equal(r.tokens[0].ticker, 'MASKED');
+  assert.ok(r.activity.some((a) => a.type === 'listing' && a.offerId === 'o1' && a.stage === 'ready'), 'the listing shows in the activity');
 });

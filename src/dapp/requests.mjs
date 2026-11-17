@@ -283,6 +283,9 @@ export function makeHandler({ getPublic, getTrade, getSites, setSites, openAppro
       case 'rgbListAssets':
         needConnected();
         return openApproval(origin, 'rgbListAssets', {});
+      case 'rgbOutputs':
+        needConnected();
+        return openApproval(origin, 'rgbOutputs', {});
       case 'rgbSwapAvailable':
         needConnected();
         return openApproval(origin, 'rgbSwapAvailable', { assetId: optAssetId(params.assetId) || (() => { throw err(4000, 'assetId is required.'); })() });

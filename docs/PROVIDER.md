@@ -207,6 +207,15 @@ uses it for "pick a token" instead of asking for the asset ID. `instant` *(2.28.
 first) that sit alone on one output: an Instant listing of exactly one of them is live at once, any other amount
 first moves the tokens (one transaction, live after a block).
 
+
+### `rgb.getOutputs(): Promise<{ at, tokens, rgb, coins, activity }>` 🔐 *(2.29.25+)*
+
+What's in the RGB wallet, so a site can show what is locked and why (MASKED asks the person first; nothing moves):
+
+- `tokens`: `[{ assetId, ticker, precision, free, listed, waiting, other }]`: where each token's balance is, in base units (free to list or send, in Instant listings, waiting for a block, on outputs MASKED can't use).
+- `rgb`: `[{ outpoint, sats, tokens: [{ assetId, ticker, precision, amount, settled }], state, listing }]`, one per RGB output. `state`: `on sale` (a signed Instant listing), `going live` (moved for a listing, being signed), `cancelling`, `promised` (kept for a listing this copy has no record of), `free`, `waiting` (not confirmed yet), `unusable`, `empty` (a spare output that can receive tokens). `listing`: `{ offerId, stage, priceSats }` for the first three.
+- `coins`: `[{ outpoint, sats, confirmed, justSpent }]`: the plain bitcoin coins of the RGB balance (each buy or move spends one).
+- `activity`: the newest 40 of: token transfers `{ type: 'transfer', assetId, ticker, kind, status, amount, txid, at }` and Instant listings/purchases `{ type: 'listing', offerId, role, stage, assetId, amount, priceSats, txid, at }`.
 ### Peer-to-peer swaps: `rgb.offerableAmount`, `prepareBuy`, `prepareSale`, `signBuy`, `completeSale` 🔐
 RGB tokens for BTC in one Bitcoin transaction, wallet to wallet: nobody holds anything in between. The site only passes
 the messages from one wallet to the other. The transaction layout and message fields below are the whole format: any

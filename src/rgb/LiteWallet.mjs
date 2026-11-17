@@ -590,7 +590,25 @@ export class LiteWallet {
     coins.sort((a, b) => b.sats - a.sats);
     // per token: where its balance is
     const byToken = [...meta].map(([assetId, m]) => ({ assetId, ...m, ...heldBreakdown(all, assetId, this.reserved) })).filter((t) => [t.free, t.listed, t.waiting, t.other].some((v) => BigInt(v) > 0n));
-    return { at: Date.now(), coins, rgb, tokens: byToken };
+    // recent activity: token transfers (sends, receives, moves) and Instant listings (sold, bought, cancelled)
+    const activity = [];
+    for (const [assetId, m] of meta) {
+      let list = [];
+      try { list = plain(this.engineTransfers(assetId)) || []; } catch { list = []; }
+      for (const t of list) {
+        const amount = (t.assignments || []).reduce((n, x) => n + BigInt(x?.Fungible ?? 0), 0n);
+        activity.push({ type: 'transfer', assetId, ticker: m.ticker, precision: m.precision, kind: String(t.kind || ''), status: String(t.status || ''), amount: String(amount), txid: t.txid ? String(t.txid) : '', at: Number(t.createdAt || 0) * (Number(t.createdAt) < 1e12 ? 1000 : 1) });
+      }
+    }
+    try {
+      for (const [id, e] of Object.entries(store?.all?.() || {})) {
+        if (!e || !['seller', 'buyer'].includes(e.role)) continue;
+        const m = meta.get(e.assetId) || { ticker: '', precision: 0 };
+        activity.push({ type: 'listing', offerId: id, role: e.role, stage: String(e.stage || ''), assetId: e.assetId || '', ticker: m.ticker || '', precision: m.precision ?? 0, amount: String(e.amount || '0'), priceSats: String(e.priceSats || ''), coin: e.coin || '', txid: String(e.soldTxid || e.cancelTxid || e.txid || e.moveTxid || ''), at: Number(e.at || 0) });
+      }
+    } catch { /* none */ }
+    activity.sort((a, b) => b.at - a.at);
+    return { at: Date.now(), coins, rgb, tokens: byToken, activity: activity.slice(0, 40) };
   }
 
   /** This wallet's plain bitcoin coins: confirmed, and all (with its own unconfirmed change). */
