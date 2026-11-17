@@ -118,7 +118,11 @@ export class LiteWallet {
    * the ones invoices wait on and the unconfirmed transactions, instead of every address ever used (hundreds of
    * requests, too many for mempool.space on mainnet). A full sync still runs at most every 30 minutes, and on a rescan.
    */
-  lightSync() { try { if (typeof this.wallet?.setLightSync === 'function') this.wallet.setLightSync(LiteWallet.LIGHT_SYNC_RECENT); } catch { /* full syncs as before */ } }
+  lightSync() {
+    let last;
+    try { last = Number(globalThis.localStorage?.getItem(this.lastFullKey)) || undefined; } catch { last = undefined; }
+    try { if (typeof this.wallet?.setLightSync === 'function') this.wallet.setLightSync(LiteWallet.LIGHT_SYNC_RECENT, last); } catch { /* full syncs as before */ }
+  }
   static LIGHT_SYNC_RECENT = 20;
   isOnline() { return !!this.online; }
   /**
@@ -167,7 +171,12 @@ export class LiteWallet {
     await this.goOnline(undefined, was);
     return this.indexer !== was;
   }
-  async save() { await this.wallet.flush(); }
+  async save() { await this.wallet.flush(); this.keepLastFull(); }
+  /** Where this browser keeps when the engine last ran a full sync (each MASKED window opens the wallet anew). */
+  get lastFullKey() { return `masked.rgb.last-full.${this.params?.dataDir || ''}`; }
+  keepLastFull() {
+    try { if (typeof this.wallet?.lastFullSync === 'function') { const t = Number(this.wallet.lastFullSync()); if (t > 0) globalThis.localStorage?.setItem(this.lastFullKey, String(t)); } } catch { /* a full sync next time */ }
+  }
   async dispose() {
     const w = this.w;
     this.w = null; this.online = null; this.lastBackupBytes = null;

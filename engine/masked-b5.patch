@@ -11,10 +11,10 @@ index 884d686..e2896b5 100644
  rgb-strict-encoding = { version = "=1.0.5", default-features = false, features = [
      "bitcoin",
 diff --git a/bindings/wasm/src/lib.rs b/bindings/wasm/src/lib.rs
-index 51b6efd..bd6b78a 100644
+index 51b6efd..c070753 100644
 --- a/bindings/wasm/src/lib.rs
 +++ b/bindings/wasm/src/lib.rs
-@@ -635,6 +635,203 @@ impl WasmWallet {
+@@ -635,6 +635,210 @@ impl WasmWallet {
          to_js(&result)
      }
  
@@ -120,9 +120,16 @@ index 51b6efd..bd6b78a 100644
 +    /// Light syncs: only the last `recent` addresses of each side, the ones invoices wait on, and this wallet's
 +    /// unconfirmed transactions (a few dozen requests instead of one per address ever used); a full sync still runs
 +    /// at most every 30 minutes, and on a full scan. `null`: every sync full.
++    /// `lastFull`: when the last full sync ran (unix seconds, from `lastFullSync`), kept by the caller across sessions.
 +    #[wasm_bindgen(js_name = "setLightSync")]
-+    pub fn set_light_sync(&self, recent: Option<u32>) {
-+        self.inner.borrow_mut().set_light_sync(recent);
++    pub fn set_light_sync(&self, recent: Option<u32>, last_full: Option<f64>) {
++        self.inner.borrow_mut().set_light_sync(recent, last_full.map(|t| t as u64));
++    }
++
++    /// When the last full sync ran (unix seconds).
++    #[wasm_bindgen(js_name = "lastFullSync")]
++    pub fn last_full_sync(&self) -> f64 {
++        self.inner.borrow().last_full_sync() as f64
 +    }
 +
 +    /// Learn the outputs of this wallet's own transactions just broadcast, with no request to the block server.
@@ -218,7 +225,7 @@ index 51b6efd..bd6b78a 100644
      /// Send RGB assets (end): broadcast a signed PSBT. Returns an OperationResult JS object.
      #[wasm_bindgen(js_name = "sendEnd")]
      pub async fn send_end(
-@@ -763,6 +960,56 @@ impl WasmWallet {
+@@ -763,6 +967,56 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -275,7 +282,7 @@ index 51b6efd..bd6b78a 100644
      /// Drain all wallet funds (end): broadcast a signed PSBT. Returns the txid string.
      #[wasm_bindgen(js_name = "drainToEnd")]
      pub async fn drain_to_end(
-@@ -1074,6 +1321,22 @@ impl WasmWallet {
+@@ -1074,6 +1328,22 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -298,7 +305,7 @@ index 51b6efd..bd6b78a 100644
      /// Check if the wallet needs a backup. Returns true if modified since last backup.
      #[wasm_bindgen(js_name = "backupInfo")]
      pub fn backup_info(&self) -> Result<bool, JsValue> {
-@@ -1217,7 +1480,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
+@@ -1217,7 +1487,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
  /// Works before the witness transaction is broadcast. Takes the raw consignment
  /// bytes (strict-encoded, not base64), the witness transaction ID, and the Bitcoin network.
  ///
@@ -308,7 +315,7 @@ index 51b6efd..bd6b78a 100644
  #[wasm_bindgen(js_name = "validateConsignmentOffchain")]
  pub fn validate_consignment_offchain(
      consignment_bytes: &[u8],
-@@ -1235,3 +1499,43 @@ pub fn validate_consignment_offchain(
+@@ -1235,3 +1506,43 @@ pub fn validate_consignment_offchain(
      .map_err(|e| JsValue::from_str(&e.to_string()))?;
      to_js(&result)
  }
@@ -1161,7 +1168,7 @@ index a3a9f46..8a151f9 100644
      }
  
 diff --git a/src/wallet/online.rs b/src/wallet/online.rs
-index ca96b4a..22e17f7 100644
+index ca96b4a..ccc534d 100644
 --- a/src/wallet/online.rs
 +++ b/src/wallet/online.rs
 @@ -4,6 +4,9 @@
@@ -1327,18 +1334,28 @@ index ca96b4a..22e17f7 100644
          let pending_witness_scripts = self._reconcile_pending_witness()?;
  
          let db_txos = self.database.iter_txos()?;
-@@ -2730,10 +2793,62 @@ impl Wallet {
+@@ -2730,10 +2793,72 @@ impl Wallet {
              }
              self.database.set_txo(new_db_utxo.clone())?;
          }
 +        Ok(())
 +    }
- 
--        debug!(self.logger, "Synced TXOs");
++
 +    /// MASKED: syncs become light (see `_light_sync_request`), with a full one at most every 30 minutes and whenever
 +    /// a full scan is asked for. `None`: every sync is full, as rgb-lib does.
-+    pub fn set_light_sync(&mut self, recent: Option<u32>) {
++    pub fn set_light_sync(&mut self, recent: Option<u32>, last_full: Option<u64>) {
 +        self.light_recent = recent;
++        // the caller keeps when the last full sync ran across sessions (each window opens the wallet anew): a wallet
++        // opened again soon after doesn't start with a full one
++        if let Some(t) = last_full {
++            self.last_full_sync = self.last_full_sync.max(t);
++        }
++    }
+ 
+-        debug!(self.logger, "Synced TXOs");
++    /// MASKED: when the last full sync ran (unix seconds), for the caller to keep.
++    pub fn last_full_sync(&self) -> u64 {
++        self.last_full_sync
 +    }
  
 -        Ok(())
@@ -1392,7 +1409,7 @@ index ca96b4a..22e17f7 100644
      }
  
      /// Sync and save the state, also when the sync fails part way.
-@@ -2815,11 +2930,11 @@ impl Wallet {
+@@ -2815,11 +2940,11 @@ impl Wallet {
              if internal_unspents_outpoints.contains(&(txid.clone(), vout)) {
                  continue;
              }
@@ -1409,7 +1426,7 @@ index ca96b4a..22e17f7 100644
              db_txo.spent = ActiveValue::Set(true);
              self.database.update_txo(db_txo)?;
          }
-@@ -4723,6 +4838,22 @@ impl Wallet {
+@@ -4723,6 +4848,22 @@ impl Wallet {
                  &data.consignment_hash,
              ) {
                  Ok(bytes) => {
@@ -1432,7 +1449,7 @@ index ca96b4a..22e17f7 100644
                      self.received_consignments
                          .insert(recipient_id.clone(), bytes);
                  }
-@@ -4871,7 +5002,14 @@ impl Wallet {
+@@ -4871,7 +5012,14 @@ impl Wallet {
                  .await;
          };
          let blinding = derive_shared(&ed25519_from_seed(&seed), &sender_vk)?.seal_blinding;
@@ -1448,7 +1465,7 @@ index ca96b4a..22e17f7 100644
          let spent = Self::known_spent_opouts(&consignment);
          let mut payments: Vec<_> = self.find_payments(&consignment, &matcher, &spent).collect();
          if payments.len() != 1 {
-@@ -5805,6 +5943,8 @@ impl Wallet {
+@@ -5805,6 +5953,8 @@ impl Wallet {
                      details: s!("consignment not found in memory"),
                  })?
                  .clone();
@@ -1457,7 +1474,7 @@ index ca96b4a..22e17f7 100644
              let consignment =
                  RgbTransfer::load(&consignment_bytes[..]).map_err(InternalError::from)?;
  
-@@ -7053,6 +7193,10 @@ impl Wallet {
+@@ -7053,6 +7203,10 @@ impl Wallet {
          batch: bool,
      ) -> Result<(), Error> {
          for recipient in recipients {
@@ -1468,7 +1485,7 @@ index ca96b4a..22e17f7 100644
              let recipient_id = &recipient.recipient_id;
              let recipient_vk = verifying_key_from_bytes(&recipient.public_key)?;
              let derived = derive_shared(sender_sk, &recipient_vk)?;
-@@ -7590,6 +7734,246 @@ impl Wallet {
+@@ -7590,6 +7744,246 @@ impl Wallet {
          Ok(tx.compute_txid().to_string())
      }
  
@@ -1715,7 +1732,7 @@ index ca96b4a..22e17f7 100644
      /// Prepare the PSBT to inflate an IFA asset.
      pub async fn inflate_begin(
          &mut self,
-@@ -12074,3 +12458,857 @@ mod bfa_tests {
+@@ -12074,3 +12468,857 @@ mod bfa_tests {
          assert!(options(&format!(r#","evm_chains":{{"mainnet":{chain}}}"#)).is_err());
      }
  }
