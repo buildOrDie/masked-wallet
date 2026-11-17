@@ -35,6 +35,12 @@ export function rgbError(error, profile = profileOf('utexo')) {
   if (/did not answer in time|timed? ?out|\b429\b|too many requests|status: 50[234]\b|bad gateway|service unavailable|gateway time/i.test(full)) return `The ${profile.label} block server is busy or down right now.`;
   if (/invalid indexer/i.test(full) && (profile.id === 'mainnet' || profile.id === 'public')) return `RGB couldn't reach a block server (mempool.space or blockstream.info). If you use an ad blocker, VPN or firewall, allow these sites, or set your own server in Settings → Blockchain server. Then try again.`;
   if (/invalid indexer|failed to fetch|network ?error|internet|ECONN|proxy/i.test(full)) return `Can't reach the ${profile.label} RGB servers right now. Check your connection and try again. (${text})`;
+  // something of this wallet is still waiting for its block (a move, a sale, a purchase): one clear answer instead of
+  // the engine's words, which differ by step ("none of its inputs…", "isn't a settled RGB output", UnsafeHistory…)
+  if (/none of its inputs is an RGB output|isn't a settled RGB output|that output can't be listed|OWN_MOVE_PENDING/i.test(full)) {
+    return `Your tokens are still settling from your last move, sale or purchase. Wait for its block (about 10 minutes), then try again. Nothing was sent. (${text})`;
+  }
+  if (/unsafe ?history/i.test(full)) return `The tokens' last transfer isn't confirmed yet. Try again after its block (about 10 minutes). Nothing was sent.`;
   if (/no valid transport endpoints|invalid transport endpoint/i.test(full)) return 'Could not use the transfer server named in this invoice: it is unreachable, or it speaks the old protocol (0.2). Allow MASKED to reach it when asked, or ask for a new invoice from an up-to-date wallet.';
   // the Bitcoin node refused the transaction: say why, in full (the reason is at the end of a long message)
   if (/sendrawtransaction|failed ?broadcast/i.test(full)) {
