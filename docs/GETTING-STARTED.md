@@ -53,5 +53,5 @@ Switch in **Settings → Network → Signet**, get test coins from a Signet fauc
 
 ## Next
 
-- [FAQ](FAQ.md) · [all guides](README.md) · [safety](../SECURITY.md)
+- [FAQ](FAQ.md) · [all guides](README.md) · [safety](https://github.com/buildOrDie/masked-wallet/blob/main/SECURITY.md)
 - News and updates: [@ratsonchain on X](https://x.com/ratsonchain)

@@ -108,8 +108,8 @@ The signature verifies against `x(Q)`. The private key above is from a public te
 
 ## Reference implementation
 
-MASKED ([`src/ecash/EcashBook.mjs`](../src/ecash/EcashBook.mjs): `lockKeyOf`, `send`, `receive`, `canReclaim`) and its
-tests ([`test/ecash.test.mjs`](../test/ecash.test.mjs)), run end to end against an unmodified nutshell mint.
+MASKED ([`src/ecash/EcashBook.mjs`](https://github.com/buildOrDie/masked-wallet/blob/main/src/ecash/EcashBook.mjs): `lockKeyOf`, `send`, `receive`, `canReclaim`) and its
+tests ([`test/ecash.test.mjs`](https://github.com/buildOrDie/masked-wallet/blob/main/test/ecash.test.mjs)), run end to end against an unmodified nutshell mint.
 
 [10]: https://github.com/cashubtc/nuts/blob/main/10.md
 [11]: https://github.com/cashubtc/nuts/blob/main/11.md

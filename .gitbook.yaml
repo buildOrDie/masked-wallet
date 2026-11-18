@@ -1,0 +1,6 @@
+# GitBook (Git Sync) reads the guide from docs/: docs/README.md is the home page, docs/SUMMARY.md the menu.
+root: ./docs/
+
+structure:
+  readme: README.md
+  summary: SUMMARY.md

@@ -7,7 +7,7 @@ Yes. MASKED is free and open source under the MIT licence. You only pay normal B
 You do. The recovery phrase is stored only encrypted on your device (AES-256-GCM, 600,000 PBKDF2 iterations). Websites and MASKED's servers never see it.
 
 **Is it audited?**
-No. MASKED is experimental and unaudited. Use small amounts. Details: [SECURITY.md](../SECURITY.md).
+No. MASKED is experimental and unaudited. Use small amounts. Details: [SECURITY.md](https://github.com/buildOrDie/masked-wallet/blob/main/SECURITY.md).
 
 **Public or Shielded: which should I use?**
 Public for exchanges, marketplaces and websites that need a normal address. Shielded (`sp1…`) for receiving privately: every payment lands at a new place on chain, so nobody can link your payments or see your balance from the address.
@@ -43,10 +43,10 @@ Instant listings and peer-to-peer swaps are signed by your wallet. Launchpad sal
 Mostly, yes. `window.masked` follows the `window.unisat` API: see [PROVIDER.md](PROVIDER.md).
 
 **Where do I report a bug?**
-[Open an issue](https://github.com/buildOrDie/masked-wallet/issues/new/choose). Security problems go privately: [SECURITY.md](../SECURITY.md).
+[Open an issue](https://github.com/buildOrDie/masked-wallet/issues/new/choose). Security problems go privately: [SECURITY.md](https://github.com/buildOrDie/masked-wallet/blob/main/SECURITY.md).
 
 **Where are the updates posted?**
-On the developer's X: [@ratsonchain](https://x.com/ratsonchain), and in [CHANGELOG.md](../CHANGELOG.md).
+On the developer's X: [@ratsonchain](https://x.com/ratsonchain), and in [CHANGELOG.md](https://github.com/buildOrDie/masked-wallet/blob/main/CHANGELOG.md).
 
 **Is there a MASKED support account that DMs people?**
 No. Nobody from MASKED will DM you first or ask for your recovery phrase. Anyone who does is a scammer.

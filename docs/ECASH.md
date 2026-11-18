@@ -1,6 +1,8 @@
 # Ecash (Cashu) in MASKED
 
-<p align="center"><a href="img/masked-ecash.mp4"><img src="img/masked-ecash-preview.gif" width="480" alt="MASKED ecash in 47 seconds: top up with BTC, pay Lightning, lock a token to a bc1p address, pay a website"></a><br><a href="img/masked-ecash.mp4"><b>▶ Watch the video (47 s)</b></a></p>
+[![MASKED ecash in 47 seconds: top up with BTC, pay Lightning, lock a token to a bc1p address, pay a website](img/masked-ecash-preview.gif)](img/masked-ecash.mp4)
+
+[▶ Watch the video (47 s)](img/masked-ecash.mp4)
 
 | Top up with BTC | On its way | Pay Lightning |
 |:-:|:-:|:-:|
@@ -26,7 +28,7 @@ for savings, use Shielded. MASKED doesn't run or vouch for any mint.
 | **Top up with Bitcoin** | With a mint that takes on-chain deposits ([NUT-30](https://cashubtc.github.io/nuts/)), MASKED sends from your Public or Shielded balance to the mint's deposit address, with nothing to copy. Once it confirms, the same amount arrives as ecash, and you can pay any Lightning invoice with it: **BTC → Lightning inside the wallet, with no swap service**. The deposit address is locked to a key of its own (NUT-20), so only this wallet can mint from it. Deposits show under "On its way" and are watched even after you close and reopen MASKED. |
 | **Top up with Lightning** | Get a Lightning invoice from your mint, pay it from any Lightning wallet or exchange, and receive the same amount as ecash. |
 | **Pay** | Pay any Lightning invoice with ecash. The unused part of the fee reserve comes back. |
-| **Pay websites** | Sites ask through `window.masked.cashu` (pay, NUT-18 payment requests, refunds), and you approve each payment in MASKED. See [PROVIDER.md](PROVIDER.md#ecash-cashu-masked-only) and [`examples/cashu-paywall.html`](../examples/cashu-paywall.html). |
+| **Pay websites** | Sites ask through `window.masked.cashu` (pay, NUT-18 payment requests, refunds), and you approve each payment in MASKED. See [PROVIDER.md](PROVIDER.md#ecash-cashu-masked-only) and [`examples/cashu-paywall.html`](https://github.com/buildOrDie/masked-wallet/blob/main/examples/cashu-paywall.html). |
 | **Find my ecash again** | After reinstalling, or on a new device with the same recovery phrase, ask your mints for the ecash this wallet made. |
 
 ## How it works

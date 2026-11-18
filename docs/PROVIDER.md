@@ -138,7 +138,7 @@ Cancels a listing made straight from Shielded by moving its coin back into Shiel
 
 `window.masked.cashu` lets a site take payments in [Cashu](https://cashu.space) ecash: instant, no transaction fee, and
 private (the mint can't link payer and payee). Every payment and claim is approved in MASKED. Sites never see the
-ecash balance. See [ECASH.md](ECASH.md) and the example paywall in [`examples/cashu-paywall.html`](../examples/cashu-paywall.html).
+ecash balance. See [ECASH.md](ECASH.md) and the example paywall in [`examples/cashu-paywall.html`](https://github.com/buildOrDie/masked-wallet/blob/main/examples/cashu-paywall.html).
 
 ### `cashu.pay({ amount, mints?, lockTo?, memo? }): Promise<{ token, mint, amount }>` 🔐
 Asks for `amount` sats as a `cashuB…` token. `mints` limits which mints you accept (MASKED pays from one where the user

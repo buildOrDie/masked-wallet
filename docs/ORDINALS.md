@@ -29,6 +29,6 @@ Send the inscription to a Shielded (silent payments, BIP 352) address, or tap **
 
 ## Code
 
-- [`src/ordinals/Gallery.mjs`](../src/ordinals/Gallery.mjs): which coins hold which inscriptions (ord's `/outputs`), cached per coin.
-- [`src/wallet/TxBuilder.mjs`](../src/wallet/TxBuilder.mjs) `sendInscription`: the transaction.
-- [`test/ordinals.test.mjs`](../test/ordinals.test.mjs): the inscription stays on output 0 with its value, the fee side, a Shielded receiver finds it, refusals, caching.
+- [`src/ordinals/Gallery.mjs`](https://github.com/buildOrDie/masked-wallet/blob/main/src/ordinals/Gallery.mjs): which coins hold which inscriptions (ord's `/outputs`), cached per coin.
+- [`src/wallet/TxBuilder.mjs`](https://github.com/buildOrDie/masked-wallet/blob/main/src/wallet/TxBuilder.mjs) `sendInscription`: the transaction.
+- [`test/ordinals.test.mjs`](https://github.com/buildOrDie/masked-wallet/blob/main/test/ordinals.test.mjs): the inscription stays on output 0 with its value, the fee side, a Shielded receiver finds it, refusals, caching.

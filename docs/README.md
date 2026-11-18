@@ -10,7 +10,7 @@ Can't find your answer? Ask the [AI wiki](https://deepwiki.com/buildOrDie/masked
 | [Getting started](GETTING-STARTED.md) | Install, create or restore a wallet, receive and send your first bitcoin |
 | [FAQ](FAQ.md) | Short answers: safety, fees, Shielded vs Public, Signet, RGB backups |
 | [News and videos](NEWS.md) | What's new in each update, with the videos |
-| [Safety](../SECURITY.md) | What protects you, and the limits to know before using real funds |
+| [Safety](https://github.com/buildOrDie/masked-wallet/blob/main/SECURITY.md) | What protects you, and the limits to know before using real funds |
 
 ## Features
 
@@ -37,6 +37,6 @@ Can't find your answer? Ask the [AI wiki](https://deepwiki.com/buildOrDie/masked
 |---|---|
 | [Provider API: `window.masked`](PROVIDER.md) | Connect a website: accounts, signing, sends, RGB, ecash |
 | [Architecture](ARCHITECTURE.md) | How the code is laid out, and the rules it follows |
-| [Contributing](../CONTRIBUTING.md) | Set up, test, open a pull request |
+| [Contributing](https://github.com/buildOrDie/masked-wallet/blob/main/CONTRIBUTING.md) | Set up, test, open a pull request |
 | [Translating](i18n/TRANSLATING.md) | Help with 简体中文 (no coding needed) |
-| [For AI agents](../AGENTS.md) | Instructions for coding assistants working on this repo |
+| [For AI agents](https://github.com/buildOrDie/masked-wallet/blob/main/AGENTS.md) | Instructions for coding assistants working on this repo |

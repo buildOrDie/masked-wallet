@@ -1,21 +1,25 @@
 # News and videos
 
-What's new in MASKED, newest first, with the videos. Every version and fix, in detail: [CHANGELOG.md](../CHANGELOG.md).
+What's new in MASKED, newest first, with the videos. Every version and fix, in detail: [CHANGELOG.md](https://github.com/buildOrDie/masked-wallet/blob/main/CHANGELOG.md).
 Updates are posted first by the developer on X: [@ratsonchain](https://x.com/ratsonchain).
 
 ## 2.29.28: switching networks fixed · 18 Nov 2026
 
-<p align="center"><a href="img/masked-2.29.28.mp4"><img src="img/masked-2.29.28-preview.gif" width="560" alt="MASKED 2.29.28: what's fixed, and the app's Public and Shielded sides"></a><br><a href="img/masked-2.29.28.mp4"><b>▶ Watch the video (20 s)</b></a></p>
+[![MASKED 2.29.28: what's fixed, and the app's Public and Shielded sides](img/masked-2.29.28-preview.gif)](img/masked-2.29.28.mp4)
+
+[▶ Watch the video (20 s)](img/masked-2.29.28.mp4)
 
 - **Mainnet ↔ Signet:** switching network (or account) while a scan was running no longer mixes the two up. On Android, Signet kept loading.
 - **Repairs itself:** wallets it already happened to start their scan again from the right place. Nothing is lost.
 - **RGB opens again** for anyone on 2.29.27 from the Chrome Web Store.
 - **Settings:** follow the dev on X and open the source code, one tap away. A one-time note on Home says MASKED is free and open source.
-- **The repository:** a [guide](README.md), [Getting started](GETTING-STARTED.md), an [FAQ](FAQ.md), and [AGENTS.md](../AGENTS.md) for AI coding agents.
+- **The repository:** a [guide](README.md), [Getting started](GETTING-STARTED.md), an [FAQ](FAQ.md), and [AGENTS.md](https://github.com/buildOrDie/masked-wallet/blob/main/AGENTS.md) for AI coding agents.
 
 ## 2.29.22–2.29.26: sell in lots, buy several at once · 15–17 Nov 2026
 
-<p align="center"><a href="img/masked-2.29.26.mp4"><img src="img/masked-2.29.26-preview.gif" width="560" alt="MASKED 2.29.26: lots, sweeps, the RGB wallet view and far fewer requests"></a><br><a href="img/masked-2.29.26.mp4"><b>▶ Watch the video (39 s)</b></a></p>
+[![MASKED 2.29.26: lots, sweeps, the RGB wallet view and far fewer requests](img/masked-2.29.26-preview.gif)](img/masked-2.29.26.mp4)
+
+[▶ Watch the video (39 s)](img/masked-2.29.26.mp4)
 
 - **Sell in lots:** split a sale into several Instant listings in one approval; they're all on sale at once, even with MASKED closed.
 - **Buy several listings at once:** tick the rows you want; MASKED checks each seller's signature and buys the cheapest first.
@@ -37,6 +41,14 @@ Updates are posted first by the developer on X: [@ratsonchain](https://x.com/rat
 
 ## Feature videos
 
-| | |
-|:-:|:-:|
-| <a href="img/masked-ecash.mp4"><img src="img/masked-ecash-preview.gif" width="320" alt="Ecash in MASKED"></a><br>**Ecash** (47 s): top up with bitcoin, pay Lightning, lock a token to an address, pay a website. [Guide](ECASH.md) | <a href="img/masked-ordinals.mp4"><img src="img/masked-ordinals-preview.gif" width="320" alt="Ordinals in MASKED"></a><br>**Ordinals** (18 s): your inscriptions, sent publicly or privately. [Guide](ORDINALS.md) |
+### Ecash (47 s)
+
+[![Ecash in MASKED](img/masked-ecash-preview.gif)](img/masked-ecash.mp4)
+
+Top up with bitcoin, pay Lightning, lock a token to an address, pay a website. [▶ Watch](img/masked-ecash.mp4) · [Guide](ECASH.md)
+
+### Ordinals (18 s)
+
+[![Ordinals in MASKED](img/masked-ordinals-preview.gif)](img/masked-ordinals.mp4)
+
+Your inscriptions, sent publicly or privately. [▶ Watch](img/masked-ordinals.mp4) · [Guide](ORDINALS.md)
