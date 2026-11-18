@@ -42,6 +42,9 @@ Instant listings and peer-to-peer swaps are signed by your wallet. Launchpad sal
 **Does MASKED work with sites made for UniSat?**
 Mostly, yes. `window.masked` follows the `window.unisat` API: see [PROVIDER.md](PROVIDER.md).
 
+**Where can I ask questions?**
+In the MASKED chat on Telegram: [t.me/maskedwallet](https://t.me/maskedwallet). Admins never DM you first, and nobody there needs your recovery phrase.
+
 **Where do I report a bug?**
 [Open an issue](https://github.com/buildOrDie/masked-wallet/issues/new/choose). Security problems go privately: [SECURITY.md](https://github.com/buildOrDie/masked-wallet/blob/main/SECURITY.md).
 
@@ -49,4 +52,4 @@ Mostly, yes. `window.masked` follows the `window.unisat` API: see [PROVIDER.md](
 On the developer's X: [@ratsonchain](https://x.com/ratsonchain), and in [CHANGELOG.md](https://github.com/buildOrDie/masked-wallet/blob/main/CHANGELOG.md).
 
 **Is there a MASKED support account that DMs people?**
-No. Nobody from MASKED will DM you first or ask for your recovery phrase. Anyone who does is a scammer.
+No. Support happens in the open, in the [Telegram chat](https://t.me/maskedwallet) and on GitHub. Nobody from MASKED will DM you first or ask for your recovery phrase. Anyone who does is a scammer.

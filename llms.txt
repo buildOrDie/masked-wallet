@@ -11,6 +11,7 @@
 - [Chrome Web Store](https://chromewebstore.google.com/detail/masked-wallet/pojmpfcbdmacabhckemelcbkmckhaoig)
 - [Android APK](https://signet.maskedwallet.com/install)
 - [Website](https://maskedwallet.com)
+- [Telegram chat and support](https://t.me/maskedwallet)
 
 ## Features
 

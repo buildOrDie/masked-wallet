@@ -1,7 +1,7 @@
 # MASKED guide
 
 Everything about MASKED in one place: how to start, what each feature does, and how to build on it.
-Can't find your answer? Ask the [AI wiki](https://deepwiki.com/buildOrDie/masked-wallet), open an [issue](https://github.com/buildOrDie/masked-wallet/issues), or ask the dev on X: [@ratsonchain](https://x.com/ratsonchain).
+Can't find your answer? Ask the [AI wiki](https://deepwiki.com/buildOrDie/masked-wallet), ask in the [Telegram chat](https://t.me/maskedwallet) (@maskedwallet), open an [issue](https://github.com/buildOrDie/masked-wallet/issues), or follow the dev on X: [@ratsonchain](https://x.com/ratsonchain).
 
 ## Start here
 
