@@ -96,8 +96,9 @@ export class ChainSync {
   async run(budget = 6, { older = false } = {}) {
     const app = this.app, keys = app.account.keys;
     if (!keys || this.syncing) return;
-    const gen = ++this.gen;
-    const live = () => gen === this.gen;
+    const gen = ++this.gen, id = app.account.id;
+    // a newer sync, or another wallet / network on show (its own progress and coins), ends this one
+    const live = () => gen === this.gen && app.account.id === id;
     const fundDue = !older || Date.now() - (app.coins.publicAt || 0) > 60000; // history loops reuse a fresh balance
     this.syncing = true; this.error = null; this.started = Date.now(); this.note = fundDue ? 'Checking balance…' : 'Checking for payments…';
     app.render();
@@ -121,7 +122,10 @@ export class ChainSync {
     const app = this.app, keys = app.account.keys, net = app.state.net, srv = this.scanServer;
     const tip = await this.tipHeight();
     this.tip = tip;
-    const p = { ...(this.progress || {}) };
+    let p = { ...(this.progress || {}) };
+    // progress past this network's tip was written by another network's scan (switching Mainnet → Signet
+    // mid-scan, before 2.29.28): start this network's progress again
+    if (Number.isInteger(p.topHeight) && p.topHeight > tip + 6) p = { scannedBlocks: 0 };
     if (!Number.isInteger(p.topHeight)) p.topHeight = Number.isInteger(p.tip) ? p.tip : tip;
     if (!Number.isInteger(p.nextHeight)) p.nextHeight = p.topHeight;
     if (!Number.isInteger(p.floor)) p.floor = keys.fresh ? Math.max(0, tip - 2) : keys.birthday ? birthdayHeight(keys.birthday, tip) : 0;
@@ -147,17 +151,19 @@ export class ChainSync {
     // The scan server is usually a block or two behind the tip for a minute after each block. Wait for it
     // (next sync picks those up) rather than scanning them through public servers: that took minutes.
     const sInfo = srv.url() ? await srv.status() : null;
+    if (!live()) return;
     const top = srv.servesNet(sInfo) && sInfo.height < tip && tip - sInfo.height <= 12 ? sInfo.height : tip;
     if (top < tip && p.nextHeight > top && p.nextHeight >= p.floor) holdHistory = this.holdHistory = true;
     let scanned = 0;
-    const save = () => { this.saveProgress({ ...p, updatedAt: Date.now() }); app.coins.save(); app.render(); };
+    const save = () => { if (!live()) return; this.saveProgress({ ...p, updatedAt: Date.now() }); app.coins.save(); app.render(); };
     // scan server set but not answering: only a couple of blocks per sync through public servers, so the wallet stays responsive
     const fwdBudget = older ? 0 : srv.url() && !sInfo ? 2 : Math.max(budget, 24);
     const todo = Math.min(fwdBudget, Math.max(0, top - p.topHeight));
     while (!older && p.topHeight < top && scanned < fwdBudget && live()) {
       const n = Math.min(srv.url() ? 6 : 2, top - p.topHeight, fwdBudget - scanned);
       this.note = `Scanning block ${(p.topHeight + 1).toLocaleString()} · ${scanned + 1}/${todo}`; app.render();
-      await app.scanner.scanBlocks(Array.from({ length: n }, (_, i) => p.topHeight + 1 + i));
+      await app.scanner.scanBlocks(Array.from({ length: n }, (_, i) => p.topHeight + 1 + i), { live });
+      if (!live()) return;
       p.topHeight += n; p.scannedBlocks += n; scanned += n;
       save();
     }
@@ -166,11 +172,12 @@ export class ChainSync {
     while (!holdHistory && p.nextHeight >= p.floor && scanned < oldBudget && live()) {
       this.note = history ? `Restoring history · ${(p.nextHeight - p.floor + 1).toLocaleString()} blocks left` : `Checking older block ${p.nextHeight.toLocaleString()}`; app.render();
       const n = Math.min(history ? (srv.url() ? 12 : 3) : 1, p.nextHeight - p.floor + 1, oldBudget - scanned);
-      await app.scanner.scanBlocks(Array.from({ length: n }, (_, i) => p.nextHeight - i), { cut: history });
+      await app.scanner.scanBlocks(Array.from({ length: n }, (_, i) => p.nextHeight - i), { cut: history, live });
+      if (!live()) return;
       p.nextHeight -= n; p.scannedBlocks += n; scanned += n;
       save();
     }
-    this.saveProgress({ ...p, updatedAt: Date.now() });
+    if (live()) this.saveProgress({ ...p, updatedAt: Date.now() });
   }
 
   /** The steps that never depend on the block scan succeeding, then the next history round. */

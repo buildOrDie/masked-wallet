@@ -84,3 +84,64 @@ test('switching accounts: its own addresses and records; new accounts scan from 
   assert.equal(app.state.wallet.restored, true, 'Account 1 keeps the phrase\'s restore settings');
   assert.equal(app.state.wallet.birthday, 1);
 });
+
+test('switching network mid-scan: the Mainnet scan stops and never writes into the Signet wallet', async () => {
+  globalThis.localStorage.clear();
+  const app = new MaskedApp();
+  app.render = () => {};
+  app.state.net = 'main';
+  app.lock.secret = { words: WORDS, passphrase: '', fresh: false, restored: false, birthday: null };
+  app.state.wallet = app.accountKeys(WORDS, '', 'main', 0);
+  app.loadWalletData();
+  const tips = { main: 925000, signet: 270000 };
+  app.sync.tipHeight = async () => tips[app.state.net];
+  app.scanServer.url = () => '';
+  app.fees.refresh = async () => {};
+  app.afterSyncSteps = () => [];
+  app.tokenServer.url = () => '';
+  /** @type {(v?: any) => void} */ let release = () => {};
+  let scans = 0;
+  app.coins.syncPublic = async () => { app.coins.public = []; app.coins.publicAt = Date.now(); return []; };
+  app.scanner.scanBlocks = async () => { scans++; if (scans === 1) await new Promise((r) => { release = r; }); };
+  app.store.setJson(`wren.scan.${app.account.id}`, { topHeight: tips.main - 30, nextHeight: tips.main - 30, floor: tips.main - 500, scannedBlocks: 0 });
+  app.sync.loadProgress();
+  const mainId = app.account.id;
+  const running = app.sync.run(6);
+  while (scans === 0) await new Promise((r) => setTimeout(r, 1));
+  // the Mainnet scan is in the middle of a block: switch to Signet
+  const signetRun = new Promise((r) => { const orig = app.sync.run.bind(app.sync); app.sync.run = (...a) => { const p = orig(...a); r(p); return p; }; });
+  app.setNet('signet');
+  const signetId = app.account.id;
+  assert.notEqual(signetId, mainId);
+  assert.equal(app.sync.syncing, true, 'Signet starts its own sync straight away, not blocked by the Mainnet one');
+  release();
+  await running;
+  await (await signetRun);
+  const sig = app.store.getJson(`wren.scan.${signetId}`, null);
+  assert.ok(sig, 'Signet has its own progress');
+  assert.ok(sig.topHeight <= tips.signet, `Signet progress stays at Signet heights (got ${sig.topHeight})`);
+  const main = app.store.getJson(`wren.scan.${mainId}`, null);
+  assert.equal(main.topHeight, tips.main - 30, 'the stopped Mainnet scan saved nothing after the switch');
+});
+
+test('progress another network wrote (past this tip) starts again', async () => {
+  globalThis.localStorage.clear();
+  const app = new MaskedApp();
+  app.render = () => {};
+  app.state.net = 'signet';
+  app.lock.secret = { words: WORDS, passphrase: '', fresh: true, restored: false, birthday: null };
+  app.state.wallet = app.accountKeys(WORDS, '', 'signet', 0);
+  app.loadWalletData();
+  app.sync.tipHeight = async () => 270000;
+  app.scanServer.url = () => '';
+  app.fees.refresh = async () => {};
+  app.afterSyncSteps = () => [];
+  app.tokenServer.url = () => '';
+  app.coins.syncPublic = async () => [];
+  app.scanner.scanBlocks = async () => {};
+  app.sync.saveProgress({ topHeight: 924994, nextHeight: 924994, floor: 924500, scannedBlocks: 500 });
+  await app.sync.run(6);
+  const p = app.sync.progress;
+  assert.ok(p.topHeight <= 270000 && p.topHeight >= 269990, `back at Signet heights (got ${p.topHeight})`);
+  assert.equal(app.sync.historyLeft(), 0, 'a fresh wallet has no history to restore');
+});

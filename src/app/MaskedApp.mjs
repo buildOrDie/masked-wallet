@@ -155,6 +155,9 @@ export class MaskedApp {
   /** A different wallet or network: drop what is on screen and load its records. */
   resetWallet() {
     const state = this.state;
+    // a sync still running belongs to the wallet or network on show before: stop it, or it carries on
+    // writing that wallet's blocks and coins into this one (Mainnet → Signet before the scan finished)
+    this.sync.cancel();
     this.coins.clear();
     state.send = { stage: 'form' }; state.mint = { stage: 'form' }; state.drop = { stage: 'form' }; state.reveal = false;
     this.loadWalletData();

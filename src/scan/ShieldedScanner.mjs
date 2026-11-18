@@ -102,6 +102,7 @@ export class ShieldedScanner {
   async scanBlockFromServer(height, opts) {
     const j = await this.app.scanServer.block(height, opts);
     if (!j) return null;
+    if (opts?.live && !opts.live()) return 0; // another wallet or network is on show now
     let foundAll;
     try { foundAll = await this.scanMany(j.txs.map(([, tw, outs]) => [tw, outs.map((o) => o[1])])); } catch { return null; }
     let hits = 0;
@@ -142,6 +143,7 @@ export class ShieldedScanner {
         let txs;
         try { txs = await (await fetchRetry(`${servers.base()}block/${hash}/txs/${st}`, `Block ${height}`, 5)).json(); }
         finally { servers.limiter.release(); }
+        if (opts.live && !opts.live()) return; // another wallet or network is on show now
         for (const tx of txs) { try { hits += this.scanTx(tx).n || 0; } catch {} }
       }
     };

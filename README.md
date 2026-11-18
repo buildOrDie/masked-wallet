@@ -69,6 +69,7 @@ To check a download is genuine, compare its SHA-256 with the one on the release 
 
 ## What's new
 
+- **2.29.28**: switching between Mainnet and Signet while a scan is running no longer mixes the two up (Signet kept loading); wallets it already happened to repair themselves.
 - **2.29.27**: Home shows a one-time note that MASKED is free, open source and built in public, with a link to follow the dev on X. Settings has links to the dev's X and to this repository.
 - **2.29.26**: faster, with far fewer network requests: windows opened from a site share their work, and open listings are checked for a sale at most every 2 minutes. Fixes a step that could hang for good, and lots that lost their signature when browser storage filled up.
 - **2.29.25**: **lots on sale at once**: one approval moves and signs every lot, so they're all for sale even with MASKED closed right after.

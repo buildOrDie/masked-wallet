@@ -188,9 +188,10 @@ export class CoinStore {
 
   // ---- chain ----
   async syncPublic() {
-    const f = this.account.funding();
+    const f = this.account.funding(), id = this.account.id;
     if (!f) return [];
     const utxos = await readJson(await fetch(`${this.app.servers.base()}address/${f.address}/utxo`), 'Balance lookup');
+    if (this.account.id !== id) return this.public; // another wallet or network is on show now: not its coins
     if (!Array.isArray(utxos)) throw new Error('Balance lookup returned an unexpected reply.');
     this.public = utxos.map((u) => ({
       key: `fund:${u.txid}:${u.vout}`, kind: 'funding', txid: u.txid, vout: u.vout, sats: u.value,
@@ -203,7 +204,7 @@ export class CoinStore {
 
   /** Shielded coins spent elsewhere (another device, a sale) leave the list. */
   async dropSpent() {
-    const keep = [];
+    const keep = [], id = this.account.id;
     for (const c of this.shielded) {
       if (c.example) { keep.push(c); continue; }
       try {
@@ -213,6 +214,7 @@ export class CoinStore {
       } catch {}
       keep.push(c);
     }
+    if (this.account.id !== id) return; // another wallet or network is on show now
     this.shielded = keep;
     this.save();
   }
