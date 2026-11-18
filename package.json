@@ -6,6 +6,7 @@
   "description": "MASKED: open-source Bitcoin wallet for Chrome with a Shielded balance (BIP 352 silent payments), BRC-20 / BRC2.0 and a UniSat-compatible window.masked provider",
   "scripts": {
     "build": "node scripts/build-extension.mjs extension",
+    "store-zip": "node scripts/store-zip.mjs",
     "build:android": "node scripts/build-mobile.mjs && npx cap sync android",
     "build:ios": "node scripts/build-mobile.mjs && npx cap sync ios",
     "lint": "eslint \"src/**/*.mjs\" \"test/**/*.mjs\" \"scripts/**/*.mjs\"",
