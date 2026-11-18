@@ -8,6 +8,7 @@ import { EsploraPool } from '../../net/EsploraPool.mjs';
 import { Keyring } from '../../wallet/Keyring.mjs';
 import { View } from '../View.mjs';
 import { I, copyBtn, rowKV } from '../html.mjs';
+import { DEV_X, REPO_URL } from './HomeView.mjs';
 
 const { n2b } = sp.util;
 const VERSION_LABEL = '2.3.3';
@@ -65,6 +66,10 @@ export class SettingsView extends View {
     ${this.servers()}
     ${this.indexer()}
     ${this.advanced(w)}
+    <section class="card menu">
+      <a class="menu-row" href="${DEV_X}" target="_blank" rel="noopener"><span>${I.x}<b>Follow the dev on X</b></span><span class="small muted">@ratsonchain ›</span></a>
+      <a class="menu-row" href="${REPO_URL}" target="_blank" rel="noopener"><span>${I.ext}<b>Source code</b></span><span class="small muted">GitHub · MIT ›</span></a>
+    </section>
     <p class="muted small center">MASKED ${VERSION_LABEL} · keys stay in this browser</p>`;
   }
 

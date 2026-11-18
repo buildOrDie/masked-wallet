@@ -154,6 +154,8 @@ export class Controller {
     if (d.updateInstall !== undefined) { app.update?.install(); return true; }
     if (d.updateAllow !== undefined) { app.update?.allowInstalls(); return true; }
     if (d.updateCheck !== undefined) { this.toast('Checking…'); app.update?.check(true).then((up) => this.toast(up ? `MASKED ${up.version} is out` : 'You have the latest version')); return true; }
+    // the open-source note on Home: gone once tapped (Follow still opens X: a link's click isn't cancelled here)
+    if (d.devOk !== undefined) { try { localStorage.setItem('masked.dev-hint', '1'); } catch { /* */ } setTimeout(() => this.render(), 0); return true; }
     if (d.lang) { setLang(d.lang); try { localStorage.setItem('masked.lang-hint', '1'); } catch { /* */ } this.render(); return true; }
     if (d.copy != null) {
       this.toast((await copyText(d.copy)) ? 'Copied' : 'Copy failed — select and copy manually');

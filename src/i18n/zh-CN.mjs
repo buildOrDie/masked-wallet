@@ -1445,4 +1445,9 @@ export const ZH_CN = {
   "Updating… {0}": "更新中… {0}",
   "Last saved · Refresh": "上次保存 · 刷新",
   "The block server did not answer in time.": "区块服务器未及时响应。",
+  "Free and open source": "免费且开源",
+  "Built in public: every update lands on the dev's X first.": "公开开发：每次更新都会先发布在开发者的 X 上。",
+  "Follow the dev": "关注开发者",
+  "Follow the dev on X": "在 X 上关注开发者",
+  "Source code": "源代码",
 };

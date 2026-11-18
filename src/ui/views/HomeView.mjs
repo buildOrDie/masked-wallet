@@ -9,6 +9,11 @@ import { OrdinalsView } from './OrdinalsView.mjs';
 import { I, btcLogo, shieldLogo } from '../html.mjs';
 
 /** Home: the balance of the side on show (Public or Shielded), actions, both balances and the tokens. */
+/** MASKED's news: its developer's account on X. Its code: the public repository. */
+export const DEV_X = 'https://x.com/ratsonchain';
+export const REPO_URL = 'https://github.com/buildOrDie/masked-wallet';
+const DEV_HINT_KEY = 'masked.dev-hint';
+
 export class HomeView extends View {
   /** A Chinese browser, and no language chosen yet: offer Chinese once (it never switches by itself). */
   static langHint() {
@@ -18,6 +23,14 @@ export class HomeView extends View {
     if (asked || !zh) return '';
     return `<div class="hint lang-hint" translate="no"><b>切换到中文？</b><span>MASKED 有中文版（测试中）。也可以随时在设置里更改。</span>
       <span class="lang-btns"><button class="btn primary sm" data-lang="zh-CN">使用中文</button><button class="btn ghost sm" data-lang="en">Keep English</button></span></div>`;
+  }
+  /** Once, until closed: MASKED is free and open source, built in public, with its news on the developer's X. */
+  static devHint() {
+    let seen = false;
+    try { seen = localStorage.getItem(DEV_HINT_KEY) === '1'; } catch { /* storage blocked: show it */ }
+    if (seen) return '';
+    return `<div class="hint dev-hint"><b>Free and open source</b><span>Built in public: every update lands on the dev's X first.</span>
+      <span class="lang-btns"><a class="btn primary sm" href="${DEV_X}" target="_blank" rel="noopener" data-dev-ok>${I.x}<span>Follow the dev</span></a><button class="btn ghost sm" data-dev-ok>Got it</button></span></div>`;
   }
   /** The phone app: a newer version is out. Updates in the app when it can, else through the install page. */
   static updateCard(app, up) {
@@ -60,6 +73,7 @@ export class HomeView extends View {
     const updateRow = up ? HomeView.updateCard(app, up) : '';
     return `
     ${HomeView.langHint()}
+    ${HomeView.devHint()}
     ${updateRow}
     ${w.source === 'example' ? '<div class="testnet-note warn">Demo wallet — keys are public. Create your own in Settings.</div>' : this.netBanner()}
     <section class="hero ${shd ? 'sh' : ''}">
