@@ -2,7 +2,7 @@
 
 # MASKED
 
-[![Follow the dev on X: @ratsonchain](https://img.shields.io/badge/Follow%20the%20dev-%40ratsonchain-000000?style=for-the-badge&logo=x&logoColor=white)](https://x.com/ratsonchain) [![MIT licence](https://img.shields.io/badge/licence-MIT-f7a21b?style=for-the-badge)](LICENSE) [![Guide](https://img.shields.io/badge/guide-start%20here-9d8cff?style=for-the-badge)](docs/README.md) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/buildOrDie/masked-wallet)
+[![Follow the dev on X: @ratsonchain](https://img.shields.io/badge/Follow%20the%20dev-%40ratsonchain-000000?style=for-the-badge&logo=x&logoColor=white)](https://x.com/ratsonchain) [![MIT licence](https://img.shields.io/badge/licence-MIT-f7a21b?style=for-the-badge)](LICENSE) [![Guide](https://img.shields.io/badge/guide-start%20here-9d8cff?style=for-the-badge)](docs/README.md) [![Ask the AI wiki: DeepWiki](https://img.shields.io/badge/ask%20the%20AI%20wiki-DeepWiki-1f6feb?style=for-the-badge)](https://deepwiki.com/buildOrDie/masked-wallet)
 
 **A Bitcoin wallet with a private side.** Open source, for Chrome and Android.
 
