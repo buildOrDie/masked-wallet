@@ -11,7 +11,7 @@ You get two Bitcoin balances from one recovery phrase:
 
 It also holds your tokens and NFTs: BRC-20, Ordinals, RGB and LEAF, plus Cashu ecash for instant payments.
 
-[**Add to Chrome**](https://chromewebstore.google.com/detail/masked-wallet/pojmpfcbdmacabhckemelcbkmckhaoig) · [**Android app**](https://signet.maskedwallet.com/install) · [maskedwallet.com](https://maskedwallet.com) · [@masked_wallet](https://x.com/masked_wallet)
+[**Add to Chrome**](https://chromewebstore.google.com/detail/masked-wallet/pojmpfcbdmacabhckemelcbkmckhaoig) · [**Android app**](https://signet.maskedwallet.com/install) · [maskedwallet.com](https://maskedwallet.com) · [the dev on X: @ratsonchain](https://x.com/ratsonchain)
 
 > **Experimental, unaudited software. Use small amounts.** See [Safety](#safety) and [SECURITY.md](SECURITY.md).
 

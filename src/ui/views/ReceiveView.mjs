@@ -7,7 +7,7 @@ import { I, addrChunks, btcLogo, head, qrSvg, seg, shieldLogo } from '../html.mj
 export class ReceiveView extends View {
   /** A ready post with the Shielded address, opened in X. */
   static shareUrl(addr) {
-    const text = `Pay me privately 🎭\n\n${addr}\n\nSilent payments on Bitcoin, via @masked_wallet\nmaskedwallet.com`;
+    const text = `Pay me privately 🎭\n\n${addr}\n\nSilent payments on Bitcoin, with MASKED\nmaskedwallet.com`;
     return `https://x.com/intent/post?text=${encodeURIComponent(text)}`;
   }
 
