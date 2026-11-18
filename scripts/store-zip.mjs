@@ -8,6 +8,7 @@ import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { missingEngineFeatures } from './check-engine.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const fail = (msg) => { console.error(`\nNOT MADE: ${msg}\n`); process.exit(1); };
@@ -16,8 +17,8 @@ if (!existsSync(resolve(root, 'vendor/rgb-lib-wasm/rgb_lib_wasm_bindings_bg.wasm
 execFileSync(process.execPath, [resolve(root, 'scripts/build-extension.mjs'), 'extension'], { cwd: root, stdio: 'inherit' });
 
 const ext = resolve(root, 'extension');
-const names = WebAssembly.Module.exports(new WebAssembly.Module(await readFile(join(ext, 'rgb-lib.wasm')))).map((e) => e.name);
-for (const need of [/migrate/i, /presign/i, /swap/i]) if (!names.some((n) => need.test(n))) fail(`the RGB engine in extension/ has no ${need.source} functions: it is not MASKED's engine. Run: bash engine/build.sh`);
+const missing = await missingEngineFeatures(join(ext, 'rgb-lib.wasm'));
+if (missing.length) fail(`the RGB engine in extension/ has no ${missing.join(', ')} functions: it is not MASKED's engine. Run: bash engine/build.sh`);
 
 const manifest = JSON.parse(await readFile(join(ext, 'manifest.json'), 'utf8'));
 const { version } = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'));
