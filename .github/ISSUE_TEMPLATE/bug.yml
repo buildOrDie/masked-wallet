@@ -1,0 +1,45 @@
+name: Something isn't working
+description: Report a bug in the wallet, the app or the market.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! **Never paste your recovery phrase, password or private keys here**: nobody needs them to fix a bug.
+  - type: input
+    id: version
+    attributes:
+      label: MASKED version
+      description: Settings, at the bottom (e.g. 2.29.27)
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options: [Chrome / Brave / Edge extension, Android app, The website or market]
+    validations:
+      required: true
+  - type: dropdown
+    id: network
+    attributes:
+      label: Network
+      options: [Mainnet, Signet]
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to make it happen again
+      placeholder: "1. Open …\n2. Tap …\n3. See …"
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots, txids or console errors
+      description: Txids are public and help a lot. Hide any address you'd rather keep private.

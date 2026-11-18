@@ -1,0 +1,61 @@
+{
+  "repo_notes": [
+    {
+      "content": "MASKED is a free, open-source (MIT), self-custodial Bitcoin wallet for Chrome (Manifest V3) and Android (Capacitor). Write for two readers: people using the wallet (plain language, no jargon, task first) and developers. Public balance = taproot bc1p; Shielded balance = BIP 352 silent payments sp1. Ecash (Cashu) and the Launchpad escrow are custodial; say so where relevant. The software is experimental and unaudited. Never suggest typing a recovery phrase anywhere except the wallet. Do not describe prices, returns, airdrops or partnerships. Updates are posted by the developer on X: @ratsonchain. src/ is the source; extension/ is build output."
+    }
+  ],
+  "pages": [
+    {
+      "title": "Overview",
+      "purpose": "What MASKED is, who it is for, the two balances, install links, and the safety status (experimental, unaudited)."
+    },
+    {
+      "title": "Getting started",
+      "purpose": "Install, create or restore a wallet, back up the phrase, receive, send, shield, and try Signet. Base it on docs/GETTING-STARTED.md and docs/FAQ.md.",
+      "parent": "Overview"
+    },
+    {
+      "title": "Public and Shielded balances",
+      "purpose": "How silent payments (BIP 352) work in MASKED: sp1 addresses, scanning, the scan server, change, and what stays private.",
+      "parent": "Overview"
+    },
+    {
+      "title": "Safety model",
+      "purpose": "Vault encryption, auto-lock, approvals, protected coins, look-alike address warnings, refused signatures, and the known limits from SECURITY.md.",
+      "parent": "Overview"
+    },
+    {
+      "title": "Tokens: BRC-20, Ordinals and LEAF",
+      "purpose": "Minting, inscribing and sending BRC-20 / BRC2.0, the Ordinals gallery, LEAF (CRC-20)."
+    },
+    {
+      "title": "RGB tokens and market",
+      "purpose": "Holding, sending and issuing RGB tokens, the RGB balance, backups, instant listings, lots, swaps and the market. Signet and the Mainnet beta."
+    },
+    {
+      "title": "Ecash",
+      "purpose": "Cashu ecash: top up, pay, receive, lock to an address, and why it is custodial."
+    },
+    {
+      "title": "Offline send and silent airdrop",
+      "purpose": "Signing a payment offline and relaying it; paying many Shielded addresses in one transaction."
+    },
+    {
+      "title": "window.masked provider",
+      "purpose": "The dApp API for website builders, UniSat compatibility, approvals, RGB and ecash methods. Based on docs/PROVIDER.md."
+    },
+    {
+      "title": "Architecture",
+      "purpose": "Composition root (MaskedApp), services, pure modules, views and controller, provider/background, storage keys. Based on docs/ARCHITECTURE.md."
+    },
+    {
+      "title": "Building and testing",
+      "purpose": "npm run check, npm run build, reproducible builds, the RGB engine build, Android and iOS builds, the test suite.",
+      "parent": "Architecture"
+    },
+    {
+      "title": "Contributing",
+      "purpose": "How to contribute code and translations, rules for wallet code, reporting bugs and security issues."
+    }
+  ]
+}

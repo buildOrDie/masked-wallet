@@ -1,1 +1,11 @@
-blank_issues_enabled: true
+blank_issues_enabled: false
+contact_links:
+  - name: Security problem
+    url: https://github.com/buildOrDie/masked-wallet/blob/main/SECURITY.md
+    about: Please report security issues privately, not in a public issue.
+  - name: Questions and how-tos
+    url: https://github.com/buildOrDie/masked-wallet/blob/main/docs/FAQ.md
+    about: Short answers to common questions. You can also ask the AI wiki at deepwiki.com/buildOrDie/masked-wallet.
+  - name: News and updates
+    url: https://x.com/ratsonchain
+    about: Every release is posted first by the developer on X.

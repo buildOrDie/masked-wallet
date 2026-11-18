@@ -1,0 +1,19 @@
+name: Idea or feature request
+description: Suggest something MASKED should do.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What would you like to do?
+      description: The thing you're trying to do, in your own words.
+    validations:
+      required: true
+  - type: textarea
+    id: how
+    attributes:
+      label: How could MASKED help?
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else? (links, screenshots, other wallets that do it)

@@ -2,7 +2,7 @@
 
 # MASKED
 
-[![Follow the dev on X: @ratsonchain](https://img.shields.io/badge/Follow%20the%20dev-%40ratsonchain-000000?style=for-the-badge&logo=x&logoColor=white)](https://x.com/ratsonchain) [![MIT licence](https://img.shields.io/badge/licence-MIT-f7a21b?style=for-the-badge)](LICENSE)
+[![Follow the dev on X: @ratsonchain](https://img.shields.io/badge/Follow%20the%20dev-%40ratsonchain-000000?style=for-the-badge&logo=x&logoColor=white)](https://x.com/ratsonchain) [![MIT licence](https://img.shields.io/badge/licence-MIT-f7a21b?style=for-the-badge)](LICENSE) [![Guide](https://img.shields.io/badge/guide-start%20here-9d8cff?style=for-the-badge)](docs/README.md) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/buildOrDie/masked-wallet)
 
 **A Bitcoin wallet with a private side.** Open source, for Chrome and Android.
 
@@ -14,6 +14,8 @@ You get two Bitcoin balances from one recovery phrase:
 It also holds your tokens and NFTs: BRC-20, Ordinals, RGB and LEAF, plus Cashu ecash for instant payments.
 
 [**Add to Chrome**](https://chromewebstore.google.com/detail/masked-wallet/pojmpfcbdmacabhckemelcbkmckhaoig) · [**Android app**](https://signet.maskedwallet.com/install) · [maskedwallet.com](https://maskedwallet.com) · [the dev on X: @ratsonchain](https://x.com/ratsonchain)
+
+**New here?** [Getting started](docs/GETTING-STARTED.md) · [FAQ](docs/FAQ.md) · [All guides](docs/README.md) · [Ask the AI wiki](https://deepwiki.com/buildOrDie/masked-wallet) (answers questions about MASKED and its code)
 
 > **Experimental, unaudited software. Use small amounts.** See [Safety](#safety) and [SECURITY.md](SECURITY.md).
 
@@ -67,6 +69,7 @@ To check a download is genuine, compare its SHA-256 with the one on the release 
 
 ## What's new
 
+- **2.29.27**: Home shows a one-time note that MASKED is free, open source and built in public, with a link to follow the dev on X. Settings has links to the dev's X and to this repository.
 - **2.29.26**: faster, with far fewer network requests: windows opened from a site share their work, and open listings are checked for a sale at most every 2 minutes. Fixes a step that could hang for good, and lots that lost their signature when browser storage filled up.
 - **2.29.25**: **lots on sale at once**: one approval moves and signs every lot, so they're all for sale even with MASKED closed right after.
 - **2.29.24**: lots work with tokens from swaps too; RGB pauses token moves while another copy of the wallet is newer, and offers to load its backup.
@@ -105,6 +108,12 @@ npm run build   # rebuilds extension/ from src/
 ```
 
 The build is reproducible: the same source gives the same `extension/`. The Chrome Web Store package is built from a tagged release and only drops the manifest `key`. RGB swaps need the engine built with [engine/build.sh](engine/README.md). Android and iPhone: [docs/ANDROID.md](docs/ANDROID.md), [docs/IOS.md](docs/IOS.md). How the code is laid out: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+### Working with an AI assistant
+
+- **Questions about MASKED or its code:** ask the [AI wiki on DeepWiki](https://deepwiki.com/buildOrDie/masked-wallet).
+- **Coding agents** (Claude Code, Codex, Cursor, Copilot…) read [AGENTS.md](AGENTS.md): commands, where things are, and the rules that keep wallet code safe.
+- **Chat assistants and search tools** can read [llms.txt](llms.txt), a short map of MASKED and its docs.
 
 ## Follow the build
 
