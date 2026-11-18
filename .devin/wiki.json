@@ -2,12 +2,15 @@
   "repo_notes": [
     {
       "content": "MASKED is a free, open-source (MIT), self-custodial Bitcoin wallet for Chrome (Manifest V3) and Android (Capacitor). Write for two readers: people using the wallet (plain language, no jargon, task first) and developers. Public balance = taproot bc1p; Shielded balance = BIP 352 silent payments sp1. Ecash (Cashu) and the Launchpad escrow are custodial; say so where relevant. The software is experimental and unaudited. Never suggest typing a recovery phrase anywhere except the wallet. Do not describe prices, returns, airdrops or partnerships. Updates are posted by the developer on X: @ratsonchain. src/ is the source; extension/ is build output."
+    },
+    {
+      "content": "Style: plain, short sentences, like the README and docs/GETTING-STARTED.md. Say 'the wallet' or 'you', not 'users'. No marketing words (comprehensive, robust, seamless, leverage, utilize). Name things as the app does: Public, Shielded, Send, Shield, Receive, RGB balance, Settings. Only include a diagram when it has real content taken from the code (docs/ARCHITECTURE.md has two mermaid diagrams to base them on); never an empty one. The Overview and Getting started pages are for people using the wallet: no source folders or build details there; those belong on Architecture and Building and testing."
     }
   ],
   "pages": [
     {
       "title": "Overview",
-      "purpose": "What MASKED is, who it is for, the two balances, install links, and the safety status (experimental, unaudited)."
+      "purpose": "What MASKED is in plain words for someone deciding whether to use it: the two balances, what it holds, where to get it, and that it is experimental and unaudited (small amounts). Which parts are custodial (ecash, the Launchpad escrow) and which are not."
     },
     {
       "title": "Getting started",
