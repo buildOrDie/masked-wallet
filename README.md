@@ -2,6 +2,8 @@
 
 # MASKED
 
+[![Follow the dev on X: @ratsonchain](https://img.shields.io/badge/Follow%20the%20dev-%40ratsonchain-000000?style=for-the-badge&logo=x&logoColor=white)](https://x.com/ratsonchain) [![MIT licence](https://img.shields.io/badge/licence-MIT-f7a21b?style=for-the-badge)](LICENSE)
+
 **A Bitcoin wallet with a private side.** Open source, for Chrome and Android.
 
 You get two Bitcoin balances from one recovery phrase:
@@ -65,6 +67,7 @@ To check a download is genuine, compare its SHA-256 with the one on the release 
 
 ## What's new
 
+- **2.29.26**: faster, with far fewer network requests: windows opened from a site share their work, and open listings are checked for a sale at most every 2 minutes. Fixes a step that could hang for good, and lots that lost their signature when browser storage filled up.
 - **2.29.25**: **lots on sale at once**: one approval moves and signs every lot, so they're all for sale even with MASKED closed right after.
 - **2.29.24**: lots work with tokens from swaps too; RGB pauses token moves while another copy of the wallet is newer, and offers to load its backup.
 - **2.29.23**: **sell in lots**: split a sale into up to 10 Instant listings in one transaction; buyers take as many as they want, the rest stays listed.
@@ -102,6 +105,10 @@ npm run build   # rebuilds extension/ from src/
 ```
 
 The build is reproducible: the same source gives the same `extension/`. The Chrome Web Store package is built from a tagged release and only drops the manifest `key`. RGB swaps need the engine built with [engine/build.sh](engine/README.md). Android and iPhone: [docs/ANDROID.md](docs/ANDROID.md), [docs/IOS.md](docs/IOS.md). How the code is laid out: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Follow the build
+
+MASKED is built in public. Every release, fix and what's coming next is posted first by its developer on X: **[@ratsonchain](https://x.com/ratsonchain)**. Found a bug? Open an [issue](https://github.com/buildOrDie/masked-wallet/issues).
 
 ## Contributing
 
