@@ -9,6 +9,7 @@ Can't find your answer? Ask the [AI wiki](https://deepwiki.com/buildOrDie/masked
 |---|---|
 | [Getting started](GETTING-STARTED.md) | Install, create or restore a wallet, receive and send your first bitcoin |
 | [FAQ](FAQ.md) | Short answers: safety, fees, Shielded vs Public, Signet, RGB backups |
+| [News and videos](NEWS.md) | What's new in each update, with the videos |
 | [Safety](../SECURITY.md) | What protects you, and the limits to know before using real funds |
 
 ## Features

@@ -6,6 +6,7 @@
 
 - [Getting started](https://github.com/buildOrDie/masked-wallet/blob/main/docs/GETTING-STARTED.md): install, create or restore, receive, send, shield
 - [FAQ](https://github.com/buildOrDie/masked-wallet/blob/main/docs/FAQ.md): safety, Shielded vs Public, Signet, RGB backups, ecash
+- [News and videos](https://github.com/buildOrDie/masked-wallet/blob/main/docs/NEWS.md): what's new in each update
 - [Safety and known limits](https://github.com/buildOrDie/masked-wallet/blob/main/SECURITY.md)
 - [Chrome Web Store](https://chromewebstore.google.com/detail/masked-wallet/pojmpfcbdmacabhckemelcbkmckhaoig)
 - [Android APK](https://signet.maskedwallet.com/install)

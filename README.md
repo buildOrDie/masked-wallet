@@ -15,7 +15,7 @@ It also holds your tokens and NFTs: BRC-20, Ordinals, RGB and LEAF, plus Cashu e
 
 [**Add to Chrome**](https://chromewebstore.google.com/detail/masked-wallet/pojmpfcbdmacabhckemelcbkmckhaoig) · [**Android app**](https://signet.maskedwallet.com/install) · [maskedwallet.com](https://maskedwallet.com) · [the dev on X: @ratsonchain](https://x.com/ratsonchain)
 
-**New here?** [Getting started](docs/GETTING-STARTED.md) · [FAQ](docs/FAQ.md) · [All guides](docs/README.md) · [Ask the AI wiki](https://deepwiki.com/buildOrDie/masked-wallet) (answers questions about MASKED and its code)
+**New here?** [Getting started](docs/GETTING-STARTED.md) · [FAQ](docs/FAQ.md) · [News and videos](docs/NEWS.md) · [All guides](docs/README.md) · [Ask the AI wiki](https://deepwiki.com/buildOrDie/masked-wallet) (answers questions about MASKED and its code)
 
 > **Experimental, unaudited software. Use small amounts.** See [Safety](#safety) and [SECURITY.md](SECURITY.md).
 
@@ -68,6 +68,8 @@ To check a download is genuine, compare its SHA-256 with the one on the release 
 - Found a security problem? Report it privately: [SECURITY.md](SECURITY.md).
 
 ## What's new
+
+<p align="center"><a href="docs/img/masked-2.29.28.mp4"><img src="docs/img/masked-2.29.28-preview.gif" width="480" alt="MASKED 2.29.28 update video"></a><br><a href="docs/img/masked-2.29.28.mp4"><b>▶ Watch the 2.29.28 video (20 s)</b></a> · <a href="docs/NEWS.md">All news and videos</a></p>
 
 - **2.29.28**: switching between Mainnet and Signet while a scan is running no longer mixes the two up (Signet kept loading); wallets it already happened to repair themselves.
 - **2.29.27**: Home shows a one-time note that MASKED is free, open source and built in public, with a link to follow the dev on X. Settings has links to the dev's X and to this repository.
