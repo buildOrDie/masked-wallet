@@ -83,3 +83,13 @@ test('the sweep stops when the RGB balance runs out, and says so for the ones le
   n = 5;
   await assert.rejects(a.approvals.run({ ...act, id: 'r3' }), /101,000 sats/);
 });
+
+test('economy fee rates: Instant buys and sweeps take 0.1 sat/vB and up, listings and cancels still 1 and up', async () => {
+  const { handle, opened } = handler();
+  await handle(SITE, 'rgbInstantBuyMany', { items: [item('a')], network: 'signet', feeRate: 0.3 });
+  assert.equal(opened.at(-1).params.feeRate, 0.3);
+  await handle(SITE, 'rgbInstantBuy', { ...item('b'), network: 'signet', feeRate: 0.1 });
+  assert.equal(opened.at(-1).params.feeRate, 0.1);
+  await assert.rejects(handle(SITE, 'rgbInstantBuyMany', { items: [item('c')], network: 'signet', feeRate: 0.05 }), /between 0.1 and 500/);
+  await assert.rejects(handle(SITE, 'rgbInstantCancel', { offerId: 'd', offer: { assetId: A, amount: '1', priceSats: '1' }, feeRate: 0.5 }), /between 1 and 500/);
+});

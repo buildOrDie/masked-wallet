@@ -3,6 +3,7 @@
 // goes to openApproval, which shows the wallet's approval screen. The caller supplies where things are stored.
 import * as btc from '@scure/btc-signer';
 import { bech32m, hex } from '@scure/base';
+import { BUY_FEE_MIN } from '../rgb/swap.mjs';
 
 export const NETS = {
   main: { ord: 'https://ordinals.com', api: 'https://mempool.space/api/', unisat: 'livenet', chain: 'BITCOIN_MAINNET', name: 'Bitcoin Mainnet' },
@@ -52,7 +53,9 @@ function swapParams(method, p) {
   }
   if (method === 'rgbBuySign') { out.psbt = str(p.psbt, 200_000, 'psbt'); out.consignment = str(p.consignment, 4_000_000, 'consignment'); }
   if (method === 'rgbSaleComplete') out.psbt = str(p.psbt, 200_000, 'psbt');
-  if (['rgbInstantList', 'rgbInstantBuy', 'rgbInstantCancel'].includes(method) && p.feeRate != null) { const f = Number(p.feeRate); if (!(f >= 1 && f <= 500)) throw err(4000, 'feeRate must be between 1 and 500 sat/vB.'); out.feeRate = f; }
+  // an Instant buy works out its own fee (no RGB engine rounding), so it can use an economy rate below 1 sat/vB
+  if (method === 'rgbInstantBuy' && p.feeRate != null) { const f = Number(p.feeRate); if (!(f >= BUY_FEE_MIN && f <= 500)) throw err(4000, `feeRate must be between ${BUY_FEE_MIN} and 500 sat/vB.`); out.feeRate = f; }
+  if (['rgbInstantList', 'rgbInstantCancel'].includes(method) && p.feeRate != null) { const f = Number(p.feeRate); if (!(f >= 1 && f <= 500)) throw err(4000, 'feeRate must be between 1 and 500 sat/vB.'); out.feeRate = f; }
   if (method === 'rgbInstantList') {
     // where the wallet sends the signed listing if it's signed later (after the tokens move): https only
     let u; try { u = new URL(String(p.market || '')); } catch { throw err(4000, 'market must be the market\'s address.'); }
@@ -105,7 +108,7 @@ function sweepParams(p) {
   if (ids.size !== out.length) throw err(4000, 'The same listing is in the list twice.');
   if (new Set(out.map((x) => x.offer.assetId)).size !== 1) throw err(4000, 'A sweep buys one token: every listing must be for the same asset.');
   const res = { items: out.map(({ network: _n, ...x }) => x), network: p.network == null ? undefined : String(p.network).slice(0, 20) };
-  if (p.feeRate != null) { const f = Number(p.feeRate); if (!(f >= 1 && f <= 500)) throw err(4000, 'feeRate must be between 1 and 500 sat/vB.'); res.feeRate = f; }
+  if (p.feeRate != null) { const f = Number(p.feeRate); if (!(f >= BUY_FEE_MIN && f <= 500)) throw err(4000, `feeRate must be between ${BUY_FEE_MIN} and 500 sat/vB.`); res.feeRate = f; }
   return res;
 }
 const checkAmount = (a) => { if (!/^\d+(\.\d+)?$/.test(String(a || '')) || /^0+(\.0+)?$/.test(String(a))) throw err(4000, 'amount must be a positive number.'); return String(a); };

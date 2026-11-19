@@ -14,6 +14,9 @@
 
 export const SEAL_OUTPUT = 1;
 export const SEAL_SATS = 1000;
+/** The lowest fee rate an Instant buy accepts (sat/vB): current Bitcoin Core relays down to 0.1. The buy works out its
+ * own fee, so it isn't held to the RGB engine's whole-number rates (listing moves and cancels are). */
+export const BUY_FEE_MIN = 0.1;
 /** Size used for the network fee (two Taproot inputs, four outputs, with room for the commitment). */
 export const SWAP_SIZE_VB = 320;
 

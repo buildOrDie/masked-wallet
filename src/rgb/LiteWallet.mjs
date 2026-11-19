@@ -6,7 +6,7 @@
 import * as btc from '@scure/btc-signer';
 import { hex, base64 } from '@scure/base';
 import { isInvoiceV1, readInvoiceV1, invoiceIdOf, pickEndpoint, newSenderKey, sharedKeys, deliverConsignment, endpointUrl, rpc, PROXY_V1 } from './proxyV1.mjs';
-import { SEAL_SATS, SEAL_OUTPUT, SWAP_SIZE_VB, b64, buyerOutputs, outpointOf, completionBlocker, readOffer, buyerCoinFor, offerable, heldBreakdown, payoutFor, changedTerms, unb64, exactCoinFor, freeSellerCoinFor, sendCoinsFor, instantAmounts, INSTANT_SEAL_OUTPUT, INSTANT_SEAL_SATS, payCoinsFor, txVbytes, OPRET_SCRIPT, P2TR_SCRIPT } from './swap.mjs';
+import { SEAL_SATS, SEAL_OUTPUT, SWAP_SIZE_VB, b64, buyerOutputs, outpointOf, completionBlocker, readOffer, buyerCoinFor, offerable, heldBreakdown, payoutFor, changedTerms, unb64, exactCoinFor, freeSellerCoinFor, sendCoinsFor, instantAmounts, INSTANT_SEAL_OUTPUT, INSTANT_SEAL_SATS, payCoinsFor, txVbytes, OPRET_SCRIPT, P2TR_SCRIPT, BUY_FEE_MIN } from './swap.mjs';
 import { RGB_UTXO_SATS, RGB_KEEP_SPARE } from './config.mjs';
 
 /** rgb-lib names for our network ids. Utexo's custom Signet uses Signet rules too. */
@@ -1807,7 +1807,8 @@ export class LiteWallet {
     const consignment = unb64(String(l.consignment || ''));
     check(consignment, info.templateTxid);
     // pay: one confirmed coin covering the price, the seal and the fee
-    const rate = Math.max(1, Number(feeRate) || 1);
+    // economy rates below 1 sat/vB are fine here: the fee is worked out below, not by the RGB engine (2.29.29)
+    const rate = Math.max(BUY_FEE_MIN, Number(feeRate) || 1);
     // the size from the real scripts: the seller's coin, the buyer's coins; commitment, payout, seal, change
     const feeFor = (ins, change = true) => BigInt(Math.ceil(rate * txVbytes([info.sellerScript || P2TR_SCRIPT, ...ins], [OPRET_SCRIPT, info.payoutScript || P2TR_SCRIPT, P2TR_SCRIPT, ...(change ? [P2TR_SCRIPT] : [])])));
     const perInput = feeFor([P2TR_SCRIPT, P2TR_SCRIPT]) - feeFor([P2TR_SCRIPT]);
