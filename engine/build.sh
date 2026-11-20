@@ -32,7 +32,12 @@ git clone --quiet --depth 1 --branch "$tag" https://github.com/UTEXO-Protocol/rg
 git -C "$work" apply "$here/masked-b5.patch"
 # swaps, listings, the wallet upgrade and the engine's own tests, natively
 (cd "$work" && cargo test --locked --lib -q)
+# no paths of this computer in the published engine: Rust and C keep source paths for error messages, and those
+# started with /Users/<name>/ (the home folder, the cargo cache, this build folder)
+export RUSTFLAGS="--remap-path-prefix=$work=/rgb-lib-wasm --remap-path-prefix=$HOME=/build"
+export CFLAGS_wasm32_unknown_unknown="-ffile-prefix-map=$work=/rgb-lib-wasm -ffile-prefix-map=$HOME=/build"
 (cd "$work/bindings/wasm" && wasm-pack build --release --target web --out-dir pkg)
+if LC_ALL=C grep -a -q -F "$HOME" "$work/bindings/wasm/pkg/rgb_lib_wasm_bindings_bg.wasm"; then echo "The built engine still names $HOME. Stop."; exit 1; fi
 
 out="$root/vendor/rgb-lib-wasm"; rm -rf "$out"; mkdir -p "$out"
 cp "$work/bindings/wasm/pkg/"rgb_lib_wasm_bindings* "$out/"
