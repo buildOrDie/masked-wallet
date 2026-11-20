@@ -78,6 +78,9 @@ function keepSpend(key, v) {
 /** For tests: forget kept answers. */
 export function outspendCacheClear() { spendsMem = {}; spendsReadAt = Date.now(); try { globalThis.localStorage?.removeItem(SPENDS_KEY); } catch { /* none */ } }
 
+/** Most lots one transaction makes (outputs of one move; the market splits a listing into at most 10). */
+const LOTS_ONE_TX_MAX = 20;
+
 export class LiteWallet {
   /**
    * @param {object} lib  the loaded rgb-lib-wasm module ({ WasmWallet, WasmInvoice, restoreKeys })
@@ -892,6 +895,8 @@ export class LiteWallet {
   get canPresign() { return typeof this.wallet.presignSale === 'function' && typeof this.lib.WasmWallet?.presignedBuyPsbt === 'function'; }
   requirePresign() { if (!this.canPresign) throw new Error('This MASKED build can\'t make Instant listings yet. Update MASKED.'); }
   /** The engine can spend and list outputs of this wallet's own unconfirmed moves (all lots signed at once). */
+  /** Every lot of a listing in lots in one transaction (2.30.2 engine: `setSwapLots`). */
+  get canSplitOnce() { return this.canChainLots && typeof this.wallet.setSwapLots === 'function' && /** @type {any} */ (this).splitOnceOff !== true; }
   get canChainLots() { return this.canPresign && typeof this.wallet.setOwnUnconfirmed === 'function' && typeof this.wallet.setSwapChangeVout === 'function' && /** @type {any} */ (this).lotsChain !== false; }
   /**
    * Tell the engine which unconfirmed transactions are this wallet's own moves (listing and lot moves in `store`, plus
@@ -1023,7 +1028,7 @@ export class LiteWallet {
     return gone;
   }
   /** Move the tokens of a listing onto an output of their own (or a listed output back, when cancelling). */
-  async instantMove(assetId, amount, from, feeRate, onStep = (_t) => {}, { feeFromInputs = true } = {}) {
+  async instantMove(assetId, amount, from, feeRate, onStep = (_t) => {}, { feeFromInputs = true, lots = [] } = {}) {
     const online = this.requireOnline();
     const rate = Math.max(1, Number(feeRate) || 1);
     // `from`: one output holding the tokens, or several (tokens spread over outputs are joined in the same move)
@@ -1034,7 +1039,10 @@ export class LiteWallet {
     // sats in bitcoin for the network fee" with 50,000 on an RGB output).
     const split = typeof this.wallet.setSwapChangeVout === 'function';
     const KEEP = split ? BigInt(LiteWallet.MOVE_KEEP_SATS) : 0n;
-    const outsFor = (back) => [OPRET_SCRIPT, P2TR_SCRIPT, P2TR_SCRIPT, ...(back ? [P2TR_SCRIPT] : [])];
+    // `lots`: more lots in the same transaction (2.30.2, `setSwapLots`), one output each right after the seal
+    const extra = (lots || []).map((a) => BigInt(a));
+    const lotsSats = BigInt(INSTANT_SEAL_SATS) * BigInt(extra.length);
+    const outsFor = (back) => [OPRET_SCRIPT, P2TR_SCRIPT, ...extra.map(() => P2TR_SCRIPT), P2TR_SCRIPT, ...(back ? [P2TR_SCRIPT] : [])];
     const feeFor = (n, back = split) => BigInt(Math.ceil(rate * txVbytes([...Array(froms.length).fill(P2TR_SCRIPT), ...Array(n).fill(P2TR_SCRIPT)], outsFor(back))));
     const perInput = feeFor(2) - feeFor(1);
     const sis = await Promise.all(froms.map((c) => this.outpointInfo(c.outpoint)));
@@ -1042,8 +1050,8 @@ export class LiteWallet {
     // the token outputs' own sats pay the fee when they're enough (a chained lot move; an RGB output holding the
     // bitcoin of an earlier move): no other coin needed
     let pay = null;
-    if (feeFromInputs && have >= feeFor(0, false) + BigInt(INSTANT_SEAL_SATS) + KEEP + (split ? 0n : 546n)) pay = { coins: [] };
-    const need = feeFor(1) + BigInt(INSTANT_SEAL_SATS) + KEEP + 546n;
+    if (feeFromInputs && have >= feeFor(0, false) + BigInt(INSTANT_SEAL_SATS) + lotsSats + KEEP + (split ? 0n : 546n)) pay = { coins: [] };
+    const need = feeFor(1) + BigInt(INSTANT_SEAL_SATS) + lotsSats + KEEP + 546n;
     const { all, confirmed } = pay ? { all: [], confirmed: [] } : await this.btcCoins();
     pay = pay || payCoinsFor(confirmed, all, need > have ? need - have : 1n, perInput);
     if (!pay) throw new Error(`Your RGB wallet needs about ${need.toLocaleString('en-US')} sats in bitcoin for the network fee. Tap Add from Bitcoin under RGB balance on Home.`);
@@ -1062,15 +1070,18 @@ export class LiteWallet {
     // the real size, from the real scripts
     const own = await this.ownScript();
     const total = infos.reduce((t, f) => t + BigInt(f.sats), 0n);
+    const lotOuts = extra.map(() => ({ script: own, sats: INSTANT_SEAL_SATS }));
+    const lotScripts = extra.map(() => own);
     let outs;
     if (split) {
       // the RGB output for the rest of the tokens (KEEP sats), then the rest of the bitcoin back, if it's worth an output
-      const back = total - BigInt(INSTANT_SEAL_SATS) - KEEP - BigInt(Math.ceil(rate * txVbytes(infos.map((f) => f.script), [OPRET_SCRIPT, seal, own, own])));
-      const alone = total - BigInt(INSTANT_SEAL_SATS) - BigInt(Math.ceil(rate * txVbytes(infos.map((f) => f.script), [OPRET_SCRIPT, seal, own])));
-      if (back >= 546n) outs = [{ script: seal, sats: INSTANT_SEAL_SATS }, { script: own, sats: Number(KEEP) }, { script: own, sats: Number(back) }];
-      else if (alone >= KEEP) outs = [{ script: seal, sats: INSTANT_SEAL_SATS }, { script: own, sats: Number(alone) }];
+      const back = total - BigInt(INSTANT_SEAL_SATS) - lotsSats - KEEP - BigInt(Math.ceil(rate * txVbytes(infos.map((f) => f.script), [OPRET_SCRIPT, seal, ...lotScripts, own, own])));
+      const alone = total - BigInt(INSTANT_SEAL_SATS) - lotsSats - BigInt(Math.ceil(rate * txVbytes(infos.map((f) => f.script), [OPRET_SCRIPT, seal, ...lotScripts, own])));
+      if (back >= 546n) outs = [{ script: seal, sats: INSTANT_SEAL_SATS }, ...lotOuts, { script: own, sats: Number(KEEP) }, { script: own, sats: Number(back) }];
+      else if (alone >= KEEP) outs = [{ script: seal, sats: INSTANT_SEAL_SATS }, ...lotOuts, { script: own, sats: Number(alone) }];
       else throw new Error('Not enough bitcoin for the network fee.');
     } else {
+      if (extra.length) throw new Error('This RGB engine makes lots one transaction at a time.');
       const change = total - BigInt(INSTANT_SEAL_SATS) - BigInt(Math.ceil(rate * txVbytes(infos.map((f) => f.script), [OPRET_SCRIPT, seal, own])));
       if (change < 546n) throw new Error('Not enough bitcoin for the network fee.');
       outs = [{ script: seal, sats: INSTANT_SEAL_SATS }, { script: own, sats: Number(change) }];
@@ -1081,7 +1092,12 @@ export class LiteWallet {
     );
     // the rest of the tokens stay on this move's own change output (an engine that can): no free RGB output needed,
     // and the next lot of a chain moves from it at once
-    if (typeof this.wallet.setSwapChangeVout === 'function') this.wallet.setSwapChangeVout(SEAL_OUTPUT + 1);
+    if (typeof this.wallet.setSwapChangeVout === 'function') this.wallet.setSwapChangeVout(SEAL_OUTPUT + 1 + extra.length);
+    // the other lots: outputs 2, 3, … of this same transaction (an engine that can: setSwapLots)
+    if (extra.length) {
+      if (typeof this.wallet.setSwapLots !== 'function') throw new Error('This RGB engine makes lots one transaction at a time.');
+      this.wallet.setSwapLots(extra.map((a, k) => ({ vout: SEAL_OUTPUT + 1 + k, amount: Number(a) })));
+    }
     const psbt = this.engineV1
       ? await this.wallet.colorSwap(online, unsigned, assetId, BigInt(amount), r.invoice, SEAL_OUTPUT, BigInt(INSTANT_SEAL_SATS), 1, this.transport, null)
       : await this.wallet.colorSwap(online, unsigned, assetId, BigInt(amount), r.recipientId, SEAL_OUTPUT, BigInt(INSTANT_SEAL_SATS), [this.transport], 1);
@@ -1106,6 +1122,8 @@ export class LiteWallet {
     } catch (err) {
       // given up before anything could go out: the invoice goes too (once sent, it stays: its transfer is on the way)
       if (stage !== 'send') await dropInvoice();
+      if (typeof this.wallet?.setSwapLots === 'function') { try { this.wallet.setSwapLots(null); } catch { /* cleared by the next colouring */ } }
+      try { if (err && typeof err === 'object') err.moveStage = stage; } catch { /* a frozen error */ }
       throw err;
     }
   }
@@ -1431,7 +1449,28 @@ export class LiteWallet {
     /** @type {Map<string, string>} lots not moved (the market takes them off) */
     const failed = new Map();
     let from = coins;
-    for (const [k, l] of list.entries()) {
+    // 2.30.2: every lot in ONE transaction (an engine with setSwapLots): lot 1 on the seal, the others on outputs
+    // 2, 3, … of the same move (about 70% less network fee for 10 lots than a chain of moves). Refused before it
+    // went out (an older engine, a lot the engine won't make): the chain below, as before.
+    let oneTx = false;
+    if (this.canSplitOnce && list.length <= LOTS_ONE_TX_MAX) {
+      onStep(`Moving ${list.length} lots to outputs of their own, in one transaction…`);
+      try {
+        const moved = await this.instantMove(assetId, list[0].amount, from, rate, onStep, { feeFromInputs: false, lots: list.slice(1).map((l) => String(l.amount)) });
+        this.syncOwnUnconfirmed(store, [moved.txid]);
+        const coinsMade = list.map((_, k) => `${moved.txid}:${SEAL_OUTPUT + k}`);
+        list.forEach((l, k) => store.set(l.offerId, { role: 'seller', assetId, amount: String(l.amount), priceSats: String(l.priceSats), market: String(market), token: l.token, at, stage: 'moving', lotGroup: group, lotNo: k, lots: list.length, feeRate: rate, moveTxid: moved.txid, moveHex: k === 0 ? moved.txHex || undefined : undefined, coin: coinsMade[k], oneTx: true }));
+        this.reserve([...new Set([...this.reserved, ...coinsMade])]);
+        await this.save();
+        try { await this.wallet.sync(online); } catch { /* signed below if it can */ }
+        oneTx = true;
+      } catch (err) {
+        if (err?.moveStage === 'send') throw err; // it may have gone out: kept, never made twice
+        this.splitOnceOff = true; // this engine can't: the chain from now on
+        onStep('Moving the lots one after another instead…');
+      }
+    }
+    for (const [k, l] of (oneTx ? [] : list.entries())) {
       onStep(`Moving lot ${k + 1} of ${list.length} to an output of its own…`);
       let moved;
       try { moved = await this.instantMove(assetId, l.amount, from, rate, onStep, { feeFromInputs: k > 0 }); } catch (err) {

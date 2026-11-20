@@ -261,10 +261,14 @@ export class ApprovalController {
         // one move per lot: a token output and a bitcoin coin in; the commitment, the lot, the rest of the tokens and the
         // bitcoin back out (MASKED with the newer engine: all of them now, every lot signed at once)
         const atOnce = !!r.service.wallet?.canChainLots;
-        const vb = lots.length * Math.ceil(txVbytes([P2TR_SCRIPT, P2TR_SCRIPT], [OPRET_SCRIPT, P2TR_SCRIPT, P2TR_SCRIPT, P2TR_SCRIPT]));
+        // 2.30.2 engine: every lot in one transaction (one output each) instead of one move per lot
+        const oneTx = !!r.service.wallet?.canSplitOnce && lots.length <= 20;
+        const vb = oneTx
+          ? Math.ceil(txVbytes([P2TR_SCRIPT, P2TR_SCRIPT], [OPRET_SCRIPT, ...lots.map(() => P2TR_SCRIPT), P2TR_SCRIPT, P2TR_SCRIPT]))
+          : lots.length * Math.ceil(txVbytes([P2TR_SCRIPT, P2TR_SCRIPT], [OPRET_SCRIPT, P2TR_SCRIPT, P2TR_SCRIPT, P2TR_SCRIPT]));
         const each = lots.map((x) => ({ shown: r.amount(asset, Number(x.amount)), price: Number(x.priceSats) }));
         const same = each.every((x) => x.shown === each[0].shown && x.price === each[0].price);
-        return { asset, assetId: P.assetId, shown: `${r.amount(asset, total)} ${asset.ticker}`, price, n: lots.length, each, same, market: host, rate, vb, fee: Math.ceil(rate * vb), seal: INSTANT_SEAL_SATS * lots.length, atOnce };
+        return { asset, assetId: P.assetId, shown: `${r.amount(asset, total)} ${asset.ticker}`, price, n: lots.length, each, same, market: host, rate, vb, fee: Math.ceil(rate * vb), seal: INSTANT_SEAL_SATS * lots.length, atOnce, oneTx };
       }
       if (m === 'rgbInstantBuyMany') {
         if (!r.service.canPresign) throw new Error('This MASKED version can\'t do Instant listings yet. Update MASKED.');

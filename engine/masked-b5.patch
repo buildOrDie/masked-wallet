@@ -11,10 +11,10 @@ index 884d686..e2896b5 100644
  rgb-strict-encoding = { version = "=1.0.5", default-features = false, features = [
      "bitcoin",
 diff --git a/bindings/wasm/src/lib.rs b/bindings/wasm/src/lib.rs
-index 51b6efd..e97565a 100644
+index 51b6efd..d55126d 100644
 --- a/bindings/wasm/src/lib.rs
 +++ b/bindings/wasm/src/lib.rs
-@@ -635,6 +635,245 @@ impl WasmWallet {
+@@ -635,6 +635,258 @@ impl WasmWallet {
          to_js(&result)
      }
  
@@ -152,6 +152,19 @@ index 51b6efd..e97565a 100644
 +        self.inner.borrow_mut().set_swap_change_vout(vout);
 +    }
 +
++    /// For the next `colorSwap` only: the other lots of a listing in lots, `[{ vout, amount }]`, on outputs of this
++    /// wallet in the same PSBT (one transaction makes every lot). `[]` or null clears it.
++    #[wasm_bindgen(js_name = "setSwapLots")]
++    pub fn set_swap_lots(&self, lots_js: JsValue) -> Result<(), JsValue> {
++        #[derive(serde::Deserialize)]
++        struct Lot { vout: u32, amount: u64 }
++        let lots: Vec<Lot> = if lots_js.is_null() || lots_js.is_undefined() { vec![] } else {
++            serde_wasm_bindgen::from_value(lots_js).map_err(|e| JsValue::from_str(&format!("Invalid lots: {e}")))?
++        };
++        self.inner.borrow_mut().set_swap_lots(lots.into_iter().map(|l| (l.vout, l.amount)).collect());
++        Ok(())
++    }
++
 +    /// A pre-signed listing was bought: mark its output spent (the caller checked it on chain).
 +    #[wasm_bindgen(js_name = "markOutpointSpent")]
 +    pub fn mark_outpoint_spent(&self, outpoint: &str) -> Result<bool, JsValue> {
@@ -260,7 +273,7 @@ index 51b6efd..e97565a 100644
      /// Send RGB assets (end): broadcast a signed PSBT. Returns an OperationResult JS object.
      #[wasm_bindgen(js_name = "sendEnd")]
      pub async fn send_end(
-@@ -763,6 +1002,56 @@ impl WasmWallet {
+@@ -763,6 +1015,56 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -317,7 +330,7 @@ index 51b6efd..e97565a 100644
      /// Drain all wallet funds (end): broadcast a signed PSBT. Returns the txid string.
      #[wasm_bindgen(js_name = "drainToEnd")]
      pub async fn drain_to_end(
-@@ -1074,6 +1363,22 @@ impl WasmWallet {
+@@ -1074,6 +1376,22 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -340,7 +353,7 @@ index 51b6efd..e97565a 100644
      /// Check if the wallet needs a backup. Returns true if modified since last backup.
      #[wasm_bindgen(js_name = "backupInfo")]
      pub fn backup_info(&self) -> Result<bool, JsValue> {
-@@ -1217,7 +1522,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
+@@ -1217,7 +1535,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
  /// Works before the witness transaction is broadcast. Takes the raw consignment
  /// bytes (strict-encoded, not base64), the witness transaction ID, and the Bitcoin network.
  ///
@@ -350,7 +363,7 @@ index 51b6efd..e97565a 100644
  #[wasm_bindgen(js_name = "validateConsignmentOffchain")]
  pub fn validate_consignment_offchain(
      consignment_bytes: &[u8],
-@@ -1235,3 +1541,43 @@ pub fn validate_consignment_offchain(
+@@ -1235,3 +1554,43 @@ pub fn validate_consignment_offchain(
      .map_err(|e| JsValue::from_str(&e.to_string()))?;
      to_js(&result)
  }
@@ -1064,10 +1077,10 @@ index c5c45b2..46cf640 100644
  pub(crate) mod offline;
  #[cfg(feature = "esplora")]
 diff --git a/src/wallet/offline.rs b/src/wallet/offline.rs
-index a3a9f46..8a151f9 100644
+index a3a9f46..15922a7 100644
 --- a/src/wallet/offline.rs
 +++ b/src/wallet/offline.rs
-@@ -1312,9 +1312,55 @@ pub struct Wallet {
+@@ -1312,9 +1312,60 @@ pub struct Wallet {
      pub(crate) rgb_stock: std::rc::Rc<std::cell::RefCell<Option<crate::utils::MemStock>>>,
      pub(crate) vss_client: Option<super::vss::VssBackupClient>,
      pub(crate) last_vss_backup_error: std::cell::RefCell<Option<String>>,
@@ -1084,6 +1097,11 @@ index a3a9f46..8a151f9 100644
 +    pub(crate) own_unconfirmed: HashSet<String>,
 +    /// MASKED: the next `color_swap` puts the asset change on this output of its PSBT (`set_swap_change_vout`).
 +    pub(crate) swap_change_vout: Option<u32>,
++    /// MASKED: the next `color_swap` also puts these amounts of the asset on these outputs of its PSBT, this
++    /// wallet's own (`set_swap_lots`): one transaction makes every lot of a listing in lots.
++    pub(crate) swap_lots: Vec<(u32, u64)>,
++    /// MASKED: the lots of the colouring under way, from `color_swap` to `_prepare_rgb_psbt_wasm`.
++    pub(crate) lots_now: Vec<crate::wallet::online::LotOut>,
  }
  
  impl Wallet {
@@ -1123,7 +1141,7 @@ index a3a9f46..8a151f9 100644
      /// Create a wallet and restore its latest durable IndexedDB snapshot, if one exists.
      ///
      /// The returned wallet is ready for use only after the IndexedDB read and snapshot
-@@ -1325,6 +1371,31 @@ impl Wallet {
+@@ -1325,6 +1376,31 @@ impl Wallet {
          let snapshot = super::idb_store::load_snapshot(&wallet.idb_key())
              .await
              .map_err(|details| Error::Persistence { details })?;
@@ -1155,7 +1173,7 @@ index a3a9f46..8a151f9 100644
          if let Some(snapshot) = snapshot {
              wallet.idb_loaded = Some((snapshot.writer, snapshot.sequence));
              wallet
-@@ -1475,6 +1546,12 @@ impl Wallet {
+@@ -1475,6 +1551,14 @@ impl Wallet {
              },
              vss_client: None,
              last_vss_backup_error: std::cell::RefCell::new(None),
@@ -1165,10 +1183,12 @@ index a3a9f46..8a151f9 100644
 +            presigned_receives: HashSet::new(),
 +            own_unconfirmed: HashSet::new(),
 +            swap_change_vout: None,
++            swap_lots: vec![],
++            lots_now: vec![],
          })
      }
  
-@@ -1690,8 +1767,10 @@ impl Wallet {
+@@ -1690,8 +1774,10 @@ impl Wallet {
              None => rgb_allocations.as_deref().unwrap(),
          };
  
@@ -1180,7 +1200,7 @@ index a3a9f46..8a151f9 100644
          allocatable.sort_by_key(|t| t.rgb_allocations.len() + t.pending_blinded as usize);
          match allocatable.first() {
              Some(mut selected) => {
-@@ -2618,7 +2697,7 @@ impl Wallet {
+@@ -2618,7 +2704,7 @@ impl Wallet {
          Ok(psbt.to_string())
      }
  
@@ -1189,7 +1209,7 @@ index a3a9f46..8a151f9 100644
          let sign_options = sign_options.unwrap_or_default();
          let [colored, vanilla] = &self.signers;
          self.bdk_wallet
-@@ -4215,6 +4294,12 @@ pub(crate) mod address_reuse_tests {
+@@ -4215,6 +4301,14 @@ pub(crate) mod address_reuse_tests {
              rgb_stock: std::rc::Rc::new(std::cell::RefCell::new(None)),
              vss_client: None,
              last_vss_backup_error: std::cell::RefCell::new(None),
@@ -1199,11 +1219,13 @@ index a3a9f46..8a151f9 100644
 +            presigned_receives: HashSet::new(),
 +            own_unconfirmed: HashSet::new(),
 +            swap_change_vout: None,
++            swap_lots: vec![],
++            lots_now: vec![],
          }
      }
  
 diff --git a/src/wallet/online.rs b/src/wallet/online.rs
-index ca96b4a..d23c37a 100644
+index ca96b4a..5d48494 100644
 --- a/src/wallet/online.rs
 +++ b/src/wallet/online.rs
 @@ -4,6 +4,9 @@
@@ -1216,7 +1238,33 @@ index ca96b4a..d23c37a 100644
  const SCHEMAS_SUPPORTING_INFLATION: [database::enums::AssetSchema; 1] = [AssetSchema::Ifa];
  const SCHEMAS_SUPPORTING_BURN: [database::enums::AssetSchema; 2] =
      [AssetSchema::Ifa, AssetSchema::Bfa];
-@@ -791,8 +794,9 @@ pub(crate) struct ConsignmentPayment<'c> {
+@@ -361,6 +364,15 @@ struct BtcChange {
+     amount: u64,
+ }
+ 
++/// MASKED: a lot of a listing in lots, made by the same transaction as the move: `amount` of the asset on output
++/// `vout` (this wallet's, holding `sats`), recorded as the wallet's own like change, no receive needed.
++#[derive(Clone, Debug, Default, Deserialize, Serialize)]
++pub(crate) struct LotOut {
++    pub(crate) vout: u32,
++    pub(crate) amount: u64,
++    pub(crate) sats: u64,
++}
++
+ // map txo idx to assignments
+ type TxoAssignments = HashMap<i32, Vec<Assignment>>;
+ 
+@@ -377,6 +389,9 @@ pub(crate) struct InfoBatchTransfer {
+     operation_secret_key: Option<Vec<u8>>,
+     /// the sender's own proxy endpoint, where the recipients post their ACK
+     sender_transport_endpoint: Option<String>,
++    /// MASKED: lots made by this transaction on outputs of this wallet (`set_swap_lots`)
++    #[serde(default)]
++    lots: Vec<LotOut>,
+ }
+ 
+ impl std::fmt::Debug for InfoBatchTransfer {
+@@ -791,8 +806,9 @@ pub(crate) struct ConsignmentPayment<'c> {
  
  pub(crate) enum ReceiveMatcher {
      Blind(SecretSeal),
@@ -1228,7 +1276,7 @@ index ca96b4a..d23c37a 100644
  }
  
  impl DbTransfer {
-@@ -817,7 +821,7 @@ impl DbTransfer {
+@@ -817,7 +833,7 @@ impl DbTransfer {
              RecipientTypeFull::Witness { .. } => {
                  let script_pubkey = script_buf_from_recipient_id(recipient_id)?
                      .expect("witness recipient ID should yield a script");
@@ -1237,7 +1285,7 @@ index ca96b4a..d23c37a 100644
              }
          }
      }
-@@ -1598,7 +1602,7 @@ impl Wallet {
+@@ -1598,7 +1614,7 @@ impl Wallet {
                          }
                          // the blinding is derived from the keys of both parties, so a seal with a
                          // different one doesn't pay this transfer
@@ -1246,7 +1294,7 @@ index ca96b4a..d23c37a 100644
                              continue;
                          }
                          let vout = seal.vout.into_u32();
-@@ -1778,11 +1782,20 @@ impl Wallet {
+@@ -1778,11 +1794,20 @@ impl Wallet {
          let mut assignments_collected = AssignmentsCollection::default();
          let mut input_btc_amt = 0;
          for unspent in mut_unspents {
@@ -1269,7 +1317,53 @@ index ca96b4a..d23c37a 100644
                  .collect();
  
              // skip UTXOs with no allocations
-@@ -2441,6 +2454,17 @@ impl Wallet {
+@@ -2093,6 +2118,7 @@ impl Wallet {
+         extra_allocations: HashMap<String, TxoAssignments>,
+         change_utxo_idx: Option<i32>,
+         btc_change: Option<BtcChange>,
++        lots: &[LotOut],
+         status: TransferStatus,
+         min_confirmations: u8,
+         expiration_timestamp: Option<i64>,
+@@ -2174,6 +2200,29 @@ impl Wallet {
+                     self.database.set_coloring(db_coloring)?;
+                 }
+             }
++            // MASKED: the lots, this wallet's own outputs of this transaction (like change)
++            for lot in lots {
++                let op = Outpoint { txid: txid.clone(), vout: lot.vout };
++                let txo_idx = match self.database.get_txo(&op)? {
++                    Some(txo) => txo.idx,
++                    None => self.database.set_txo(DbTxoActMod {
++                        txid: ActiveValue::Set(txid.clone()),
++                        vout: ActiveValue::Set(lot.vout),
++                        btc_amount: ActiveValue::Set(lot.sats.to_string()),
++                        spent: ActiveValue::Set(false),
++                        exists: ActiveValue::Set(false),
++                        pending_witness: ActiveValue::Set(false),
++                        ..Default::default()
++                    })?,
++                };
++                self.database.set_coloring(DbColoringActMod {
++                    txo_idx: ActiveValue::Set(txo_idx),
++                    asset_transfer_idx: ActiveValue::Set(asset_transfer_idx),
++                    r#type: ActiveValue::Set(ColoringType::Change),
++                    assignment: ActiveValue::Set(Assignment::Fungible(lot.amount)),
++                    ..Default::default()
++                })?;
++            }
+             if transfer_info.change.fungible > 0 {
+                 let db_coloring = DbColoringActMod {
+                     txo_idx: ActiveValue::Set(change_utxo_idx.unwrap()),
+@@ -2373,6 +2422,7 @@ impl Wallet {
+                 info.extra_allocations.clone(),
+                 info.change_utxo_idx,
+                 info.btc_change.clone(),
++                &info.lots,
+                 status,
+                 info.min_confirmations,
+                 info.expiration_timestamp,
+@@ -2441,6 +2491,17 @@ impl Wallet {
      pub(crate) fn get_input_unspents(
          &self,
          unspents: &[LocalUnspent],
@@ -1287,7 +1381,7 @@ index ca96b4a..d23c37a 100644
      ) -> Result<Vec<LocalUnspent>, Error> {
          let mut input_unspents = unspents.to_vec();
          // consider the following UTXOs unspendable:
-@@ -2449,16 +2473,35 @@ impl Wallet {
+@@ -2449,16 +2510,35 @@ impl Wallet {
          // - pending incoming witness
          // - pending incoming blinded
          // - inexistent
@@ -1328,7 +1422,7 @@ index ca96b4a..d23c37a 100644
          });
          Ok(input_unspents)
      }
-@@ -2685,13 +2728,23 @@ impl Wallet {
+@@ -2685,13 +2765,23 @@ impl Wallet {
          // Use js_sys::Date::now() for WASM-compatible timestamp
          // (std::time::UNIX_EPOCH.elapsed() panics on wasm32-unknown-unknown)
          let start_time = (js_sys::Date::now() / 1000.0) as u64;
@@ -1352,7 +1446,7 @@ index ca96b4a..d23c37a 100644
          self.bdk_wallet
              .apply_update(update)
              .map_err(|e| Error::FailedBdkSync {
-@@ -2699,6 +2752,16 @@ impl Wallet {
+@@ -2699,6 +2789,16 @@ impl Wallet {
              })?;
          self.bdk_wallet.persist(&mut self.bdk_database)?;
  
@@ -1369,13 +1463,14 @@ index ca96b4a..d23c37a 100644
          let pending_witness_scripts = self._reconcile_pending_witness()?;
  
          let db_txos = self.database.iter_txos()?;
-@@ -2730,10 +2793,72 @@ impl Wallet {
+@@ -2730,10 +2830,72 @@ impl Wallet {
              }
              self.database.set_txo(new_db_utxo.clone())?;
          }
 +        Ok(())
 +    }
-+
+ 
+-        debug!(self.logger, "Synced TXOs");
 +    /// MASKED: syncs become light (see `_light_sync_request`), with a full one at most every 30 minutes and whenever
 +    /// a full scan is asked for. `None`: every sync is full, as rgb-lib does.
 +    pub fn set_light_sync(&mut self, recent: Option<u32>, last_full: Option<u64>) {
@@ -1387,13 +1482,12 @@ index ca96b4a..d23c37a 100644
 +        }
 +    }
  
--        debug!(self.logger, "Synced TXOs");
+-        Ok(())
 +    /// MASKED: when the last full sync ran (unix seconds), for the caller to keep.
 +    pub fn last_full_sync(&self) -> u64 {
 +        self.last_full_sync
 +    }
- 
--        Ok(())
++
 +    /// A light sync request. A full one asks the block server about every address this wallet ever used (hundreds
 +    /// of requests on a used wallet: too many for public servers like mempool.space). This one asks only about:
 +    /// - the last `recent` addresses of each side (where new payments land: a deposit, a payment to a new invoice),
@@ -1444,7 +1538,7 @@ index ca96b4a..d23c37a 100644
      }
  
      /// Sync and save the state, also when the sync fails part way.
-@@ -2815,11 +2940,11 @@ impl Wallet {
+@@ -2815,11 +2977,11 @@ impl Wallet {
              if internal_unspents_outpoints.contains(&(txid.clone(), vout)) {
                  continue;
              }
@@ -1461,7 +1555,55 @@ index ca96b4a..d23c37a 100644
              db_txo.spent = ActiveValue::Set(true);
              self.database.update_txo(db_txo)?;
          }
-@@ -4723,6 +4848,22 @@ impl Wallet {
+@@ -3080,6 +3242,11 @@ impl Wallet {
+     ) -> Result<Option<Vec<u8>>, Error> {
+         let mut change_utxo_option = None;
+         let mut change_utxo_idx = None;
++        // MASKED: lots of a listing in lots (only `color_swap` sets them, for this colouring only)
++        let lots = std::mem::take(&mut self.lots_now);
++        if !lots.is_empty() && transfer_info_map.len() != 1 {
++            return Err(Error::Internal { details: s!("lots are for one asset") });
++        }
+ 
+         let prev_outputs = psbt
+             .unsigned_tx
+@@ -3217,6 +3384,19 @@ impl Wallet {
+                 )?;
+             }
+ 
++            // MASKED: every lot on its own output of this wallet, in the same transition as the move
++            for lot in &lots {
++                asset_transition_builder = add_or_side_output(
++                    asset_transition_builder,
++                    &main_assignment_types,
++                    &mut main_used,
++                    &mut side_transfers,
++                    OS_ASSET,
++                    BuilderSeal::Revealed(GraphSeal::new_random_vout(lot.vout)),
++                    Amount::from(lot.amount).into(),
++                )?;
++            }
++
+             let change = inputs_added.change(&transfer_info.original_assignments_needed);
+ 
+             if change != AssignmentsCollection::default() {
+@@ -3614,6 +3794,7 @@ impl Wallet {
+             entropy,
+             operation_secret_key: None,
+             sender_transport_endpoint: None,
++            lots,
+         };
+         self.transfer_artifacts
+             .entry(txid_key.to_string())
+@@ -3732,6 +3913,7 @@ impl Wallet {
+                 info.extra_allocations,
+                 info.change_utxo_idx,
+                 info.btc_change,
++                &info.lots,
+                 TransferStatus::Initiated,
+                 min_confirmations,
+                 expiration_timestamp,
+@@ -4723,6 +4905,22 @@ impl Wallet {
                  &data.consignment_hash,
              ) {
                  Ok(bytes) => {
@@ -1484,7 +1626,7 @@ index ca96b4a..d23c37a 100644
                      self.received_consignments
                          .insert(recipient_id.clone(), bytes);
                  }
-@@ -4871,7 +5012,14 @@ impl Wallet {
+@@ -4871,7 +5069,14 @@ impl Wallet {
                  .await;
          };
          let blinding = derive_shared(&ed25519_from_seed(&seed), &sender_vk)?.seal_blinding;
@@ -1500,7 +1642,7 @@ index ca96b4a..d23c37a 100644
          let spent = Self::known_spent_opouts(&consignment);
          let mut payments: Vec<_> = self.find_payments(&consignment, &matcher, &spent).collect();
          if payments.len() != 1 {
-@@ -4904,7 +5052,10 @@ impl Wallet {
+@@ -4904,7 +5109,10 @@ impl Wallet {
          let witness_id = paying_bundle.witness_id();
          let txid = witness_id.to_string();
  
@@ -1512,7 +1654,7 @@ index ca96b4a..d23c37a 100644
              error!(
                  self.logger,
                  "Consignment pays this recipient {} allocations, refusing it",
-@@ -5805,6 +5956,8 @@ impl Wallet {
+@@ -5805,6 +6013,8 @@ impl Wallet {
                      details: s!("consignment not found in memory"),
                  })?
                  .clone();
@@ -1521,7 +1663,7 @@ index ca96b4a..d23c37a 100644
              let consignment =
                  RgbTransfer::load(&consignment_bytes[..]).map_err(InternalError::from)?;
  
-@@ -7053,6 +7206,10 @@ impl Wallet {
+@@ -7053,6 +7263,10 @@ impl Wallet {
          batch: bool,
      ) -> Result<(), Error> {
          for recipient in recipients {
@@ -1532,7 +1674,7 @@ index ca96b4a..d23c37a 100644
              let recipient_id = &recipient.recipient_id;
              let recipient_vk = verifying_key_from_bytes(&recipient.public_key)?;
              let derived = derive_shared(sender_sk, &recipient_vk)?;
-@@ -7590,6 +7747,246 @@ impl Wallet {
+@@ -7590,6 +7804,246 @@ impl Wallet {
          Ok(tx.compute_txid().to_string())
      }
  
@@ -1779,7 +1921,105 @@ index ca96b4a..d23c37a 100644
      /// Prepare the PSBT to inflate an IFA asset.
      pub async fn inflate_begin(
          &mut self,
-@@ -12074,3 +12471,857 @@ mod bfa_tests {
+@@ -7782,6 +8236,7 @@ impl Wallet {
+             info_contents.extra_allocations,
+             info_contents.change_utxo_idx,
+             info_contents.btc_change,
++            &info_contents.lots,
+             TransferStatus::WaitingConfirmations,
+             info_contents.min_confirmations,
+             info_contents.expiration_timestamp,
+@@ -8119,6 +8574,7 @@ impl Wallet {
+                 info_contents.extra_allocations,
+                 info_contents.change_utxo_idx,
+                 info_contents.btc_change,
++                &info_contents.lots,
+                 TransferStatus::WaitingConfirmations,
+                 info_contents.min_confirmations,
+                 None,
+@@ -9321,6 +9777,7 @@ mod send_end_tests {
+             entropy: 0,
+             operation_secret_key: Some(OPERATION_SEED.to_vec()),
+             sender_transport_endpoint: None,
++            lots: vec![],
+         };
+         let db = DbBatchTransfer {
+             idx: 1,
+@@ -9427,6 +9884,7 @@ mod send_end_tests {
+             entropy: 0,
+             operation_secret_key: Some(OPERATION_SEED.to_vec()),
+             sender_transport_endpoint: Some(s!("rpc://127.0.0.1:1")),
++            lots: vec![],
+         }
+     }
+ 
+@@ -10024,6 +10482,57 @@ mod send_end_tests {
+         assert!(kept.signed_psbt.is_none());
+     }
+ 
++    /// MASKED lots in one transaction: every lot output is recorded as this wallet's own (a new output of the
++    /// transaction, holding exactly its lot), next to the change, with no receive needed.
++    #[test]
++    fn save_transfers_records_lot_outputs() {
++        let (wallet, _) = setup();
++        let txid = s!("lots");
++        let input_idx = seed_txo(&wallet, "i", 0);
++        let change_idx = seed_txo(&wallet, &txid, 4);
++        let map = BTreeMap::from([(
++            s!("asset"),
++            info_asset(
++                TypeOfTransition::Transfer,
++                vec![recipient("r1", false, true)],
++                HashMap::from([(input_idx, vec![Assignment::Fungible(1000)])]),
++            ),
++        )]);
++        let lots = vec![LotOut { vout: 2, amount: 300, sats: 330 }, LotOut { vout: 3, amount: 400, sats: 330 }];
++        wallet
++            ._save_transfers(txid.clone(), &map, HashMap::new(), Some(change_idx), None, &lots, TransferStatus::Initiated, 1, None, None, None, &HashMap::new())
++            .unwrap();
++        let db = wallet.database.get_db_data(false).unwrap();
++        for lot in &lots {
++            let txo = db.txos.iter().find(|t| t.txid == txid && t.vout == lot.vout).expect("the lot's output is recorded");
++            assert_eq!(txo.btc_amount, lot.sats.to_string());
++            assert!(!txo.spent);
++            let colorings: Vec<_> = db.colorings.iter().filter(|c| c.txo_idx == txo.idx).collect();
++            assert_eq!(colorings.len(), 1, "one allocation on each lot");
++            assert_eq!(colorings[0].r#type, ColoringType::Change);
++            assert_eq!(colorings[0].assignment, Assignment::Fungible(lot.amount));
++        }
++        // a send without lots records none
++        let (wallet, _) = setup();
++        let input_idx = seed_txo(&wallet, "i", 0);
++        let map = BTreeMap::from([(
++            s!("asset"),
++            info_asset(TypeOfTransition::Transfer, vec![recipient("r1", false, true)], HashMap::from([(input_idx, vec![Assignment::Fungible(10)])])),
++        )]);
++        wallet._save_transfers(s!("plain"), &map, HashMap::new(), None, None, &[], TransferStatus::Initiated, 1, None, None, None, &HashMap::new()).unwrap();
++        let db = wallet.database.get_db_data(false).unwrap();
++        assert!(!db.txos.iter().any(|t| t.txid == "plain"));
++    }
++
++    /// An `InfoBatchTransfer` saved before lots existed (a wallet saved by 2.30.1 or earlier) still loads.
++    #[test]
++    fn batch_info_without_lots_loads() {
++        let mut v = serde_json::to_value(batch_info(None, HashMap::new())).unwrap();
++        v.as_object_mut().unwrap().remove("lots");
++        let info: InfoBatchTransfer = serde_json::from_value(v).unwrap();
++        assert!(info.lots.is_empty());
++    }
++
+     #[test]
+     fn update_or_save_transfers_updates_outgoing_batch() {
+         let (wallet, _) = setup();
+@@ -10051,6 +10560,7 @@ mod send_end_tests {
+                 info.extra_allocations.clone(),
+                 info.change_utxo_idx,
+                 None,
++                &[],
+                 TransferStatus::Initiated,
+                 1,
+                 None,
+@@ -12074,3 +12584,892 @@ mod bfa_tests {
          assert!(options(&format!(r#","evm_chains":{{"mainnet":{chain}}}"#)).is_err());
      }
  }
@@ -1868,6 +2108,8 @@ index ca96b4a..d23c37a 100644
 +        blinding: Option<u64>,
 +    ) -> Result<String, Error> {
 +        info!(self.logger, "Swap (begin) for {asset_id}...");
++        // asked for this colouring only, used or not
++        let lots_asked = std::mem::take(&mut self.swap_lots);
 +        if amount == 0 {
 +            return Err(Error::InvalidAmountZero);
 +        }
@@ -1960,9 +2202,34 @@ index ca96b4a..d23c37a 100644
 +                Some(BtcChange { vout: v, amount: psbt.unsigned_tx.output[i].value.to_sat() })
 +            }
 +        };
-+        let psbt = self
-+            ._color_swap_psbt(psbt, &asset_id, amount, recipient, unspents, &mut runtime, min_confirmations, operation_sk.to_bytes().to_vec(), sender_transport_endpoint, btc_change)
-+            .await?;
++        // MASKED: the other lots of a listing in lots, on outputs of this wallet in the same transaction
++        let mut lots: Vec<LotOut> = vec![];
++        let mut seen = HashSet::new();
++        for (v, lot_amount) in lots_asked {
++            let i = v as usize;
++            if lot_amount == 0 {
++                return Err(Error::InvalidAmountZero);
++            }
++            if v == 0 || v == seal_vout || btc_change.as_ref().is_some_and(|c| c.vout == v) || i >= psbt.unsigned_tx.output.len() || !seen.insert(v) {
++                return Err(Error::Internal { details: s!("swap PSBT: a lot's output isn't one") });
++            }
++            let script = psbt.unsigned_tx.output[i].script_pubkey.clone();
++            if script.is_op_return() || !self.bdk_wallet.is_mine(script) {
++                return Err(Error::Internal { details: s!("swap PSBT: a lot's output isn't this wallet's") });
++            }
++            // a fresh address of this wallet's RGB side for every lot
++            psbt.unsigned_tx.output[i].script_pubkey = self.get_new_address()?.script_pubkey();
++            psbt.outputs[i] = Default::default();
++            lots.push(LotOut { vout: v, amount: lot_amount, sats: psbt.unsigned_tx.output[i].value.to_sat() });
++        }
++        let lots_total = lots.iter().try_fold(0u64, |t, l| t.checked_add(l.amount)).ok_or(Error::Internal { details: s!("lots too large") })?;
++        let needed_total = amount.checked_add(lots_total).ok_or(Error::Internal { details: s!("lots too large") })?;
++        self.lots_now = lots;
++        let colored = self
++            ._color_swap_psbt(psbt, &asset_id, needed_total, recipient, unspents, &mut runtime, min_confirmations, operation_sk.to_bytes().to_vec(), sender_transport_endpoint, btc_change)
++            .await;
++        self.lots_now = vec![];
++        let psbt = colored?;
 +        info!(self.logger, "Swap (begin) completed");
 +        Ok(psbt.to_string())
 +    }
@@ -1971,6 +2238,14 @@ index ca96b4a..d23c37a 100644
 +    /// wallet's outputs, moved to its RGB side if needed) instead of on a free RGB output elsewhere.
 +    pub fn set_swap_change_vout(&mut self, vout: Option<u32>) {
 +        self.swap_change_vout = vout;
++    }
++
++    /// MASKED: for the next `color_swap` only, also put `amount` of the asset on output `vout` of its PSBT for each
++    /// `(vout, amount)`: outputs of this wallet (each gets a fresh address of its RGB side), recorded as its own like
++    /// change. One transaction then makes every lot of a listing in lots: the recipient (an invoice of this wallet)
++    /// gets the first, these the others, the change output the rest. Empty clears it.
++    pub fn set_swap_lots(&mut self, lots: Vec<(u32, u64)>) {
++        self.swap_lots = lots;
 +    }
 +
 +    /// Colour `psbt` for `amount` of `asset_id` to `recipient`, a witness seal (shared by `color_swap` and

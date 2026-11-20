@@ -1006,3 +1006,44 @@ test('outspend answers: "not spent" reused only when allowed (listings: 2 minute
     assert.equal(asked, 3, 'spent stays spent: kept');
   } finally { globalThis.fetch = real; }
 });
+
+test('lots in one transaction (2.30.2 engine): one move makes every lot, then each is signed', async () => {
+  const chain = fakeChain();
+  const from = `${T('b')}:0`, fee = `${T('c')}:2`;
+  chain.outs[from] = { sats: 1000, script: '5120rgb', tx: 'aa' };
+  chain.outs[fee] = { sats: 50000, script: '5120btc', tx: 'bb' };
+  const rgb = [unspent('b', 0, [tok(1000)])];
+  const coins = [{ outpoint: fee, txout: { value: 50000 }, is_spent: false }];
+  const s = wallet({ name: 'lots', lib: fakeLib(), chain, rgb, coins });
+  let lots = null, changeVout = null, psbtOuts = null;
+  Object.assign(s.w.w, {
+    setOwnUnconfirmed: () => {}, setSwapChangeVout: (v) => { changeVout = v; }, setSwapLots: (l) => { if (l) lots = l; },
+    refresh: async () => {}, learnOwnOutputs: async () => {},
+    colorSwap: async (online, psbt, assetId, amount, rid, vout) => { psbtOuts = JSON.parse(psbt).outs; s.log.push(['colorSwap', JSON.parse(psbt).ins, String(amount), vout]); return psbt; },
+  });
+  const list = [['l1', 300, 3000], ['l2', 300, 3300], ['l3', 400, 4400]].map(([offerId, amount, priceSats]) => ({ offerId: `sw${offerId}000000000a`, amount: String(amount), priceSats: String(priceSats), token: 'ab'.repeat(16) }));
+  const out = await s.w.instantListLots({ assetId: ASSET, lots: list, feeRate: 2, market: 'https://signet.maskedwallet.com' }, s.store);
+  assert.equal(s.log.filter((x) => x[0] === 'colorSwap').length, 1, 'one transaction for every lot');
+  assert.equal(s.log.find((x) => x[0] === 'colorSwap')[2], '300', 'the first lot goes to the seal');
+  assert.deepEqual(lots, [{ vout: 2, amount: 300 }, { vout: 3, amount: 400 }], 'the others on outputs 2 and 3');
+  assert.equal(changeVout, 4, 'the rest of the tokens after the lots');
+  assert.equal(psbtOuts.length, 5, 'seal, two lots, the rest of the tokens, the bitcoin back (the engine adds the commitment as output 0)');
+  assert.deepEqual(psbtOuts.slice(0, 3).map((o) => o.sats), [330, 330, 330]);
+  const signed = s.log.filter((x) => x[0] === 'presign').map((x) => x[1]);
+  assert.deepEqual(signed, [`${T('5')}:1`, `${T('5')}:2`, `${T('5')}:3`], 'every lot signed on its own output');
+  assert.equal(out.stage, 'ready');
+});
+
+test('lots: an engine without one-transaction lots moves them one after another, as before', async () => {
+  const chain = fakeChain();
+  const from = `${T('b')}:0`, fee = `${T('c')}:2`;
+  chain.outs[from] = { sats: 1000, script: '5120rgb', tx: 'aa' };
+  chain.outs[fee] = { sats: 50000, script: '5120btc', tx: 'bb' };
+  const s = wallet({ name: 'lots2', lib: fakeLib(), chain, rgb: [unspent('b', 0, [tok(1000)])], coins: [{ outpoint: fee, txout: { value: 50000 }, is_spent: false }] });
+  Object.assign(s.w.w, { setOwnUnconfirmed: () => {}, setSwapChangeVout: () => {}, refresh: async () => {}, learnOwnOutputs: async () => {} });
+  assert.equal(s.w.canSplitOnce, false);
+  const list = [['m1', 500], ['m2', 500]].map(([o, a]) => ({ offerId: `sw${o}000000000ab`, amount: String(a), priceSats: '5000', token: 'ab'.repeat(16) }));
+  await s.w.instantListLots({ assetId: ASSET, lots: list, feeRate: 2, market: 'https://signet.maskedwallet.com' }, s.store).catch(() => {});
+  assert.ok(s.log.filter((x) => x[0] === 'colorSwap').length >= 1);
+  assert.ok(s.log.filter((x) => x[0] === 'colorSwap').every((x) => x[2] === '500'), 'one lot per move');
+});
