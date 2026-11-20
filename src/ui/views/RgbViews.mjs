@@ -67,7 +67,12 @@ export function tradeHistory(r, a) {
       if (e.moveTxid) role.set(String(e.moveTxid).toLowerCase(), { what: 'listed', e });
       if (e.cancelTxid) role.set(String(e.cancelTxid).toLowerCase(), { what: 'cancelled', e });
       if (e.soldTxid) role.set(String(e.soldTxid).toLowerCase(), { what: 'sold', e });
-    } else if (e.role === 'buyer' && e.txid) role.set(String(e.txid).toLowerCase(), { what: 'bought', e });
+    } else if (e.role === 'buyer' && e.txid) {
+      // a combined purchase (2.30): every listing points to the same transaction; the first one holds the totals
+      const k = String(e.txid).toLowerCase();
+      if (e.combinedIn && role.get(k)?.e?.combined) continue;
+      role.set(k, { what: 'bought', e });
+    }
   }
   const sats = (n) => `${Number(n || 0).toLocaleString('en-US')} sats`;
   const waiting = (t) => ['WaitingCounterparty', 'WaitingConfirmations'].includes(String(t.status));

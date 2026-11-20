@@ -33,3 +33,15 @@ test('history: own moves are one row, named by what they were; sales and purchas
   assert.equal(by.Sold.sign, '−'); assert.equal(by.Sold.amount, '22');
   assert.equal(by.Received.sign, '+');
 });
+
+test('history: a combined purchase (2.30) shows the total price, whichever listing comes first', () => {
+  const list = [tr('ReceiveWitness', T('5'), 500, 100)];
+  const lead = { role: 'buyer', assetId: 'rgb:m', amount: '500', priceSats: '38307', txid: T('5'), combined: ['x1', 'x2', 'x3'] };
+  const part = (p) => ({ role: 'buyer', assetId: 'rgb:m', amount: '100', priceSats: p, txid: T('5'), combinedIn: 'x1', posted: true });
+  for (const store of [{ x1: lead, x2: part('6902'), x3: part('9187') }, { x3: part('9187'), x2: part('6902'), x1: lead }]) {
+    const rows = tradeHistory(r(list, store), a);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].label, 'Bought');
+    assert.match(rows[0].note, /For 38,307 sats/);
+  }
+});
