@@ -108,7 +108,7 @@
       listInstantLots: (o = {}) => request('rgbInstantListLots', o),
       /** buyer: { offerId, network, offer, listing, feeRate? } → { txid } (broadcast) */
       buyInstant: (o = {}) => request('rgbInstantBuy', o),
-      /** buyer, several at once: { items: [{ offerId, offer, listing }], network, feeRate? } → { results: [{ offerId, txid } | { offerId, error }] }. One approval; one transaction each, cheapest first */
+      /** buyer, several at once: { items: [{ offerId, offer, listing }], network, feeRate? } → { results: [{ offerId, txid } | { offerId, error }] }. One approval, cheapest first; from 2.30 up to 10 in one transaction (they share its txid) */
       buyInstantMany: (o = {}) => request('rgbInstantBuyMany', o),
       /** seller: { offerId, offer, feeRate? } → { stage, txid } (moves the signed output: an on-chain transaction) */
       cancelInstant: (o = {}) => request('rgbInstantCancel', o),
