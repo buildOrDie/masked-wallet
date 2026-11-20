@@ -6,7 +6,7 @@
 import * as btc from '@scure/btc-signer';
 import { hex, base64 } from '@scure/base';
 import { isInvoiceV1, readInvoiceV1, invoiceIdOf, pickEndpoint, newSenderKey, sharedKeys, deliverConsignment, endpointUrl, rpc, PROXY_V1 } from './proxyV1.mjs';
-import { SEAL_SATS, SEAL_OUTPUT, SWAP_SIZE_VB, b64, buyerOutputs, outpointOf, completionBlocker, readOffer, buyerCoinFor, offerable, heldBreakdown, payoutFor, changedTerms, unb64, exactCoinFor, freeSellerCoinFor, sendCoinsFor, instantAmounts, INSTANT_SEAL_OUTPUT, INSTANT_SEAL_SATS, payCoinsFor, txVbytes, OPRET_SCRIPT, P2TR_SCRIPT, BUY_FEE_MIN } from './swap.mjs';
+import { SEAL_SATS, SEAL_OUTPUT, SWAP_SIZE_VB, b64, buyerOutputs, outpointOf, completionBlocker, readOffer, buyerCoinFor, offerable, heldBreakdown, payoutFor, changedTerms, unb64, exactCoinFor, freeSellerCoinFor, sendCoinsFor, instantAmounts, INSTANT_SEAL_OUTPUT, INSTANT_SEAL_SATS, payCoinsFor, txVbytes, OPRET_SCRIPT, P2TR_SCRIPT, BUY_FEE_MIN, COMBINED_MAX, payCoinsForCombined } from './swap.mjs';
 import { RGB_UTXO_SATS, RGB_KEEP_SPARE } from './config.mjs';
 
 /** rgb-lib names for our network ids. Utexo's custom Signet uses Signet rules too. */
@@ -1765,6 +1765,37 @@ export class LiteWallet {
     const tx = btc.Transaction.fromPSBT(base64.decode(String(psbt)), { allowUnknownInputs: true, allowUnknownOutputs: true });
     return hex.encode(tx.extract());
   }
+  /**
+   * An Instant listing checked before paying for it (the wallet synced): the seller's signature and price, the
+   * seller's output still unspent and as signed, and the tokens' transfer (this token, this amount on the seal).
+   * `check(bytes, txid, amount?)` checks a transfer the same way (a completed one, a combined one).
+   */
+  async instantListingChecked(o, listing) {
+    const l = listing || {};
+    let info;
+    try { info = plain(this.lib.WasmWallet.presignedListingInfo(String(l.psbt || ''))); } catch (e) { throw new Error(`The listing does not check out: ${e?.message || e}`); }
+    if (String(info.templateTxid) !== String(l.templateTxid)) throw new Error('The listing does not match its transfer.');
+    if (BigInt(String(info.payoutSats)) - BigInt(String(info.sellerSats)) !== o.priceSats) throw new Error('The signed price is not the offer\'s price.');
+    if (this.oldConsignment(unb64(String(l.consignment || '')), info.templateTxid)) throw new Error('This listing was signed by a MASKED older than 2.29, in the old RGB format, and can\'t be bought any more. Nothing was paid. The seller cancels it on the market and lists it again.');
+    if ((await this.ownOutpoints()).has(String(info.sellerOutpoint))) throw new Error('This is your own listing.');
+    // the seller's output is still there, and is what the signature says
+    const si = await this.outpointInfo(info.sellerOutpoint);
+    if (String(si.sats) !== String(info.sellerSats) || si.script !== info.sellerScript) throw new Error('The seller\'s output is not what the listing says.');
+    const [st, sv] = String(info.sellerOutpoint).split(':');
+    if ((await (await this.esplora(`/tx/${st}/outspend/${sv}`)).json())?.spent) throw new Error('Someone just bought this, or the seller cancelled it.');
+    // the tokens: valid history, this token, this amount on the buyer's seal
+    const check = (bytes, txid, amount = o.amount) => {
+      let v;
+      try { v = plain(this.lib.inspectSwapConsignment(bytes, txid, this.net, INSTANT_SEAL_OUTPUT)); } catch (e) { throw new Error(`The seller's token transfer does not check out: ${e?.message || e}`); }
+      if (!v?.valid) throw new Error(`The seller's token transfer does not check out: ${v?.details || v?.error || 'invalid'}`);
+      const { contractId, sealAmount } = inspected(v);
+      if (contractId !== o.assetId) throw new Error('The transfer is for another token than the offer.');
+      if (sealAmount == null || BigInt(String(sealAmount)) !== BigInt(amount)) throw new Error(`The transfer gives you ${sealAmount ?? 'nothing'}, the offer says ${amount}.`);
+    };
+    const consignment = unb64(String(l.consignment || ''));
+    check(consignment, info.templateTxid);
+    return { info, si, consignment, check };
+  }
   /** Buyer: check an Instant listing and buy it in one go: sign, broadcast, and hand the transfer to this wallet. */
   async instantBuy({ offerId, network, offer, listing, feeRate, onStep = (_t) => {} }, store) {
     this.requirePresign(); this.checkNet(network);
@@ -1780,32 +1811,11 @@ export class LiteWallet {
       }
       store.del?.(o.offerId);
     }
-    const l = listing || {};
-    let info;
-    try { info = plain(this.lib.WasmWallet.presignedListingInfo(String(l.psbt || ''))); } catch (e) { throw new Error(`The listing does not check out: ${e?.message || e}`); }
-    if (String(info.templateTxid) !== String(l.templateTxid)) throw new Error('The listing does not match its transfer.');
-    if (BigInt(String(info.payoutSats)) - BigInt(String(info.sellerSats)) !== o.priceSats) throw new Error('The signed price is not the offer\'s price.');
-    if (this.oldConsignment(unb64(String(l.consignment || '')), info.templateTxid)) throw new Error('This listing was signed by a MASKED older than 2.29, in the old RGB format, and can\'t be bought any more. Nothing was paid. The seller cancels it on the market and lists it again.');
     const online = this.requireOnline();
     onStep(`Checking your bitcoin on ${hostOf(this.indexer)}…`);
     await this.wallet.sync(online);
-    if ((await this.ownOutpoints()).has(String(info.sellerOutpoint))) throw new Error('This is your own listing.');
-    // the seller's output is still there, and is what the signature says
-    const si = await this.outpointInfo(info.sellerOutpoint);
-    if (String(si.sats) !== String(info.sellerSats) || si.script !== info.sellerScript) throw new Error('The seller\'s output is not what the listing says.');
-    const [st, sv] = String(info.sellerOutpoint).split(':');
-    if ((await (await this.esplora(`/tx/${st}/outspend/${sv}`)).json())?.spent) throw new Error('Someone just bought this, or the seller cancelled it.');
-    // the tokens: valid history, this token, this amount on the buyer's seal
-    const check = (bytes, txid) => {
-      let v;
-      try { v = plain(this.lib.inspectSwapConsignment(bytes, txid, this.net, INSTANT_SEAL_OUTPUT)); } catch (e) { throw new Error(`The seller's token transfer does not check out: ${e?.message || e}`); }
-      if (!v?.valid) throw new Error(`The seller's token transfer does not check out: ${v?.details || v?.error || 'invalid'}`);
-      const { contractId, sealAmount } = inspected(v);
-      if (contractId !== o.assetId) throw new Error('The transfer is for another token than the offer.');
-      if (sealAmount == null || BigInt(String(sealAmount)) !== o.amount) throw new Error(`The transfer gives you ${sealAmount ?? 'nothing'}, the offer says ${o.amount}.`);
-    };
-    const consignment = unb64(String(l.consignment || ''));
-    check(consignment, info.templateTxid);
+    const l = listing || {};
+    const { info, si, consignment, check } = await this.instantListingChecked(o, l);
     // pay: one confirmed coin covering the price, the seal and the fee
     // economy rates below 1 sat/vB are fine here: the fee is worked out below, not by the RGB engine (2.29.29)
     const rate = Math.max(BUY_FEE_MIN, Number(feeRate) || 1);
@@ -1858,6 +1868,85 @@ export class LiteWallet {
     await this.instantPost(o.offerId, store);
     await this.save();
     return { txid };
+  }
+  /** Can this RGB engine buy several Instant listings in one transaction (2.30)? */
+  get canCombine() { return this.canPresign && typeof this.lib.WasmWallet?.presignedCombinedBuy === 'function' && typeof this.lib.WasmWallet?.checkPresignedCombinedFinal === 'function'; }
+  /**
+   * Buyer: 2 to COMBINED_MAX Instant listings of one token in one transaction (about 100 vB per extra listing
+   * instead of a whole purchase each). Every listing is checked like a single purchase, and the combined transfer
+   * too (every listing's tokens on the one seal). Returns `{ txid, offerIds }`, or `{ notPaid: why }` when it can't
+   * combine them (one coin only, a listing gone, an older engine…): nothing was paid, and the caller buys them one
+   * by one. Throws only once the purchase may have gone out (kept, and sent again on the next refresh).
+   */
+  async instantBuyCombined({ items, network, feeRate, onStep = (_t) => {} }, store) {
+    this.requirePresign(); this.checkNet(network);
+    const notPaid = (why) => ({ notPaid: String(why?.message || why) });
+    if (!this.canCombine) return notPaid('This RGB engine buys listings one at a time.');
+    if (!Array.isArray(items) || items.length < 2 || items.length > COMBINED_MAX) return notPaid(`A combined purchase takes 2 to ${COMBINED_MAX} listings.`);
+    let os, checked, pay, bis, r, seal, prices, total, change, templates, txHex, txid, completed;
+    try {
+      os = items.map((x) => readOffer(x.offer, x.offerId));
+      if (os.some((o) => o.state && o.state !== 'OPEN')) return notPaid('A listing is not open any more.');
+      if (new Set(os.map((o) => o.assetId)).size !== 1) return notPaid('A combined purchase is for one token.');
+      if (new Set(os.map((o) => o.offerId)).size !== os.length) return notPaid('The same listing twice.');
+      // one of them bought before from this wallet: one by one, which finds that purchase
+      if (os.some((o) => { const d = store.get(o.offerId); return d?.txid && !d.failed; })) return notPaid('Bought before.');
+      const online = this.requireOnline();
+      onStep(`Checking your bitcoin on ${hostOf(this.indexer)}…`);
+      await this.wallet.sync(online);
+      checked = [];
+      for (let k = 0; k < os.length; k++) {
+        onStep(`Checking listing ${k + 1} of ${os.length}…`);
+        checked.push(await this.instantListingChecked(os[k], items[k].listing || {}));
+      }
+      if (new Set(checked.map((c) => String(c.info.sellerOutpoint))).size !== checked.length) return notPaid('Two listings sell the same output.');
+      // the size from the real scripts: every seller's coin and the buyer's; the commitment, every payout, the seal, change
+      const rate = Math.max(BUY_FEE_MIN, Number(feeRate) || 1);
+      const sellers = checked.map((c) => c.info.sellerScript || P2TR_SCRIPT), payouts = checked.map((c) => c.info.payoutScript || P2TR_SCRIPT);
+      const feeFor = (ins, withChange = true) => BigInt(Math.ceil(rate * txVbytes([...sellers, ...ins], [OPRET_SCRIPT, ...payouts, P2TR_SCRIPT, ...(withChange ? [P2TR_SCRIPT] : [])])));
+      const perInput = feeFor([P2TR_SCRIPT, P2TR_SCRIPT, P2TR_SCRIPT]) - feeFor([P2TR_SCRIPT, P2TR_SCRIPT]);
+      prices = os.reduce((t, o) => t + o.priceSats, 0n);
+      total = os.reduce((t, o) => t + o.amount, 0n);
+      const base = prices + BigInt(INSTANT_SEAL_SATS);
+      const { all, confirmed } = await this.btcCoins();
+      pay = payCoinsForCombined(confirmed, all, base + feeFor([P2TR_SCRIPT, P2TR_SCRIPT]), perInput);
+      if (!pay) return notPaid('Not enough bitcoin coins to combine the purchases.');
+      bis = await Promise.all(pay.coins.map((c) => this.outpointInfo(c.outpoint)));
+      const paid = bis.reduce((t, b) => t + BigInt(b.sats), 0n);
+      change = paid - base - feeFor(bis.map((b) => b.script));
+      if (change < 546n) change = 0n;
+      if (paid - base - feeFor(bis.map((b) => b.script), change > 0n) < 0n) return notPaid('Not enough bitcoin for the prices and the network fee.');
+      r = await this.onchainReceive({ assetId: null, amount: Number(total), durationSeconds: 86400, witness: true });
+      seal = this.lib.WasmWallet.witnessSealScript(r.invoice);
+      const inputs = pay.coins.map((c, k) => ({ outpoint: c.outpoint, sats: bis[k].sats, script: bis[k].script, tx: bis[k].tx }));
+      templates = items.map((x) => String(x.listing.psbt));
+      onStep(`Combining ${os.length} listings in one transaction…`);
+      const res = this.lib.WasmWallet.presignedCombinedBuy(templates, checked.map((c) => c.consignment), inputs, seal, change > 0n ? { script: await this.ownScript(), sats: Number(change) } : null, checked.map((c) => c.si.tx || null));
+      txHex = this.extractHex(this.sign(String(res.psbt)));
+      txid = this.lib.WasmWallet.checkPresignedCombinedFinal(templates, txHex, seal);
+      if (txid !== String(res.txid)) return notPaid('The signed transaction is not the combined one.');
+      completed = this.lib.WasmWallet.completePresignedConsignment(Uint8Array.from(res.consignment), txid, txHex);
+      checked[0].check(completed, txid, total);
+    } catch (e) { return notPaid(e); }
+    // kept with the first listing (the transfer, posted once); the others point to it
+    const lead = os[0].offerId, ids = os.map((o) => o.offerId), at = Date.now();
+    store.set(lead, { role: 'buyer', assetId: os[0].assetId, amount: String(total), priceSats: String(prices), recipientId: r.recipientId, invoice: r.invoice, txid, txHex, completed: b64(completed), posted: false, combined: ids, at });
+    for (const o of os.slice(1)) store.set(o.offerId, { role: 'buyer', assetId: o.assetId, amount: String(o.amount), priceSats: String(o.priceSats), txid, txHex, posted: true, combinedIn: lead, at });
+    this.expectPurchases([...this.purchases, r.recipientId]);
+    onStep('Sending the purchase to the Bitcoin network…');
+    try { await this.broadcastAll(txHex, txid); this.spentNow(pay.coins.map((c) => c.outpoint)); } catch (err) {
+      const why = String(err?.message || err);
+      if (/no block server accepted it/.test(why)) {
+        for (const id of ids) store.set(id, { ...store.get(id), failed: why, completed: undefined, txHex: undefined, at: Date.now() });
+        return notPaid(`The network refused the combined purchase (${why.split(': ').slice(1).join(': ').slice(0, 90)}).`);
+      }
+      throw err; // a network problem: kept, and sent again on the next refresh
+    }
+    await this.waitKnown(txid, 15_000);
+    try { await this.wallet.sync(this.requireOnline()); } catch { /* the next refresh */ }
+    await this.instantPost(lead, store);
+    await this.save();
+    return { txid, offerIds: ids };
   }
   /** Buyer: give this wallet the transfer (through the transfer server, like any incoming one). Retried on refresh. */
   async instantPost(offerId, store) {

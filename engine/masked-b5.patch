@@ -11,10 +11,10 @@ index 884d686..e2896b5 100644
  rgb-strict-encoding = { version = "=1.0.5", default-features = false, features = [
      "bitcoin",
 diff --git a/bindings/wasm/src/lib.rs b/bindings/wasm/src/lib.rs
-index 51b6efd..c070753 100644
+index 51b6efd..e97565a 100644
 --- a/bindings/wasm/src/lib.rs
 +++ b/bindings/wasm/src/lib.rs
-@@ -635,6 +635,210 @@ impl WasmWallet {
+@@ -635,6 +635,245 @@ impl WasmWallet {
          to_js(&result)
      }
  
@@ -210,6 +210,41 @@ index 51b6efd..c070753 100644
 +        rgb_lib_wasm::wallet::rust_only::check_presigned_final(template, final_tx, seal_script).map_err(|e| JsValue::from_str(&e.to_string()))
 +    }
 +
++    /// Several pre-signed listings bought in one transaction (2 to 10, all the same asset): `templates` (PSBT
++    /// strings), `consignments` (Uint8Arrays, in the same order), the buyer's `inputs` `[{ outpoint, sats, script,
++    /// tx? }]` (at least 2), the seal script (hex), `change` `{ script, sats }` or null, and `sellerTxs` (hex or
++    /// null per listing). Returns `{ psbt, consignment: Uint8Array, txid }`.
++    #[wasm_bindgen(js_name = "presignedCombinedBuy")]
++    pub fn presigned_combined_buy(templates_js: JsValue, consignments_js: JsValue, inputs_js: JsValue, seal_script: &str, change_js: JsValue, seller_txs_js: JsValue) -> Result<JsValue, JsValue> {
++        let templates: Vec<String> = serde_wasm_bindgen::from_value(templates_js).map_err(|e| JsValue::from_str(&format!("Invalid templates: {e}")))?;
++        if !js_sys::Array::is_array(&consignments_js) {
++            return Err(JsValue::from_str("Invalid consignments: expected an array"));
++        }
++        let consignments: Vec<Vec<u8>> = js_sys::Array::from(&consignments_js).iter().map(|v| js_sys::Uint8Array::new(&v).to_vec()).collect();
++        let inputs = serde_wasm_bindgen::from_value(inputs_js).map_err(|e| JsValue::from_str(&format!("Invalid inputs: {e}")))?;
++        let change = if change_js.is_null() || change_js.is_undefined() { None } else { Some(serde_wasm_bindgen::from_value(change_js).map_err(|e| JsValue::from_str(&format!("Invalid change: {e}")))?) };
++        let seller_txs: Vec<Option<String>> = if seller_txs_js.is_null() || seller_txs_js.is_undefined() { vec![None; templates.len()] } else { serde_wasm_bindgen::from_value(seller_txs_js).map_err(|e| JsValue::from_str(&format!("Invalid sellerTxs: {e}")))? };
++        let res = rgb_lib_wasm::wallet::rust_only::presigned_combined_buy(templates, consignments, inputs, seal_script.to_string(), change, seller_txs).map_err(|e| JsValue::from_str(&e.to_string()))?;
++        let out = js_sys::Object::new();
++        js_sys::Reflect::set(&out, &JsValue::from_str("psbt"), &JsValue::from_str(&res.psbt))?;
++        js_sys::Reflect::set(&out, &JsValue::from_str("consignment"), &js_sys::Uint8Array::from(&res.consignment[..]).into())?;
++        js_sys::Reflect::set(&out, &JsValue::from_str("txid"), &JsValue::from_str(&res.txid))?;
++        Ok(out.into())
++    }
++
++    /// The buyer's last check of a combined buy's signed transaction (hex) against all its templates. Returns its txid.
++    #[wasm_bindgen(js_name = "checkPresignedCombinedFinal")]
++    pub fn check_presigned_combined_final(templates_js: JsValue, final_tx: &str, seal_script: &str) -> Result<String, JsValue> {
++        let templates: Vec<String> = serde_wasm_bindgen::from_value(templates_js).map_err(|e| JsValue::from_str(&format!("Invalid templates: {e}")))?;
++        rgb_lib_wasm::wallet::rust_only::check_presigned_combined_final(templates, final_tx, seal_script).map_err(|e| JsValue::from_str(&e.to_string()))
++    }
++
++    /// The most listings one combined buy takes.
++    #[wasm_bindgen(js_name = "presignedCombinedMax")]
++    pub fn presigned_combined_max() -> usize {
++        rgb_lib_wasm::wallet::rust_only::COMBINED_MAX
++    }
++
 +    /// The signed transaction of a finalized PSBT, hex.
 +    #[wasm_bindgen(js_name = "psbtExtractHex")]
 +    pub fn psbt_extract_hex(psbt: &str) -> Result<String, JsValue> {
@@ -225,7 +260,7 @@ index 51b6efd..c070753 100644
      /// Send RGB assets (end): broadcast a signed PSBT. Returns an OperationResult JS object.
      #[wasm_bindgen(js_name = "sendEnd")]
      pub async fn send_end(
-@@ -763,6 +967,56 @@ impl WasmWallet {
+@@ -763,6 +1002,56 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -282,7 +317,7 @@ index 51b6efd..c070753 100644
      /// Drain all wallet funds (end): broadcast a signed PSBT. Returns the txid string.
      #[wasm_bindgen(js_name = "drainToEnd")]
      pub async fn drain_to_end(
-@@ -1074,6 +1328,22 @@ impl WasmWallet {
+@@ -1074,6 +1363,22 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -305,7 +340,7 @@ index 51b6efd..c070753 100644
      /// Check if the wallet needs a backup. Returns true if modified since last backup.
      #[wasm_bindgen(js_name = "backupInfo")]
      pub fn backup_info(&self) -> Result<bool, JsValue> {
-@@ -1217,7 +1487,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
+@@ -1217,7 +1522,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
  /// Works before the witness transaction is broadcast. Takes the raw consignment
  /// bytes (strict-encoded, not base64), the witness transaction ID, and the Bitcoin network.
  ///
@@ -315,7 +350,7 @@ index 51b6efd..c070753 100644
  #[wasm_bindgen(js_name = "validateConsignmentOffchain")]
  pub fn validate_consignment_offchain(
      consignment_bytes: &[u8],
-@@ -1235,3 +1506,43 @@ pub fn validate_consignment_offchain(
+@@ -1235,3 +1541,43 @@ pub fn validate_consignment_offchain(
      .map_err(|e| JsValue::from_str(&e.to_string()))?;
      to_js(&result)
  }
@@ -1007,14 +1042,6 @@ index 0000000..80f3fde
 @@ -0,0 +1 @@
 +{"sequence":7,"db":{"txos":[{"idx":1,"txid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","vout":1,"btc_amount":"1000","spent":false,"exists":true,"pending_witness":false}],"next_txo_idx":2,"media":[],"next_media_idx":1,"assets":[{"idx":1,"media_idx":null,"id":"rgb:oQiumQTF-ON9XQxR-4522elN-BxoL8Tf-36QX6kf-DZJwIoY","schema":"Nia","added_at":1,"details":null,"initial_supply":"21000000","name":"Masked","precision":0,"ticker":"MASKED","timestamp":1,"max_supply":null,"known_circulating_supply":null,"reject_list_url":null}],"next_asset_idx":2,"batch_transfers":[{"idx":1,"txid":null,"status":"Settled","created_at":1,"updated_at":1,"expiration":null,"min_confirmations":0},{"idx":2,"txid":null,"status":"WaitingCounterparty","created_at":2,"updated_at":2,"expiration":99,"min_confirmations":1}],"next_batch_transfer_idx":3,"asset_transfers":[{"idx":1,"user_driven":true,"batch_transfer_idx":1,"asset_id":"rgb:oQiumQTF-ON9XQxR-4522elN-BxoL8Tf-36QX6kf-DZJwIoY"},{"idx":2,"user_driven":true,"batch_transfer_idx":2,"asset_id":null}],"next_asset_transfer_idx":3,"colorings":[{"idx":1,"txo_idx":1,"asset_transfer_idx":1,"type":"Issue","assignment":{"Fungible":21000000}}],"next_coloring_idx":2,"transfers":[{"idx":1,"asset_transfer_idx":1,"requested_assignment":{"Fungible":21000000},"incoming":true,"recipient_type":null,"recipient_id":null,"ack":null,"invoice_string":null},{"idx":2,"asset_transfer_idx":2,"requested_assignment":"Any","incoming":true,"recipient_type":null,"recipient_id":"utxob:x","ack":null,"invoice_string":"rgb:x"}],"next_transfer_idx":3,"transport_endpoints":[{"idx":1,"transport_type":"JsonRpc","endpoint":"https://scan.maskedwallet.com/rgb-proxy/json-rpc"}],"next_transport_endpoint_idx":2,"transfer_transport_endpoints":[{"idx":1,"transfer_idx":2,"transport_endpoint_idx":1,"used":false}],"next_transfer_transport_endpoint_idx":2,"wallet_transactions":[{"idx":1,"txid":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","type":"CreateUtxos"}],"next_wallet_transaction_idx":2,"pending_witness_scripts":[],"next_pending_witness_script_idx":1,"backup_info":null,"next_backup_info_idx":1},"bdk_changeset":null,"transfer_artifacts":{},"received_consignments":{"rid":[1,2,3]},"stock_stash_b64":"AUVocFH0zKbj9mX8df4+J7MAgDRnia2Dqg3CnpWjFeM1AAASTm9uSW5mbGF0YWJsZUFzc2V0AAPQB9f8vuMe8KhdX5c72hsLjJ5++8vFVyV3OCys0720IYoBAQAABHNwZWPRB1uLx1Q4MgVKHSK+lCJr51OLEzomiBy6RhMCeHjgXGz3AQAABXRlcm1z2geIjFhlYzrxO5W3zRqNivLawdwUC5dyUdnU2vPHURyOhAEAAAxpc3N1ZWRTdXBwbHkBoA8BCAphc3NldE93bmVyECcAA9AHAQABANEHAQABANoHAQABAAGgDwEA//8Bq/CZ0ovtUN9eBlcVMn86mzKfd3ywuf7/9jTBk6A8tiYJAAEQJwAAAaAPAQD//wGgDwEA//8Bq/CZ0ovtUN9eBlcVMn86mzKfd3ywuf7/9jTBk6A8tiYAAAh0cmFuc2ZlcgGgDwEAoQiumQTFON9XQxR4522elNBxoL8Tf36QX6kfDZJwIoYAAEVocFH0zKbj9mX8df4+J7MAgDRnia2Dqg3CnpWjFeM1euf2agAAAAANAHNzaTphbm9ueW1vdXMDAAAD0AcBABAABk1BU0tFRAZNYXNrZWQAANEHAQADAAAAANoHAQAIAEBvQAEAAAAAAQCgDwEBAACqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqgEAAACwKX0xQbK8JghAb0ABAAAAAAAAAAAAAAAAAAAAACMAAAr2X9Ylgd6Fy9FOI+LbmpK774t5dP/htQxMdNuPhudRCF9eJuXFBTwbRURRW8agZT2gKgeR+zERbXGk+tkW4VNVAAAAAAAAAAAHAAAAAAAAABjLlG8Sk88YDp143MZbxZtHL//+rfv1jbGYzIMo9ksBBQFWDZb3pHkkssPfBA5kYzmP1l/VkWUsKUNCv6X5ORVRVByrv8PYJsC/0el3Coie+syLZxatAUo+7BC2WRUwIpBCAEAcsHWOFMIAjA8AjObS1B6eGTfhzQ+ZFMWafinhznuguwUBzMJyko95OAPZH12tjVHMmGtDMjgPkiT3x8FRTXaOu5AqW6qsUIn/CY0VC0gs/ti80BqRwNe0XTIhbtV2q3Hr3Qccq7/D2CbAv9HpdwqInvrMi2cWrQFKPuwQtlkVMCKQQiAAL9jyehcnEpA+aj6W8PhcBIC0IRoXrNEwWfxR1KS73iwEAgAEbm9uZdg/vuAvDeW0bPgP4R73/fBhx42XXTGt6e6ivECZM55sAQRzb21lsHDTj/bSDFrl2AcVyjFUHVpSu97L01KdOObdtnIgCZc80aKdzK2bkXsmMF+JqKT7IRgwKk5zxawKeA3mqwBecwMtBGV4Y2whBGhhc2gjBmRvbGxhciQDYW1wJgRwbHVzKwRkYXNoLQNkb3QuBHplcm8wA29uZTEDdHdvMgV0aHJlZTMEZm91cjQEZml2ZTUDc2l4NgVzZXZlbjcFZWlnaHQ4BG5pbmU5BWNhcmV0XgZsb2Rhc2hfAWFhAWJiAWNjAWRkAWVlAWZmAWdnAWhoAWlpAWpqAWtrAWxsAW1tAW5uAW9vAXBwAXFxAXJyAXNzAXR0AXV1AXZ2AXd3AXh4AXl5AXp6Pytyt8SvGmMMttP/CIuvNRCT7kZbnn1HKmEAguRJ1+QFAWOqIxTosUfIsoTfs5qeENGcqtX66oSOPLmEnZFn1jRKQ6p/xfb1ZE/loq5eGqmQQs3rh5RC40xyP/WCf7Ez3ooGAgR0eXBlsQ3e/oAgrdigyggpIVCrsTxRTXbeUWjByXEFon5nZmAGZGlnZXN0KluqrFCJ/wmNFQtILP7YvNAakcDXtF0yIW7Vdqtx691Ft4AlhgHFJrI7W0hhRgqQUOE/Nfu+gwWoABFX5AE4iAQCAARub25l2D++4C8N5bRs+A/hHvf98GHHjZddMa3p7qK8QJkznmwBBHNvbWXK/4+us4oAoE42IVOPjmHXWoWkZcsKDkjDWT5+qmxfx0i+Ixcq6IRFmueDNKAGPwn6DjF76osjPOeCo4h155a4A18Fc3BhY2UgBGV4Y2whBnF1b3RlcyIEaGFzaCMGZG9sbGFyJAdwZXJjZW50JQlhbXBlcnNhbmQmCmFwb3N0cm9waGUnCGJyYWNrZXRMKAhicmFja2V0UikIYXN0ZXJpc2sqBHBsdXMrBWNvbW1hLAVtaW51cy0DZG90LgVzbGFzaC8EemVybzADb25lMQN0d28yBXRocmVlMwRmb3VyNARmaXZlNQNzaXg2BXNldmVuNwVlaWdodDgEbmluZTkFY29sb246CXNlbWlDb2xvbjsEbGVzczwFZXF1YWw9B2dyZWF0ZXI+CHF1ZXN0aW9uPwJhdEACX0FBAl9CQgJfQ0MCX0REAl9FRQJfRkYCX0dHAl9ISAJfSUkCX0pKAl9LSwJfTEwCX01NAl9OTgJfT08CX1BQAl9RUQJfUlICX1NTAl9UVAJfVVUCX1ZWAl9XVwJfWFgCX1lZAl9aWgpzcUJyYWNrZXRMWwliYWNrU2xhc2hcCnNxQnJhY2tldFJdBWNhcmV0XgZsb2Rhc2hfCGJhY2t0aWNrYAFhYQFiYgFjYwFkZAFlZQFmZgFnZwFoaAFpaQFqagFrawFsbAFtbQFubgFvbwFwcAFxcQFycgFzcwF0dAF1dQF2dgF3dwF4eAF5eQF6egljQnJhY2tldEx7BHBpcGV8CWNCcmFja2V0Un0FdGlsZGV+Vg2W96R5JLLD3wQOZGM5j9Zf1ZFlLClDQr+l+TkVUVQI+6lYcho9M1QGs2jDb1qCeQlgzOI5/ryv4Ym6mDnV2ngAAAAAAAAAAP//AAAAAAAAW3csjrFf10cAx5JB9g+P2jfnNrP9RiqwF85NRU76gaoFAV5eyJJPc81yxCJclqtHeWZY7xtynKMG4mC8pCsliR0PW4vHVDgyBUodIr6UImvnU4sTOiaIHLpGEwJ4eOBcbPcGAgR0ZXh0GMuUbxKTzxgOnXjcxlvFm0cv//6t+/WNsZjMgyj2SwEFbWVkaWHgh6g0ljOHma/EipIRaDpCfSvTPi6n67iouIDqSrTrgVyhSVhd5TTukbPjoDC379TNt5q+qRUvEB83WbTHIQ4fAAhdA8QXjamOfj8680PjmX10IB0R9Ccyz76isEuOP/FfIgMTC2luZGl2aXNpYmxlAARkZWNpAQVjZW50aQIFbWlsbGkDCWRlY2lNaWxsaQQKY2VudGlNaWxsaQUFbWljcm8GCWRlY2lNaWNybwcKY2VudGlNaWNybwgEbmFubwkIZGVjaU5hbm8KCWNlbnRpTmFubwsEcGljbwwIZGVjaVBpY28NCWNlbnRpUGljbw4FZmVtdG8PCWRlY2lGZW10bxAKY2VudGlGZW10bxEEYXR0bxJeXsiST3PNcsQiXJarR3lmWO8bcpyjBuJgvKQrJYkdDwUCgiOA9HXw7bS13FF5kd5zkK2i27N1LEwGaFGqAWMClsIK9l/WJYHehcvRTiPi25qSu++LeXT/4bUMTHTbj4bnUV9eJuXFBTwbRURRW8agZT2gKgeR+zERbXGk+tkW4VNVAz4EemVybzADb25lMQN0d28yBXRocmVlMwRmb3VyNARmaXZlNQNzaXg2BXNldmVuNwVlaWdodDgEbmluZTkCX0FBAl9CQgJfQ0MCX0REAl9FRQJfRkYCX0dHAl9ISAJfSUkCX0pKAl9LSwJfTEwCX01NAl9OTgJfT08CX1BQAl9RUQJfUlICX1NTAl9UVAJfVVUCX1ZWAl9XVwJfWFgCX1lZAl9aWgFhYQFiYgFjYwFkZAFlZQFmZgFnZwFoaAFpaQFqagFrawFsbAFtbQFubgFvbwFwcAFxcQFycgFzcwF0dAF1dQF2dgF3dwF4eAF5eQF6emOqIxTosUfIsoTfs5qeENGcqtX66oSOPLmEnZFn1jRKCPupWHIaPTNUBrNow29agnkJYMziOf68r+GJupg51dp4AQAAAAAAAAD/AAAAAAAAAIBexbxTEshBkERdoWqhwIoJ4wDoMjrPrmojQgoprQA9BQHEOn2eubMCeXPJj13W4awE9cvTQkDAvrwKD7gIFACU1IIjgPR18O20tdxReZHec5CtotuzdSxMBmhRqgFjApbCAzQCX0FBAl9CQgJfQ0MCX0REAl9FRQJfRkYCX0dHAl9ISAJfSUkCX0pKAl9LSwJfTEwCX01NAl9OTgJfT08CX1BQAl9RUQJfUlICX1NTAl9UVAJfVVUCX1ZWAl9XVwJfWFgCX1lZAl9aWgFhYQFiYgFjYwFkZAFlZQFmZgFnZwFoaAFpaQFqagFrawFsbAFtbQFubgFvbwFwcAFxcQFycgFzcwF0dAF1dQF2dgF3dwF4eAF5eQF6eoiMWGVjOvE7lbfNGo2K8trB3BQLl3JR2dTa88dRHI6EBQFcoUlYXeU07pGz46Awt+/UzbeavqkVLxAfN1m0xyEOH7Bw04/20gxa5dgHFcoxVB1aUrvey9NSnTjm3bZyIAmXBQEcsHWOFMIAjA8AjObS1B6eGTfhzQ+ZFMWafinhznugu7EN3v6AIK3YoMoIKSFQq7E8UU123lFowclxBaJ+Z2ZgBgMEdHlwZRywdY4UwgCMDwCM5tLUHp4ZN+HND5kUxZp+KeHOe6C7B3N1YnR5cGUv2PJ6FycSkD5qPpbw+FwEgLQhGhes0TBZ/FHUpLveLAdjaGFyc2V0L9jyehcnEpA+aj6W8PhcBIC0IRoXrNEwWfxR1KS73iy/j8vpxTlXMaa0zWH7AN/npdYpNlM5xVrq4IejuQqqRgg80aKdzK2bkXsmMF+JqKT7IRgwKk5zxawKeA3mqwBecwAAAAAAAAAAPwAAAAAAAADEOn2eubMCeXPJj13W4awE9cvTQkDAvrwKD7gIFACU1AUCSL4jFyrohEWa54M0oAY/CfoOMXvqiyM854KjiHXnlrj1rRchRMzS3WLs50/w+xRkHZNqgMGgyT6/l3JxhIl8vMr/j66zigCgTjYhU4+OYddahaRlywoOSMNZPn6qbF/HBQE/K3K3xK8aYwy20/8Ii681EJPuRluefUcqYQCC5EnX5MzCcpKPeTgD2R9drY1RzJhrQzI4D5Ik98fBUU12jruQBQL5FwgE3a4EefjVr3SrO9IC5upBctmpuTcHFRrbf8QMob+Py+nFOVcxprTNYfsA3+el1ik2UznFWurgh6O5CqpG1/y+4x7wqF1flzvaGwuMnn77y8VXJXc4LKzTvbQhigEGBAZ0aWNrZXJbdyyOsV/XRwDHkkH2D4/aN+c2s/1GKrAXzk1FTvqBqgRuYW1lgF7FvFMSyEGQRF2haqHAignjAOgyOs+uaiNCCimtAD0HZGV0YWlsc0W3gCWGAcUmsjtbSGFGCpBQ4T81+76DBagAEVfkATiICXByZWNpc2lvbl0DxBeNqY5+PzrzQ+OZfXQgHRH0JzLPvqKwS44/8V8i2D++4C8N5bRs+A/hHvf98GHHjZddMa3p7qK8QJkznmwAANweL1JWf3Jf1zCthIZ/DaTJuprwgTMR3+TvPjxKYSVIBQFDqn/F9vVkT+Wirl4aqZBCzeuHlELjTHI/9YJ/sTPeiuCHqDSWM4eZr8SKkhFoOkJ9K9M+LqfruKi4gOpKtOuBBAIABG5vbmXYP77gLw3ltGz4D+Ee9/3wYceNl10xrenuorxAmTOebAEEc29tZdweL1JWf3Jf1zCthIZ/DaTJuprwgTMR3+TvPjxKYSVI9a0XIUTM0t1i7OdP8PsUZB2TaoDBoMk+v5dycYSJfLwISL4jFyrohEWa54M0oAY/CfoOMXvqiyM854KjiHXnlrgAAAAAAAAAACcAAAAAAAAA+RcIBN2uBHn41a90qzvSAubqQXLZqbk3BxUa23/EDKEDGgFhYQFiYgFjYwFkZAFlZQFmZgFnZwFoaAFpaQFqagFrawFsbAFtbQFubgFvbwFwcAFxcQFycgFzcwF0dAF1dQF2dgF3dwF4eAF5eQF6evupWHIaPTNUBrNow29agnkJYMziOf68r+GJupg51dp4AQEAq/CZ0ovtUN9eBlcVMn86mzKfd3ywuf7/9jTBk6A8tiYDA0FMVQhCUERJR0VTVANSR0IhAAsAAADQoA8BBwsAAQALCAAACwECAMjaBwE5MADRoA8BBwQAAAEAAAA=","stock_state_b64":"AAAAAAAAAAABAKEIrpkExTjfV0MUeOdtnpTQcaC/E39+kF+pHw2ScCKGRWhwUfTMpuP2Zfx1/j4nswCANGeJrYOqDcKelaMV4zWhCK6ZBMU431dDFHjnbZ6U0HGgvxN/fpBfqR8NknAihgPQBwEAAAAAAAD//////////6EIrpkExTjfV0MUeOdtnpTQcaC/E39+kF+pHw2ScCKGEAAGTUFTS0VEBk1hc2tlZAAAAQAA0QcBAAAAAAAA//////////+hCK6ZBMU431dDFHjnbZ6U0HGgvxN/fpBfqR8NknAihgMAAAAAAQAA2gcBAAAAAAAA//////////+hCK6ZBMU431dDFHjnbZ6U0HGgvxN/fpBfqR8NknAihggAQG9AAQAAAAABAAAAAAAAAQAAAKEIrpkExTjfV0MUeOdtnpTQcaC/E39+kF+pHw2ScCKGoA8AAKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqAQAAAAhAb0ABAAAAAAAAAAAAAA==","stock_index_b64":"AAAAAAAAAAAAAAAAAAAAAAEAoQiumQTFON9XQxR4522elNBxoL8Tf36QX6kfDZJwIoYAAAAAAQAAAKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqAQAAAAEAAKEIrpkExTjfV0MUeOdtnpTQcaC/E39+kF+pHw2ScCKGoA8AAAAAAAA=","reuse_address_index":{}}
 \ No newline at end of file
-diff --git a/src/wallet/legacy_snapshot_b3.json.contract b/src/wallet/legacy_snapshot_b3.json.contract
-new file mode 100644
-index 0000000..76ad7af
---- /dev/null
-+++ b/src/wallet/legacy_snapshot_b3.json.contract
-@@ -0,0 +1 @@
-+rgb:oQiumQTF-ON9XQxR-4522elN-BxoL8Tf-36QX6kf-DZJwIoY
-\ No newline at end of file
 diff --git a/src/wallet/mod.rs b/src/wallet/mod.rs
 index c5c45b2..46cf640 100644
 --- a/src/wallet/mod.rs
@@ -1168,7 +1195,7 @@ index a3a9f46..8a151f9 100644
      }
  
 diff --git a/src/wallet/online.rs b/src/wallet/online.rs
-index ca96b4a..ccc534d 100644
+index ca96b4a..d23c37a 100644
 --- a/src/wallet/online.rs
 +++ b/src/wallet/online.rs
 @@ -4,6 +4,9 @@
@@ -1465,7 +1492,19 @@ index ca96b4a..ccc534d 100644
          let spent = Self::known_spent_opouts(&consignment);
          let mut payments: Vec<_> = self.find_payments(&consignment, &matcher, &spent).collect();
          if payments.len() != 1 {
-@@ -5805,6 +5953,8 @@ impl Wallet {
+@@ -4904,7 +5052,10 @@ impl Wallet {
+         let witness_id = paying_bundle.witness_id();
+         let txid = witness_id.to_string();
+ 
+-        if receiving.len() != 1 {
++        // MASKED: a combined buy of several pre-signed listings pays the buyer's seal one allocation per listing
++        // (each seller's transfer as signed); the limit of allocations a UTXO can hold is checked below
++        let several_ok = self.presigned_receives.contains(&recipient_id) && !receiving.is_empty();
++        if receiving.len() != 1 && !several_ok {
+             error!(
+                 self.logger,
+                 "Consignment pays this recipient {} allocations, refusing it",
+@@ -5805,6 +5956,8 @@ impl Wallet {
                      details: s!("consignment not found in memory"),
                  })?
                  .clone();
@@ -1474,7 +1513,7 @@ index ca96b4a..ccc534d 100644
              let consignment =
                  RgbTransfer::load(&consignment_bytes[..]).map_err(InternalError::from)?;
  
-@@ -7053,6 +7203,10 @@ impl Wallet {
+@@ -7053,6 +7206,10 @@ impl Wallet {
          batch: bool,
      ) -> Result<(), Error> {
          for recipient in recipients {
@@ -1485,7 +1524,7 @@ index ca96b4a..ccc534d 100644
              let recipient_id = &recipient.recipient_id;
              let recipient_vk = verifying_key_from_bytes(&recipient.public_key)?;
              let derived = derive_shared(sender_sk, &recipient_vk)?;
-@@ -7590,6 +7744,246 @@ impl Wallet {
+@@ -7590,6 +7747,246 @@ impl Wallet {
          Ok(tx.compute_txid().to_string())
      }
  
@@ -1732,7 +1771,7 @@ index ca96b4a..ccc534d 100644
      /// Prepare the PSBT to inflate an IFA asset.
      pub async fn inflate_begin(
          &mut self,
-@@ -12074,3 +12468,857 @@ mod bfa_tests {
+@@ -12074,3 +12471,857 @@ mod bfa_tests {
          assert!(options(&format!(r#","evm_chains":{{"mainnet":{chain}}}"#)).is_err());
      }
  }
@@ -2591,10 +2630,18 @@ index ca96b4a..ccc534d 100644
 +    }
 +}
 diff --git a/src/wallet/rust_only.rs b/src/wallet/rust_only.rs
-index 4e07a9c..9f18205 100644
+index 4e07a9c..e598be7 100644
 --- a/src/wallet/rust_only.rs
 +++ b/src/wallet/rust_only.rs
-@@ -52,6 +52,12 @@ pub struct ValidateConsignmentResult {
+@@ -3,6 +3,7 @@
+ //! This module defines additional utility methods that are not exposed via FFI
+ 
+ use super::*;
++use amplify::confinement::{NonEmptyOrdMap, NonEmptyVec};
+ 
+ /// RGB asset-specific information to color a transaction
+ #[derive(Clone, Debug)]
+@@ -52,6 +53,12 @@ pub struct ValidateConsignmentResult {
      pub error: Option<String>,
      /// Detailed error/failure description (when invalid).
      pub details: Option<String>,
@@ -2607,7 +2654,7 @@ index 4e07a9c..9f18205 100644
  }
  
  impl Wallet {
-@@ -554,6 +560,18 @@ pub fn validate_consignment_offchain(
+@@ -554,6 +561,18 @@ pub fn validate_consignment_offchain(
      consignment_bytes: &[u8],
      txid: &str,
      bitcoin_network: BitcoinNetwork,
@@ -2626,7 +2673,7 @@ index 4e07a9c..9f18205 100644
  ) -> Result<ValidateConsignmentResult, Error> {
      let consignment = RgbTransfer::load(consignment_bytes).map_err(|e| Error::Internal {
          details: format!("Failed to load consignment: {e}"),
-@@ -589,6 +607,26 @@ pub fn validate_consignment_offchain(
+@@ -589,6 +608,26 @@ pub fn validate_consignment_offchain(
      {
          Ok(valid_consignment) => {
              let status = valid_consignment.validation_status();
@@ -2653,7 +2700,7 @@ index 4e07a9c..9f18205 100644
              Ok(ValidateConsignmentResult {
                  valid: true,
                  warnings: Some(
-@@ -600,6 +638,8 @@ pub fn validate_consignment_offchain(
+@@ -600,6 +639,8 @@ pub fn validate_consignment_offchain(
                  ),
                  error: None,
                  details: None,
@@ -2662,7 +2709,7 @@ index 4e07a9c..9f18205 100644
              })
          }
          Err(ValidationError::InvalidConsignment(failure)) => Ok(ValidateConsignmentResult {
-@@ -607,24 +647,32 @@ pub fn validate_consignment_offchain(
+@@ -607,24 +648,32 @@ pub fn validate_consignment_offchain(
              warnings: None,
              error: Some("invalid".to_string()),
              details: Some(failure.to_string()),
@@ -2695,7 +2742,7 @@ index 4e07a9c..9f18205 100644
          }),
      }
  }
-@@ -633,6 +681,55 @@ pub fn validate_consignment_offchain(
+@@ -633,6 +682,55 @@ pub fn validate_consignment_offchain(
  mod tests {
      use super::*;
  
@@ -2751,7 +2798,7 @@ index 4e07a9c..9f18205 100644
      #[test]
      fn validate_consignment_offchain_invalid_bytes() {
          let result = validate_consignment_offchain(
-@@ -666,9 +763,12 @@ mod tests {
+@@ -666,9 +764,12 @@ mod tests {
              warnings: Some(vec!["warn1".to_string()]),
              error: None,
              details: None,
@@ -2764,7 +2811,7 @@ index 4e07a9c..9f18205 100644
          assert!(deserialized.valid);
          assert_eq!(deserialized.warnings.unwrap(), vec!["warn1".to_string()]);
          assert!(deserialized.error.is_none());
-@@ -678,6 +778,8 @@ mod tests {
+@@ -678,6 +779,8 @@ mod tests {
              warnings: None,
              error: Some("invalid".to_string()),
              details: Some("schema mismatch".to_string()),
@@ -2773,7 +2820,7 @@ index 4e07a9c..9f18205 100644
          };
          let json = serde_json::to_string(&result_invalid).unwrap();
          let deserialized: ValidateConsignmentResult = serde_json::from_str(&json).unwrap();
-@@ -719,3 +821,493 @@ mod tests {
+@@ -719,3 +822,1060 @@ mod tests {
          assert_eq!(IndexerProtocol::Esplora.to_string(), "Esplora");
      }
  }
@@ -2948,7 +2995,12 @@ index 4e07a9c..9f18205 100644
 +/// `prev` (the output it spends). With that sighash the signature covers only that input and output 1, so the same
 +/// check holds for the template and for the buyer's final transaction.
 +fn check_seller_signature(tx: &BdkTransaction, prev: &TxOut, witness: &bdk_wallet::bitcoin::Witness) -> Result<(), Error> {
-+    let index = SELLER;
++    check_seller_signature_at(tx, SELLER, prev, witness)
++}
++
++/// [`check_seller_signature`] for a seller's input at `index` (a combined buy has several sellers; SIGHASH_SINGLE
++/// pairs each one's input with the output of the same index, its payout).
++fn check_seller_signature_at(tx: &BdkTransaction, index: usize, prev: &TxOut, witness: &bdk_wallet::bitcoin::Witness) -> Result<(), Error> {
 +    use bdk_wallet::bitcoin::{key::XOnlyPublicKey, secp256k1::{Message, Secp256k1, schnorr}, sighash::{Prevouts, SighashCache, TapSighashType}};
 +    if !prev.script_pubkey.is_p2tr() {
 +        return Err(bad_listing("the seller's output is not a taproot output"));
@@ -3135,6 +3187,290 @@ index 4e07a9c..9f18205 100644
 +    Ok(out)
 +}
 +
++/// Most listings one combined buy takes (MASKED's lot limit).
++pub const COMBINED_MAX: usize = 10;
++
++/// The input (and payout output) index of seller `k` in a combined buy. SIGHASH_SINGLE pairs each seller's input
++/// with the output of the same index, and every listing's transfer assigns the tokens to output 2 (the seal), so
++/// index 2 can't be a seller's: the first seller keeps index 1 and the others go from 3. Input 2 is the buyer's
++/// second coin (a combined buy needs two).
++pub fn combined_seller_index(k: usize) -> usize {
++    if k == 0 { SELLER } else { k + 2 }
++}
++
++/// A combined buy of several pre-signed listings, as [`presigned_combined_buy`] makes it.
++#[derive(Debug, Clone, Serialize, Deserialize)]
++#[cfg_attr(feature = "camel_case", serde(rename_all = "camelCase"))]
++pub struct PresignedCombinedBuy {
++    /// the buyer's PSBT: the sellers' inputs signed, the buyer's to sign
++    pub psbt: String,
++    /// one consignment for all the listings' transfers, naming the (unsigned) transaction; completed after signing
++    /// with [`complete_presigned_consignment`] (the txid doesn't change when the buyer signs)
++    pub consignment: Vec<u8>,
++    /// the transaction's id
++    pub txid: String,
++}
++
++/// One transaction buying several pre-signed listings of the same token at once (about 100 vB per extra listing
++/// instead of a whole transaction each).
++///
++/// Every listing's transfer stays as its seller signed it. RGB commits a bundle by its input map only (which outputs
++/// it spends, and which transfer spends each), so the transfers go into one bundle under one new commitment
++/// (output 0), and the validator checks each transfer against its own inputs. Each seller's signature
++/// (SIGHASH_SINGLE|ANYONECANPAY) covers only its input and the payout at the same index, so neither the new
++/// commitment nor the other sellers' inputs and payouts break it.
++///
++/// Layout: inputs `[buyer 0, seller 0, buyer 1, seller 1, seller 2, …, other buyer coins]`, outputs `[commitment,
++/// payout 0, seal, payout 1, payout 2, …, change]`. The seal (330 sats to `seal_script`) gets every listing's tokens.
++/// `consignments[k]` is listing `k`'s consignment and `seller_txs[k]` its seller output's whole transaction (hex,
++/// or none), as for [`presigned_buy_psbt`].
++pub fn presigned_combined_buy(
++    templates: Vec<String>,
++    consignments: Vec<Vec<u8>>,
++    buyer_inputs: Vec<SwapInput>,
++    seal_script: String,
++    change: Option<SwapOutput>,
++    seller_txs: Vec<Option<String>>,
++) -> Result<PresignedCombinedBuy, Error> {
++    use bdk_wallet::bitcoin::{Amount, Sequence, TxIn, Witness};
++    use rgbstd::rgbcore::commit_verify::{CommitId, TryCommitVerify, mpc};
++    use rgbstd::rgbcore::dbc::opret::OpretProof;
++    use rgbstd::rgbcore::validation::DbcProof;
++    use rgbstd::rgbcore::dbc::Anchor;
++
++    let n = templates.len();
++    if n < 2 {
++        return Err(bad_listing("a combined buy takes two listings or more"));
++    }
++    if n > COMBINED_MAX {
++        return Err(bad_listing(&format!("a combined buy takes at most {COMBINED_MAX} listings")));
++    }
++    if consignments.len() != n || seller_txs.len() != n {
++        return Err(bad_listing("one consignment and one seller transaction (or none) per listing"));
++    }
++    if buyer_inputs.len() < 2 {
++        return Err(bad_listing("a combined buy needs two of the buyer's coins"));
++    }
++
++    // the listings: each checked (seller signature, layout), no output listed twice, one version and lock time
++    let mut ts: Vec<(Psbt, PresignedInfo)> = Vec::with_capacity(n);
++    for t in &templates {
++        let info = presigned_listing_info(t)?;
++        ts.push((Psbt::from_str(t)?, info));
++    }
++    let version = ts[0].0.unsigned_tx.version;
++    let lock_time = ts[0].0.unsigned_tx.lock_time;
++    let mut seller_ops = HashSet::new();
++    for (p, _) in &ts {
++        if p.unsigned_tx.version != version || p.unsigned_tx.lock_time != lock_time {
++            return Err(bad_listing("the listings were signed with different transaction versions"));
++        }
++        if !seller_ops.insert(p.unsigned_tx.input[SELLER].previous_output) {
++            return Err(bad_listing("the same listing twice"));
++        }
++    }
++    let mut buyer_ins = vec![];
++    for i in &buyer_inputs {
++        let op = parse_outpoint(&i.outpoint)?;
++        if seller_ops.contains(&op) {
++            return Err(bad_listing("the buyer can't pay with a seller's output"));
++        }
++        buyer_ins.push(TxIn { previous_output: op, script_sig: ScriptBuf::new(), sequence: Sequence::ENABLE_RBF_NO_LOCKTIME, witness: Witness::new() });
++    }
++
++    // the transfers: one bundle (all input maps, all transfers) for the one token, committed in output 0
++    let mut contract_id: Option<ContractId> = None;
++    let mut input_map: BTreeMap<Opout, OpId> = BTreeMap::new();
++    let mut known: Vec<KnownTransition> = vec![];
++    let mut loaded: Vec<RgbTransfer> = Vec::with_capacity(n);
++    let mut template_ids: HashSet<RgbTxid> = HashSet::new();
++    for (k, bytes) in consignments.iter().enumerate() {
++        let c = RgbTransfer::load(&bytes[..]).map_err(|e| bad_listing(&format!("can't read listing {}'s consignment: {e}", k + 1)))?;
++        let cid = c.contract_id();
++        if contract_id.is_some_and(|id| id != cid) {
++            return Err(bad_listing("a combined buy is for one token: the listings are for different tokens"));
++        }
++        contract_id = Some(cid);
++        let tid = RgbTxid::from_str(&ts[k].1.template_txid).map_err(|_| bad_listing("bad template txid"))?;
++        template_ids.insert(tid);
++        let mut found = 0;
++        for wb in c.bundles.iter().filter(|wb| wb.witness_id() == tid) {
++            found += 1;
++            for (opout, opid) in wb.bundle.input_map.iter() {
++                if input_map.insert(*opout, *opid).is_some_and(|prev| prev != *opid) {
++                    return Err(bad_listing("two listings spend the same tokens"));
++                }
++            }
++            for kt in wb.bundle.known_transitions.iter() {
++                if !known.iter().any(|x| x.opid == kt.opid) {
++                    known.push(kt.clone());
++                }
++            }
++        }
++        if found != 1 {
++            return Err(bad_listing(&format!("listing {}'s consignment has no single transfer for its template", k + 1)));
++        }
++        loaded.push(c);
++    }
++    let contract_id = contract_id.ok_or(bad_listing("no consignment"))?;
++    let bundle = TransitionBundle {
++        input_map: NonEmptyOrdMap::try_from(input_map).map_err(|_| bad_listing("too many inputs for one bundle"))?,
++        known_transitions: NonEmptyVec::try_from(known).map_err(|_| bad_listing("too many transfers for one bundle"))?,
++    };
++    let protocol: mpc::ProtocolId = contract_id.into();
++    let tree = mpc::MerkleTree::try_commit(&mpc::MultiSource {
++        min_depth: mpc::MPC_MINIMAL_DEPTH,
++        messages: Confined::from_checked(bmap! { protocol => mpc::Message::from(bundle.bundle_id()) }),
++        static_entropy: None,
++    })
++    .map_err(|e| bad_listing(&format!("commitment: {e}")))?;
++    let commitment = tree.commit_id();
++    let mpc_proof = mpc::MerkleBlock::from(tree)
++        .to_merkle_proof(protocol)
++        .map_err(|e| bad_listing(&format!("commitment proof: {e}")))?;
++    let anchor = Anchor { mpc_proof, dbc_proof: DbcProof::Opret(OpretProof::default()) };
++
++    // the transaction
++    let mut input = vec![buyer_ins[0].clone(), ts[0].0.unsigned_tx.input[SELLER].clone(), buyer_ins[1].clone()];
++    for (p, _) in ts.iter().skip(1) {
++        input.push(p.unsigned_tx.input[SELLER].clone());
++    }
++    input.extend(buyer_ins.iter().skip(2).cloned());
++    let mut output = vec![TxOut { value: Amount::ZERO, script_pubkey: ScriptBuf::new_op_return(commitment.to_byte_array()) }; n + 2];
++    for (k, (p, _)) in ts.iter().enumerate() {
++        output[combined_seller_index(k)] = p.unsigned_tx.output[SELLER].clone();
++    }
++    output[SEAL_VOUT] = TxOut { value: Amount::from_sat(SEAL_SATS), script_pubkey: script_from_hex(&seal_script)? };
++    if let Some(c) = &change {
++        let script = c.script.as_deref().ok_or(bad_listing("the change needs a script"))?;
++        output.push(TxOut { value: Amount::from_sat(c.sats), script_pubkey: script_from_hex(script)? });
++    }
++    let tx = BdkTransaction { version, lock_time, input, output };
++    let txid = tx.compute_txid();
++
++    // the PSBT: the sellers' signed inputs from their templates, the buyer's with their amounts (and transactions)
++    let mut psbt = Psbt::from_unsigned_tx(tx.clone()).map_err(|e| Error::Internal { details: e.to_string() })?;
++    for (k, (p, _)) in ts.iter().enumerate() {
++        let slot = combined_seller_index(k);
++        psbt.inputs[slot] = p.inputs[SELLER].clone();
++        if let Some(h) = seller_txs[k].as_deref().filter(|h| !h.trim().is_empty()) {
++            let bytes = <Vec<u8> as bdk_wallet::bitcoin::hex::FromHex>::from_hex(h.trim()).map_err(|_| bad_listing("bad seller transaction hex"))?;
++            let prev: BdkTransaction = bdk_wallet::bitcoin::consensus::deserialize(&bytes).map_err(|_| bad_listing("bad seller transaction"))?;
++            let op = tx.input[slot].previous_output;
++            if prev.compute_txid() != op.txid {
++                return Err(bad_listing("a seller's transaction does not match its output"));
++            }
++            if prev.output.get(op.vout as usize) != psbt.inputs[slot].witness_utxo.as_ref() {
++                return Err(bad_listing("a seller's output on chain differs from the signed one"));
++            }
++            psbt.inputs[slot].non_witness_utxo = Some(prev);
++        }
++    }
++    let buyer_slots: Vec<usize> = [0usize, 2].into_iter().chain(n + 2..n + buyer_inputs.len()).collect();
++    for (slot, i) in buyer_slots.into_iter().zip(buyer_inputs.iter()) {
++        psbt.inputs[slot].witness_utxo = Some(TxOut { value: Amount::from_sat(i.sats), script_pubkey: script_from_hex(&i.script)? });
++        if let Some(h) = &i.tx {
++            let bytes = <Vec<u8> as bdk_wallet::bitcoin::hex::FromHex>::from_hex(h.trim()).map_err(|_| bad_listing("bad previous transaction hex"))?;
++            let prev: BdkTransaction = bdk_wallet::bitcoin::consensus::deserialize(&bytes).map_err(|_| bad_listing("bad previous transaction"))?;
++            if prev.compute_txid() != psbt.unsigned_tx.input[slot].previous_output.txid {
++                return Err(bad_listing("previous transaction does not match the input"));
++            }
++            psbt.inputs[slot].non_witness_utxo = Some(prev);
++        }
++    }
++    let ins: u64 = psbt.inputs.iter().map(|i| i.witness_utxo.as_ref().map(|o| o.value.to_sat()).unwrap_or(0)).sum();
++    let outs: u64 = psbt.unsigned_tx.output.iter().map(|o| o.value.to_sat()).sum();
++    if ins < outs {
++        return Err(bad_listing("the buyer's inputs don't cover the prices"));
++    }
++
++    // the consignment: every listing's history once (bundles of the same transaction merged), in order, then the
++    // combined transfer
++    let mut history: Vec<WitnessBundle> = vec![];
++    for c in &loaded {
++        for wb in c.bundles.iter() {
++            if template_ids.contains(&wb.witness_id()) {
++                continue;
++            }
++            if let Some(have) = history.iter_mut().find(|h| h.witness_id() == wb.witness_id()) {
++                if have.bundle.bundle_id() != wb.bundle.bundle_id() {
++                    return Err(bad_listing("two listings disagree about an earlier transfer"));
++                }
++                let mut kts: Vec<KnownTransition> = have.bundle.known_transitions.iter().cloned().collect();
++                for kt in wb.bundle.known_transitions.iter() {
++                    if !kts.iter().any(|x| x.opid == kt.opid) {
++                        kts.push(kt.clone());
++                    }
++                }
++                have.bundle.known_transitions = NonEmptyVec::try_from(kts).map_err(|_| bad_listing("too many transfers"))?;
++            } else {
++                history.push(wb.clone());
++            }
++        }
++    }
++    let mut bundles = order_bundles(history)?;
++    bundles.push(WitnessBundle { tx, spv_proof: None, anchor, bundle });
++    let mut consignment = loaded.swap_remove(0);
++    consignment.bundles = Confined::try_from(bundles).map_err(|_| bad_listing("too many bundles"))?;
++    let mut out = Vec::new();
++    consignment.save(&mut out).map_err(|e| bad_listing(&e.to_string()))?;
++    Ok(PresignedCombinedBuy { psbt: psbt.to_string(), consignment: out, txid: txid.to_string() })
++}
++
++/// Bundles in an order the validator can follow: each after the bundles whose transfers made its inputs.
++fn order_bundles(mut todo: Vec<WitnessBundle>) -> Result<Vec<WitnessBundle>, Error> {
++    let made_by = |wbs: &[WitnessBundle], opid: &OpId| wbs.iter().position(|w| w.bundle.known_transitions.iter().any(|kt| kt.opid == *opid));
++    let mut done: Vec<WitnessBundle> = Vec::with_capacity(todo.len());
++    while !todo.is_empty() {
++        let ready = (0..todo.len()).find(|&i| {
++            todo[i].bundle.known_transitions.iter().all(|kt| {
++                kt.transition.inputs.iter().all(|input| made_by(&todo, &input.op).is_none_or(|j| j == i))
++            })
++        });
++        let Some(i) = ready else {
++            return Err(bad_listing("the listings' histories loop"));
++        };
++        done.push(todo.remove(i));
++    }
++    Ok(done)
++}
++
++/// The buyer's final check of a combined buy before broadcasting: every listing's seller input and payout where
++/// [`combined_seller_index`] says, with a valid seller signature; the seal at output 2 pays `seal_script`; one
++/// OP_RETURN, the first output (the commitment).
++pub fn check_presigned_combined_final(templates: Vec<String>, final_tx: &str, seal_script: &str) -> Result<String, Error> {
++    let bytes = <Vec<u8> as bdk_wallet::bitcoin::hex::FromHex>::from_hex(final_tx.trim()).map_err(|_| bad_listing("bad transaction hex"))?;
++    let tx: BdkTransaction = bdk_wallet::bitcoin::consensus::deserialize(&bytes).map_err(|_| bad_listing("bad transaction"))?;
++    let n = templates.len();
++    if n < 2 || tx.input.len() < n + 2 || tx.output.len() < n + 2 {
++        return Err(bad_listing("the transaction does not follow the combined layout"));
++    }
++    for (k, t) in templates.iter().enumerate() {
++        presigned_listing_info(t)?;
++        let t = Psbt::from_str(t)?;
++        let tt = &t.unsigned_tx;
++        let i = combined_seller_index(k);
++        if tx.version != tt.version || tx.lock_time != tt.lock_time {
++            return Err(bad_listing("the transaction does not follow the listings"));
++        }
++        if tx.input[i].previous_output != tt.input[SELLER].previous_output || tx.input[i].sequence != tt.input[SELLER].sequence {
++            return Err(bad_listing(&format!("input {i} must be listing {}'s seller output", k + 1)));
++        }
++        if tx.output[i] != tt.output[SELLER] {
++            return Err(bad_listing(&format!("listing {}'s payout changed", k + 1)));
++        }
++        let prev = t.inputs[SELLER].witness_utxo.clone().ok_or(bad_listing("a seller's input has no amount"))?;
++        check_seller_signature_at(&tx, i, &prev, &tx.input[i].witness)?;
++    }
++    if tx.output[SEAL_VOUT].script_pubkey != script_from_hex(seal_script)? || tx.output[SEAL_VOUT].value.to_sat() != SEAL_SATS {
++        return Err(bad_listing("the seal does not pay the buyer"));
++    }
++    if !tx.output[0].script_pubkey.is_op_return() || tx.output.iter().filter(|o| o.script_pubkey.is_op_return()).count() != 1 {
++        return Err(bad_listing("the commitment must be the first output and the only OP_RETURN"));
++    }
++    Ok(tx.compute_txid().to_string())
++}
++
 +#[cfg(test)]
 +mod presigned_tests {
 +    use super::*;
@@ -3243,6 +3579,284 @@ index 4e07a9c..9f18205 100644
 +        // the seller's own output can't be the buyer's coin
 +        let own = vec![SwapInput { outpoint: format!("{}:1", "ab".repeat(32)), sats: 90000, script: buyer.clone(), tx: None }];
 +        assert!(presigned_buy_psbt(&t, own, seal, None, None).is_err());
++    }
++
++    /// Real RGB listings for combined-buy tests: a token issued to `n` seller outputs, each listed like
++    /// `presign_sale` lists it (its transfer to output 2 committed in output 0, the seller's input signed
++    /// SIGHASH_SINGLE|ANYONECANPAY).
++    mod combined {
++        use super::*;
++        use crate::utils::MemStock;
++        use rgbstd::persistence::Stock;
++        use rgbstd::rgbcore::commit_verify::{CommitId, TryCommitVerify, mpc};
++        use rgbstd::rgbcore::dbc::Anchor;
++        use rgbstd::rgbcore::dbc::opret::OpretProof;
++        use rgbstd::rgbcore::validation::DbcProof;
++        use rgbstd::txout::BlindSeal;
++        use rgbstd::{ChainNet, Identity, Txid as RgbTxid};
++        use schemata::NonInflatableAsset;
++
++        pub(super) struct Listing {
++            pub template: String,
++            pub consignment: Vec<u8>,
++            pub amount: u64,
++        }
++
++        fn key(tag: u8) -> (Keypair, ScriptBuf) {
++            let secp = Secp256k1::new();
++            let kp = Keypair::from_secret_key(&secp, &SecretKey::from_slice(&[tag; 32]).unwrap());
++            let (xonly, _) = kp.x_only_public_key();
++            (kp, ScriptBuf::new_p2tr(&secp, xonly, None))
++        }
++
++        fn commit(contract_id: ContractId, bundle: &TransitionBundle) -> (ScriptBuf, Anchor<DbcProof>) {
++            let protocol: mpc::ProtocolId = contract_id.into();
++            let tree = mpc::MerkleTree::try_commit(&mpc::MultiSource {
++                min_depth: mpc::MPC_MINIMAL_DEPTH,
++                messages: Confined::from_checked(bmap! { protocol => mpc::Message::from(bundle.bundle_id()) }),
++                static_entropy: None,
++            })
++            .unwrap();
++            let script = ScriptBuf::new_op_return(tree.commit_id().to_byte_array());
++            let mpc_proof = mpc::MerkleBlock::from(tree).to_merkle_proof(protocol).unwrap();
++            (script, Anchor { mpc_proof, dbc_proof: DbcProof::Opret(OpretProof::default()) })
++        }
++
++        /// A token of `amounts.len()` allocations (one per seller output `{tag}..:1`), each listed for
++        /// `price` sats (+ the output's 1000) to a payout script of its own.
++        pub(super) fn listings(amounts: &[u64], tag: u8, price: u64) -> Vec<Listing> {
++            let secp = Secp256k1::new();
++            let mut stock = MemStock::default();
++            stock.import_schema_definition(NonInflatableAsset::schema_definition()).unwrap();
++            let spec = crate::AssetSpec {
++                ticker: crate::Ticker::try_from("MSKT".to_string()).unwrap(),
++                name: crate::Name::try_from("Masked Test".to_string()).unwrap(),
++                details: None,
++                precision: crate::Precision::try_from(0u8).unwrap(),
++            };
++            let terms = crate::ContractTerms { text: crate::RicardianContract::default(), media: None };
++            let total: u64 = amounts.iter().sum();
++            let outpoint = |k: usize| format!("{}:1", format!("{:02x}", tag.wrapping_add(k as u8)).repeat(32));
++            let mut builder = rgbstd::contract::ContractBuilder::with(Identity::default(), NonInflatableAsset::schema_rules(), ChainNet::from(BitcoinNetwork::Regtest))
++                .add_global_state("spec", spec)
++                .unwrap()
++                .add_global_state("terms", terms)
++                .unwrap()
++                .add_global_state("issuedSupply", rgbstd::Amount::from(total))
++                .unwrap();
++            for (k, a) in amounts.iter().enumerate() {
++                let op = parse_outpoint(&outpoint(k)).unwrap();
++                let txid = RgbTxid::from_str(&op.txid.to_string()).unwrap();
++                builder = builder.add_fungible_state("assetOwner", BlindSeal::new_random(txid, op.vout), *a).unwrap();
++            }
++            let contract = builder.issue_contract().unwrap();
++            let contract_id = contract.contract_id();
++            let genesis = contract.genesis.clone();
++            let version = contract.version;
++            stock.import_contract(contract, &crate::DumbResolver).unwrap();
++            let genesis_id = genesis.id();
++
++            let mut out = vec![];
++            for (k, a) in amounts.iter().enumerate() {
++                let op = parse_outpoint(&outpoint(k)).unwrap();
++                // the genesis allocation on this seller's output
++                let index = genesis.assignments.get(&OS_ASSET).unwrap().as_fungible().iter().position(|asg| {
++                    matches!(asg, Assign { seal: rgbstd::BuilderSeal::Revealed(s), .. } if s.txid.to_string() == op.txid.to_string() && s.vout.into_u32() == op.vout)
++                }).unwrap() as u16;
++                let opout = Opout::new(genesis_id, OS_ASSET, index);
++                let transition = stock
++                    .transition_builder(contract_id, "transfer")
++                    .unwrap()
++                    .add_input(opout, AllocatedState::Amount(RevealedValue::new(rgbstd::Amount::from(*a))))
++                    .unwrap()
++                    .add_fungible_state("assetOwner", GraphSeal::new_random_vout(SEAL_VOUT as u32), *a)
++                    .unwrap()
++                    .complete_transition()
++                    .unwrap();
++                let opid = transition.id();
++                let bundle = TransitionBundle {
++                    input_map: NonEmptyOrdMap::with_key_value(opout, opid),
++                    known_transitions: NonEmptyVec::with(KnownTransition { opid, transition }),
++                };
++                let (opret, anchor) = commit(contract_id, &bundle);
++
++                let (kp, seller_script) = key(0x40 + k as u8);
++                let prev = TxOut { value: Amount::from_sat(1000), script_pubkey: seller_script };
++                let payout = p2tr(0x50 + k as u8);
++                let placeholder = parse_outpoint(&format!("{}01:0", "00".repeat(31))).unwrap();
++                let txin = |o| TxIn { previous_output: o, script_sig: ScriptBuf::new(), sequence: Sequence::ENABLE_RBF_NO_LOCKTIME, witness: Witness::new() };
++                let tx = BdkTransaction {
++                    version: Version::TWO,
++                    lock_time: LockTime::ZERO,
++                    input: vec![txin(placeholder), txin(op)],
++                    output: vec![
++                        TxOut { value: Amount::ZERO, script_pubkey: opret },
++                        TxOut { value: Amount::from_sat(price + 1000), script_pubkey: payout.clone() },
++                        TxOut { value: Amount::from_sat(SEAL_SATS), script_pubkey: payout },
++                    ],
++                };
++                let hash = SighashCache::new(&tx).taproot_key_spend_signature_hash(1, &Prevouts::One(1, &prev), TapSighashType::SinglePlusAnyoneCanPay).unwrap();
++                let sig = secp.sign_schnorr_no_aux_rand(&Message::from_digest(hash.to_byte_array()), &kp.tap_tweak(&secp, None).to_keypair());
++                let mut s = sig.as_ref().to_vec();
++                s.push(TapSighashType::SinglePlusAnyoneCanPay as u8);
++                let mut psbt = Psbt::from_unsigned_tx(tx.clone()).unwrap();
++                psbt.inputs[1].witness_utxo = Some(prev);
++                psbt.inputs[1].final_script_witness = Some(Witness::from_slice(&[s]));
++
++                let consignment = RgbTransfer {
++                    version,
++                    transfer: true,
++                    genesis: genesis.clone(),
++                    bundles: Confined::try_from(vec![WitnessBundle { tx, spv_proof: None, anchor, bundle }]).unwrap(),
++                };
++                let mut bytes = vec![];
++                consignment.save(&mut bytes).unwrap();
++                out.push(Listing { template: psbt.to_string(), consignment: bytes, amount: *a });
++            }
++            out
++        }
++    }
++
++    /// The buyer's two coins (60k and 40k sats) and the seal script.
++    fn combined_buyer() -> (Vec<SwapInput>, String, String) {
++        let buyer = "5120".to_string() + &"22".repeat(32);
++        let seal = "5120".to_string() + &"33".repeat(32);
++        let inputs = vec![
++            SwapInput { outpoint: format!("{}:0", "cd".repeat(32)), sats: 60000, script: buyer.clone(), tx: None },
++            SwapInput { outpoint: format!("{}:3", "ce".repeat(32)), sats: 40000, script: buyer.clone(), tx: None },
++        ];
++        (inputs, seal, buyer)
++    }
++
++    /// The buyer's signing (a dummy witness on its inputs) and the transaction, hex.
++    fn sign_combined(psbt: &str) -> (BdkTransaction, String) {
++        let psbt = Psbt::from_str(psbt).unwrap();
++        let mut tx = psbt.unsigned_tx.clone();
++        for (i, inp) in psbt.inputs.iter().enumerate() {
++            tx.input[i].witness = inp.final_script_witness.clone().unwrap_or_else(|| Witness::from_slice(&[vec![1u8; 64]]));
++        }
++        let hex = bdk_wallet::bitcoin::consensus::encode::serialize_hex(&tx);
++        (tx, hex)
++    }
++
++    #[test]
++    fn combined_buy_is_valid_rgb() {
++        let ls = combined::listings(&[700, 300, 1250], 0xa0, 20000);
++        let (inputs, seal, buyer) = combined_buyer();
++        // a single listing's own consignment is valid as it is (the fixture matches presign_sale's)
++        let info = presigned_listing_info(&ls[0].template).unwrap();
++        let single = inspect_swap_consignment(&ls[0].consignment, &info.template_txid, BitcoinNetwork::Regtest, Some(SEAL_VOUT as u32)).unwrap();
++        assert!(single.valid, "{:?}", single.details);
++        assert_eq!(single.seal_amount, Some(700));
++
++        let fee = 900;
++        let change = Some(SwapOutput { script: Some(buyer.clone()), sats: 100000 + 3000 - 3 * 21000 - SEAL_SATS - fee });
++        let templates: Vec<String> = ls.iter().map(|l| l.template.clone()).collect();
++        let res = presigned_combined_buy(templates.clone(), ls.iter().map(|l| l.consignment.clone()).collect(), inputs, seal.clone(), change, vec![None; 3]).unwrap();
++        let psbt = Psbt::from_str(&res.psbt).unwrap();
++        // layout: [buyer 0, seller 0, buyer 1, seller 1, seller 2], [commitment, payout 0, seal, payout 1, payout 2, change]
++        assert_eq!(psbt.unsigned_tx.input.len(), 5);
++        assert_eq!(psbt.unsigned_tx.output.len(), 6);
++        assert!(psbt.unsigned_tx.output[0].script_pubkey.is_op_return());
++        assert_eq!(psbt.unsigned_tx.output[2].value.to_sat(), SEAL_SATS);
++        for k in 0..3 {
++            assert!(psbt.inputs[combined_seller_index(k)].final_script_witness.is_some(), "seller {k} stays signed");
++        }
++
++        let (tx, hex) = sign_combined(&res.psbt);
++        let txid = check_presigned_combined_final(templates.clone(), &hex, &seal).unwrap();
++        assert_eq!(txid, res.txid, "the buyer's signatures don't change the txid");
++        let done = complete_presigned_consignment(&res.consignment, &res.txid, &hex).unwrap();
++        let v = inspect_swap_consignment(&done, &txid, BitcoinNetwork::Regtest, Some(SEAL_VOUT as u32)).unwrap();
++        assert!(v.valid, "{:?} {:?}", v.error, v.details);
++        assert_eq!(v.seal_amount, Some(700 + 300 + 1250), "the seal gets every listing's tokens");
++
++        // every seller's payout is where the final check wants it, with its signature valid
++        let mut less = tx.clone();
++        less.output[combined_seller_index(2)].value = Amount::from_sat(1000);
++        assert!(check_presigned_combined_final(templates.clone(), &bdk_wallet::bitcoin::consensus::encode::serialize_hex(&less), &seal).is_err());
++        let mut swapped = tx.clone();
++        swapped.input.swap(combined_seller_index(1), combined_seller_index(2));
++        assert!(check_presigned_combined_final(templates.clone(), &bdk_wallet::bitcoin::consensus::encode::serialize_hex(&swapped), &seal).is_err());
++        assert!(check_presigned_combined_final(templates.clone(), &hex, &buyer).is_err(), "the seal must pay the buyer");
++
++        // a consignment whose commitment doesn't match the transaction is invalid
++        let mut other = tx.clone();
++        other.output[0].script_pubkey = ScriptBuf::new_op_return([7u8; 32]);
++        let other_hex = bdk_wallet::bitcoin::consensus::encode::serialize_hex(&other);
++        let bad = complete_presigned_consignment(&res.consignment, &res.txid, &other_hex).unwrap();
++        let v = inspect_swap_consignment(&bad, &other.compute_txid().to_string(), BitcoinNetwork::Regtest, Some(SEAL_VOUT as u32)).unwrap();
++        assert!(!v.valid, "a commitment that isn't the bundle's is refused");
++
++        // a listing's transfer left out of the bundle: its tokens don't reach the seal (the validator refuses)
++        let mut c = RgbTransfer::load(&done[..]).unwrap();
++        let mut bundles: Vec<WitnessBundle> = c.bundles.iter().cloned().collect();
++        let last = bundles.last_mut().unwrap();
++        let kts: Vec<KnownTransition> = last.bundle.known_transitions.iter().skip(1).cloned().collect();
++        last.bundle.known_transitions = NonEmptyVec::try_from(kts).unwrap();
++        c.bundles = Confined::try_from(bundles).unwrap();
++        let mut cut = vec![];
++        c.save(&mut cut).unwrap();
++        let v = inspect_swap_consignment(&cut, &txid, BitcoinNetwork::Regtest, Some(SEAL_VOUT as u32)).unwrap();
++        assert!(!v.valid || v.seal_amount != Some(700 + 300 + 1250), "a missing transfer can't pass for the full amount");
++    }
++
++    #[test]
++    fn combined_buy_two_lots() {
++        let ls = combined::listings(&[5, 9], 0x60, 1500);
++        let (inputs, seal, _) = combined_buyer();
++        let templates: Vec<String> = ls.iter().map(|l| l.template.clone()).collect();
++        let res = presigned_combined_buy(templates.clone(), ls.iter().map(|l| l.consignment.clone()).collect(), inputs, seal.clone(), None, vec![None, None]).unwrap();
++        let (_, hex) = sign_combined(&res.psbt);
++        let txid = check_presigned_combined_final(templates, &hex, &seal).unwrap();
++        let done = complete_presigned_consignment(&res.consignment, &txid, &hex).unwrap();
++        let v = inspect_swap_consignment(&done, &txid, BitcoinNetwork::Regtest, Some(SEAL_VOUT as u32)).unwrap();
++        assert!(v.valid, "{:?} {:?}", v.error, v.details);
++        assert_eq!(v.seal_amount, Some(14));
++        assert_eq!(ls.iter().map(|l| l.amount).sum::<u64>(), 14);
++    }
++
++    #[test]
++    fn combined_buy_refusals() {
++        let ls = combined::listings(&[10, 20, 30], 0x10, 2000);
++        let (inputs, seal, _) = combined_buyer();
++        let t = |ix: &[usize]| ix.iter().map(|&i| ls[i].template.clone()).collect::<Vec<_>>();
++        let c = |ix: &[usize]| ix.iter().map(|&i| ls[i].consignment.clone()).collect::<Vec<_>>();
++        let none = |n: usize| vec![None; n];
++        // one listing isn't a combined buy
++        assert!(presigned_combined_buy(t(&[0]), c(&[0]), inputs.clone(), seal.clone(), None, none(1)).is_err());
++        // the same listing twice
++        assert!(presigned_combined_buy(t(&[0, 0]), c(&[0, 0]), inputs.clone(), seal.clone(), None, none(2)).is_err());
++        // a consignment that isn't its template's
++        assert!(presigned_combined_buy(t(&[0, 1]), c(&[1, 0]), inputs.clone(), seal.clone(), None, none(2)).is_err());
++        // one coin only
++        assert!(presigned_combined_buy(t(&[0, 1]), c(&[0, 1]), inputs[..1].to_vec(), seal.clone(), None, none(2)).is_err());
++        // a seller's output as the buyer's coin
++        let mut own = inputs.clone();
++        own[1].outpoint = Psbt::from_str(&ls[2].template).unwrap().unsigned_tx.input[SELLER].previous_output.to_string();
++        assert!(presigned_combined_buy(t(&[0, 1, 2]), c(&[0, 1, 2]), own, seal.clone(), None, none(3)).is_err());
++        // not enough bitcoin for the prices
++        let poor: Vec<SwapInput> = inputs.iter().map(|i| SwapInput { sats: 1000, ..i.clone() }).collect();
++        assert!(presigned_combined_buy(t(&[0, 1]), c(&[0, 1]), poor, seal.clone(), None, none(2)).is_err());
++        // two tokens
++        let other = combined::listings(&[40], 0x30, 2000);
++        let mixed_t = vec![ls[0].template.clone(), other[0].template.clone()];
++        let mixed_c = vec![ls[0].consignment.clone(), other[0].consignment.clone()];
++        assert!(presigned_combined_buy(mixed_t, mixed_c, inputs.clone(), seal.clone(), None, none(2)).unwrap_err().to_string().contains("different tokens"));
++        // more than the limit
++        let many = combined::listings(&[1; COMBINED_MAX + 1], 0x80, 1000);
++        let mt: Vec<String> = many.iter().map(|l| l.template.clone()).collect();
++        let mc: Vec<Vec<u8>> = many.iter().map(|l| l.consignment.clone()).collect();
++        let rich: Vec<SwapInput> = inputs.iter().map(|i| SwapInput { sats: 1_000_000, ..i.clone() }).collect();
++        assert!(presigned_combined_buy(mt.clone(), mc.clone(), rich.clone(), seal.clone(), None, none(COMBINED_MAX + 1)).is_err());
++        // exactly the limit works
++        let r = presigned_combined_buy(mt[..COMBINED_MAX].to_vec(), mc[..COMBINED_MAX].to_vec(), rich, seal.clone(), None, none(COMBINED_MAX)).unwrap();
++        let (_, hex) = sign_combined(&r.psbt);
++        let txid = check_presigned_combined_final(mt[..COMBINED_MAX].to_vec(), &hex, &seal).unwrap();
++        let done = complete_presigned_consignment(&r.consignment, &txid, &hex).unwrap();
++        let v = inspect_swap_consignment(&done, &txid, BitcoinNetwork::Regtest, Some(SEAL_VOUT as u32)).unwrap();
++        assert!(v.valid, "{:?} {:?}", v.error, v.details);
++        assert_eq!(v.seal_amount, Some(COMBINED_MAX as u64));
 +    }
 +
 +    #[test]

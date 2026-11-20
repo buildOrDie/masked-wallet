@@ -76,6 +76,41 @@ export const P2TR_SCRIPT = `5120${'00'.repeat(32)}`;
 /** An Instant purchase, sized before the coins are known: the seller's coin and `coins` of the buyer's (taproot). */
 export const instantBuyVbytes = (coins = 1, change = true, payoutScript = P2TR_SCRIPT) =>
   txVbytes([P2TR_SCRIPT, ...Array(coins).fill(P2TR_SCRIPT)], [OPRET_SCRIPT, payoutScript, P2TR_SCRIPT, ...(change ? [P2TR_SCRIPT] : [])]);
+/** Most Instant listings one combined purchase takes (the RGB engine's limit). */
+export const COMBINED_MAX = 10;
+/**
+ * A combined purchase of `n` Instant listings in one transaction (2.30): the buyer's `coins` (2 or more) and every
+ * seller's coin in; the commitment, every payout, the seal and the change out. About 100 vB per extra listing
+ * instead of a whole purchase (about 230 vB) each.
+ */
+export const combinedBuyVbytes = (n, coins = 2, change = true, payoutScript = P2TR_SCRIPT) =>
+  txVbytes([...Array(n).fill(P2TR_SCRIPT), ...Array(Math.max(2, coins)).fill(P2TR_SCRIPT)], [OPRET_SCRIPT, ...Array(n).fill(payoutScript), P2TR_SCRIPT, ...(change ? [P2TR_SCRIPT] : [])]);
+/** `n` listings split into combined purchases of at most COMBINED_MAX, without a lone listing at the end when it can be helped. */
+export function combinedChunks(n, max = COMBINED_MAX) {
+  if (n < 2) return [n];
+  const parts = Math.ceil(n / max), out = [];
+  for (let k = 0, left = n; k < parts; k++) { const size = Math.ceil(left / (parts - k)); out.push(size); left -= size; }
+  return out;
+}
+/**
+ * Coins for a combined purchase: at least two (the engine's layout needs two of the buyer's), confirmed ones first,
+ * largest first, up to `max`, covering `need` (the fee counted for two coins) plus `perInput` for each coin past two.
+ * @returns {{ coins: { outpoint: string, sats: string }[], total: bigint } | null}
+ */
+export function payCoinsForCombined(confirmed, all, need, perInput = 0n, max = 6) {
+  const seen = new Set(), list = [];
+  const add = (cs) => (cs || []).filter((c) => !c.is_spent && outpointOf(c.outpoint))
+    .map((c) => ({ outpoint: outpointOf(c.outpoint), sats: BigInt(String(c.txout?.value ?? 0)) }))
+    .sort((a, b) => (a.sats > b.sats ? -1 : a.sats < b.sats ? 1 : 0))
+    .forEach((c) => { if (!seen.has(c.outpoint)) { seen.add(c.outpoint); list.push(c); } });
+  add(confirmed); add(all);
+  const picked = []; let total = 0n;
+  for (const c of list.slice(0, max)) {
+    picked.push(c); total += c.sats;
+    if (picked.length >= 2 && total > BigInt(need) + BigInt(perInput) * BigInt(picked.length - 2)) return { coins: picked.map((x) => ({ outpoint: x.outpoint, sats: String(x.sats) })), total };
+  }
+  return null;
+}
 /** Moving a listing's tokens (to their own output, or back when cancelling): the RGB coin and `coins` fee coins. */
 export const instantMoveVbytes = (coins = 1) => txVbytes([P2TR_SCRIPT, ...Array(coins).fill(P2TR_SCRIPT)], [OPRET_SCRIPT, P2TR_SCRIPT, P2TR_SCRIPT]);
 

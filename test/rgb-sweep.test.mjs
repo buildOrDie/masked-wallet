@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makeHandler, MAX_SWEEP } from '../src/dapp/requests.mjs';
+import { instantBuyVbytes, combinedBuyVbytes, combinedChunks, payCoinsForCombined, COMBINED_MAX } from '../src/rgb/swap.mjs';
 import { walletApp, testKeys } from './helpers/wallet-app.mjs';
 
 const SITE = 'https://signet.maskedwallet.com';
@@ -92,4 +93,60 @@ test('economy fee rates: Instant buys and sweeps take 0.1 sat/vB and up, listing
   assert.equal(opened.at(-1).params.feeRate, 0.1);
   await assert.rejects(handle(SITE, 'rgbInstantBuyMany', { items: [item('c')], network: 'signet', feeRate: 0.05 }), /between 0.1 and 500/);
   await assert.rejects(handle(SITE, 'rgbInstantCancel', { offerId: 'd', offer: { assetId: A, amount: '1', priceSats: '1' }, feeRate: 0.5 }), /between 1 and 500/);
+});
+
+test('combined buys (2.30): sizes, chunks and coins', () => {
+  // one combined purchase is far smaller than one purchase per listing
+  assert.equal(instantBuyVbytes(1, true) * 10 > 2 * combinedBuyVbytes(10), true);
+  assert.ok(combinedBuyVbytes(3) - combinedBuyVbytes(2) < 110, 'about 100 vB per extra listing');
+  assert.deepEqual(combinedChunks(1), [1]);
+  assert.deepEqual(combinedChunks(7), [7]);
+  assert.deepEqual(combinedChunks(10), [10]);
+  assert.deepEqual(combinedChunks(11), [6, 5], 'no lone listing left at the end');
+  assert.deepEqual(combinedChunks(20), [10, 10]);
+  assert.equal(COMBINED_MAX, 10);
+  const coin = (id, sats) => ({ outpoint: `${id.repeat(64)}:0`, txout: { value: sats }, is_spent: false });
+  // two coins at least, even when one covers it
+  const two = payCoinsForCombined([coin('a', 900000), coin('b', 2000)], [], 50000);
+  assert.equal(two.coins.length, 2);
+  assert.equal(two.coins[0].sats, '900000');
+  // one coin only: can't combine
+  assert.equal(payCoinsForCombined([coin('a', 900000)], [coin('a', 900000)], 50000), null);
+  // confirmed first, then this wallet's unconfirmed change; each coin past two adds its fee
+  const three = payCoinsForCombined([coin('a', 30000), coin('b', 20000)], [coin('a', 30000), coin('b', 20000), coin('c', 15000)], 55000, 100n);
+  assert.deepEqual(three.coins.map((c) => c.sats), ['30000', '20000', '15000']);
+  assert.equal(payCoinsForCombined([coin('a', 30000), coin('b', 20000)], [], 55000), null);
+});
+
+test('a sweep with a combining engine: one transaction for the lot, one by one when it can\'t combine', async () => {
+  const a = app();
+  const calls = [];
+  let combine = true;
+  Object.assign(a.rgb, { ready: true, service: { canSwap: true, canPresign: true, get canCombine() { return true; }, profile: a.rgb.profile,
+    instantBuyCombined: async (p) => { calls.push(['combined', p.items.map((x) => x.offerId).join('')]); return combine ? { txid: '7'.repeat(64), offerIds: p.items.map((x) => x.offerId) } : { notPaid: 'Not enough bitcoin coins to combine the purchases.' }; },
+    instantBuy: async (p) => { calls.push(['one', p.offerId]); return { txid: p.offerId.repeat(64).slice(0, 64) }; } } });
+  a.rgb.refresh = async () => {};
+  const P = { items: [item('a'), item('b'), item('c')], network: 'signet', feeRate: 2 };
+  const act = { id: 'c1', origin: SITE, method: 'rgbInstantBuyMany', params: P };
+  a.approvals.active = act;
+  await new Promise((done) => a.approvals.prepareSwap(act, (fn) => fn().then((x) => { act.prep = x; done(); })));
+  assert.equal(act.prep.combined, true);
+  assert.equal(act.prep.txs, 1);
+  assert.equal(act.prep.seal, 330, 'one seal for the lot');
+  assert.equal(act.prep.fee, Math.ceil(2 * combinedBuyVbytes(3)));
+  assert.ok(act.prep.saved > 0);
+  assert.match(a.ui.views.approve.render(), /one transaction instead of 3/);
+  let out = await a.approvals.run(act);
+  assert.deepEqual(calls, [['combined', 'abc']]);
+  assert.deepEqual(out.results.map((x) => x.txid), ['7'.repeat(64), '7'.repeat(64), '7'.repeat(64)]);
+  // can't combine (one coin): bought one by one, nothing lost
+  calls.length = 0; combine = false;
+  out = await a.approvals.run({ ...act, id: 'c2' });
+  assert.deepEqual(calls, [['combined', 'abc'], ['one', 'a'], ['one', 'b'], ['one', 'c']]);
+  assert.equal(out.results.filter((x) => x.txid).length, 3);
+  // the combined purchase failed after it may have gone out: no second purchase of the same listings
+  calls.length = 0;
+  a.rgb.service.instantBuyCombined = async (p) => { calls.push(['combined', p.items.length]); throw new Error('block server timeout'); };
+  out = await a.approvals.run({ ...act, id: 'c3', params: { ...P, items: [item('a'), item('b'), item('c'), item('d'), item('e'), item('f'), item('g'), item('h'), item('i'), item('j'), item('k')] } }).catch((e) => ({ error: String(e.message) }));
+  assert.deepEqual(calls, [['combined', 6], ['combined', 5]], 'two combined purchases of 6 and 5, never one by one');
 });

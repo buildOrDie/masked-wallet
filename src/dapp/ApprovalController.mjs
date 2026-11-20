@@ -2,7 +2,7 @@
 // loads the request from the background, prepares what the screen shows (fees, PSBT breakdown, the
 // transactions to sign), and on approval signs, broadcasts and answers the background.
 import { friendly } from '../core/format.mjs';
-import { instantBuyVbytes, instantMoveVbytes, INSTANT_SEAL_SATS, txVbytes, P2TR_SCRIPT, OPRET_SCRIPT } from '../rgb/swap.mjs';
+import { instantBuyVbytes, combinedBuyVbytes, combinedChunks, instantMoveVbytes, INSTANT_SEAL_SATS, txVbytes, P2TR_SCRIPT, OPRET_SCRIPT } from '../rgb/swap.mjs';
 import { UNISAT_NET } from '../bitcoin/networks.mjs';
 import { signMessageBip322, signMessageEcdsa } from '../bitcoin/messages.mjs';
 import { TRADE_SITES } from '../trade/TradeAccount.mjs';
@@ -276,9 +276,14 @@ export class ApprovalController {
         const price = items.reduce((t, x) => t + Number(x.offer.priceSats), 0);
         const units = items.map((x) => Number(x.offer.priceSats) / (Number(x.offer.amount) / 10 ** (asset?.precision || 0))); // sats per whole token
         const rate = P.feeRate || Number(r.fee());
-        const vb = instantBuyVbytes(1, true), fee = Math.ceil(rate * vb) * items.length, seal = INSTANT_SEAL_SATS * items.length;
+        // combined (2.30): one transaction per COMBINED_MAX listings, one seal each; else one purchase per listing
+        const combined = !!r.service.canCombine && items.length >= 2;
+        const sizes = combined ? combinedChunks(items.length) : Array(items.length).fill(1);
+        const vb = sizes.reduce((t, k) => t + (k >= 2 ? combinedBuyVbytes(k) : instantBuyVbytes(1, true)), 0);
+        const fee = sizes.reduce((t, k) => t + Math.ceil(rate * (k >= 2 ? combinedBuyVbytes(k) : instantBuyVbytes(1, true))), 0), seal = INSTANT_SEAL_SATS * sizes.length;
+        const oneByOne = Math.ceil(rate * instantBuyVbytes(1, true)) * items.length;
         const shown = asset ? `${r.amount(asset, total)} ${asset.ticker}` : `${total.toLocaleString('en-US')} units`;
-        return { asset, assetId: first.assetId, shown, price, newToken: !asset, fee, rate, vb, seal, n: items.length, lo: Math.min(...units), hi: Math.max(...units), topUp: topUpFor(r, price + fee + seal) };
+        return { asset, assetId: first.assetId, shown, price, newToken: !asset, fee, rate, vb, seal, n: items.length, txs: sizes.length, combined, saved: combined ? Math.max(0, oneByOne + INSTANT_SEAL_SATS * items.length - fee - seal) : 0, lo: Math.min(...units), hi: Math.max(...units), topUp: topUpFor(r, price + fee + seal) };
       }
       const o = P.offer || {};
       const net = r.isMain ? 'mainnet' : 'signet';
@@ -570,16 +575,38 @@ export class ApprovalController {
         prepared(''); const r = app.rgb, P = a.params, n = P.items.length;
         const feeRate = P.feeRate || Number(r.fee());
         const results = [];
-        for (let k = 0; k < n; k++) {
-          const x = P.items[k];
-          try {
-            const out = await r.service.instantBuy({ ...x, network: P.network, feeRate, onStep: (t) => step(`${k + 1} of ${n}: ${t}`) });
-            results.push({ offerId: x.offerId, txid: out.txid });
-          } catch (e) {
-            const error = rgbError(e, r.profile);
-            results.push({ offerId: x.offerId, error });
-            // out of bitcoin: the rest would fail the same way, so they're left (nothing paid for them)
-            if (shortfallOf(error) || /Not enough bitcoin|RGB balance/i.test(error)) { for (const y of P.items.slice(k + 1)) results.push({ offerId: y.offerId, error: 'Not bought: the RGB balance ran out.' }); break; }
+        // 2.30: up to COMBINED_MAX listings in one transaction (about 100 vB per extra listing instead of a whole
+        // purchase each); when they can't be combined (one coin only, a listing gone…), one after another
+        const sizes = r.service.canCombine && n >= 2 ? combinedChunks(n) : Array(n).fill(1);
+        const ranOut = 'Not bought: the RGB balance ran out.';
+        let from = 0, stop = false;
+        for (const size of sizes) {
+          const part = P.items.slice(from, from + size), first = from;
+          from += size;
+          if (stop) { for (const y of part) results.push({ offerId: y.offerId, error: ranOut }); continue; }
+          if (size >= 2) {
+            const label = `${first + 1}–${first + size} of ${n}`;
+            try {
+              const out = await r.service.instantBuyCombined({ items: part, network: P.network, feeRate, onStep: (t) => step(`${label}: ${t}`) });
+              if (out?.txid) { for (const y of part) results.push({ offerId: y.offerId, txid: out.txid }); continue; }
+            } catch (e) {
+              // the combined purchase may have gone out: kept, and sent again on the next refresh
+              const error = rgbError(e, r.profile);
+              for (const y of part) results.push({ offerId: y.offerId, error });
+              continue;
+            }
+          }
+          for (let j = 0; j < part.length; j++) {
+            const x = part[j], k = first + j;
+            try {
+              const out = await r.service.instantBuy({ ...x, network: P.network, feeRate, onStep: (t) => step(`${k + 1} of ${n}: ${t}`) });
+              results.push({ offerId: x.offerId, txid: out.txid });
+            } catch (e) {
+              const error = rgbError(e, r.profile);
+              results.push({ offerId: x.offerId, error });
+              // out of bitcoin: the rest would fail the same way, so they're left (nothing paid for them)
+              if (shortfallOf(error) || /Not enough bitcoin|RGB balance/i.test(error)) { for (const y of part.slice(j + 1)) results.push({ offerId: y.offerId, error: ranOut }); stop = true; break; }
+            }
           }
         }
         later(r);

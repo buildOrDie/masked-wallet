@@ -314,6 +314,9 @@ export class SignetWallet {
   instantList(p) { return this.mutate((w) => w.instantList(p, this.instantStore())); }
   instantListLots(p) { return this.mutate((w) => w.instantListLots(p, this.instantStore())); }
   instantBuy(p) { return this.mutate((w) => w.instantBuy(p, this.instantStore())); }
+  /** Several Instant listings in one transaction (2.30): `{ txid, offerIds }`, or `{ notPaid }` to buy them one by one. */
+  instantBuyCombined(p) { return this.mutate((w) => w.instantBuyCombined(p, this.instantStore())); }
+  get canCombine() { return !!this.wallet?.canCombine; }
   instantCancel(p) { return this.mutate((w) => w.instantCancel(p, this.instantStore())); }
   /** After a refresh: sign settled listings, notice sales and cancels, hand bought transfers to the wallet. */
   instantProgress() {
