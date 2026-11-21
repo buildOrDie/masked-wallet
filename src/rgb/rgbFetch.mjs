@@ -31,14 +31,22 @@ export async function rgbFetch(input, init) {
   // transaction in it, again for each transfer (thousands of requests while lots were signed). Answered from memory.
   const key = cacheKey(input, init);
   if (key) {
+    const url = urlOf(input);
     const hit = txCache.get(key);
-    if (hit && hit.until > Date.now()) return answer(hit);
-    if (inflight.has(key)) return answer(await inflight.get(key));
+    if (hit && hit.until > Date.now()) { tally(false); return answer(hit, url); }
+    if (inflight.has(key)) { tally(false); return answer(await inflight.get(key), url); }
     const p = fetchAndKeep(key, input, init);
     inflight.set(key, p);
-    try { return answer(await p); } finally { inflight.delete(key); }
+    try { return answer(await p, url); } finally { inflight.delete(key); }
   }
   return send(input, init);
+}
+const urlOf = (input) => (typeof input === 'string' ? input : input instanceof URL ? input.href : /** @type {any} */ (input)?.url || '');
+// how many transaction lookups went to the network and how many were answered here, logged now and then
+const counts = { net: 0, kept: 0, at: 0 };
+function tally(net) {
+  counts[net ? 'net' : 'kept']++;
+  if (Date.now() - counts.at > 30_000 && counts.net) { counts.at = Date.now(); try { console.info('[MASKED] RGB transaction lookups', { fromNetwork: counts.net, fromMemory: counts.kept }); } catch { /* no console */ } }
 }
 
 // ---- the transaction cache (block server GETs about one transaction) ----
@@ -52,7 +60,13 @@ function cacheKey(input, init) {
   const method = String(init?.method || (typeof Request !== 'undefined' && input instanceof Request ? input.method : 'GET')).toUpperCase();
   if (method !== 'GET') return '';
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : /** @type {any} */ (input)?.url || '';
-  try { const u = new URL(url); return TX_PATH.test(u.pathname) && !u.search ? u.href : ''; } catch { return ''; }
+  try {
+    const u = new URL(url), m = TX_PATH.exec(u.pathname);
+    if (!m || u.search) return '';
+    // a transaction's bytes and its confirmed status are the same on every block server: one key whichever server
+    // asked (switching servers, or a fallback, asked again for every transaction); the JSON view stays per server
+    return m[3] ? `https://tx.masked/${m[1].toLowerCase()}/${m[3].toLowerCase()}` : u.href;
+  } catch { return ''; }
 }
 // Kept across MASKED's windows too (each approval is a new page that would ask about every transaction again): a
 // transaction for good, a confirmed status for 10 minutes, in the browser's Cache Storage (not the small localStorage).
@@ -76,10 +90,12 @@ function sharedPut(key, e) {
 async function fetchAndKeep(key, input, init) {
   const kept = await sharedGet(key);
   if (kept) {
+    tally(false);
     if (txCache.size >= MAX_CACHED) txCache.delete(txCache.keys().next().value);
     txCache.set(key, kept);
     return kept;
   }
+  tally(true);
   const r = await send(input, init);
   const body = await r.arrayBuffer();
   const type = r.headers.get('content-type') || '';
@@ -90,7 +106,7 @@ async function fetchAndKeep(key, input, init) {
       let confirmed = false;
       try { confirmed = !!JSON.parse(new TextDecoder().decode(body))?.confirmed; } catch { /* not kept long */ }
       keepMs = confirmed ? 600_000 : 5_000;
-    } else keepMs = 24 * 3600_000; // the transaction itself never changes
+    } else keepMs = 30 * 24 * 3600_000; // the transaction itself never changes: kept a month (it was a day)
   }
   const entry = { status: r.status, type, body, url: r.url || key, until: Date.now() + keepMs };
   if (keepMs) {
@@ -103,9 +119,9 @@ async function fetchAndKeep(key, input, init) {
 }
 // The engine (reqwest) reads response.url and stops dead on an empty one ("url parse": an uncaught throw that left
 // the step hanging forever). A Response built here has no url of its own, so it gets the address it answers.
-const answer = (e) => {
+const answer = (e, url = '') => {
   const r = new Response(e.body.slice(0), { status: e.status, headers: e.type ? { 'content-type': e.type } : {} });
-  Object.defineProperty(r, 'url', { value: e.url, configurable: true });
+  Object.defineProperty(r, 'url', { value: url || e.url, configurable: true });
   return r;
 };
 /** For tests: forget what was kept. */

@@ -66,6 +66,11 @@ test('transaction lookups are answered from memory: a transaction once, a confir
     assert.equal(asked.filter((u) => u.endsWith(`${tx}/raw`)).length, 1);
     assert.equal(asked.filter((u) => u.endsWith(`${tx}/status`)).length, 1);
     assert.equal(asked.filter((u) => u.includes(tx2)).length, 1, 'five at once: asked once');
+    // the same transaction from another block server: answered from memory too, with that server's address
+    const other = await rgbFetch(`https://other-server.example/api/tx/${tx}/raw`);
+    assert.deepEqual([...new Uint8Array(await other.arrayBuffer())], [1, 2, 3]);
+    assert.equal(other.url, `https://other-server.example/api/tx/${tx}/raw`);
+    assert.equal(asked.filter((u) => u.endsWith(`${tx}/raw`)).length, 1, 'one request whichever server');
     // anything else is not kept
     await rgbFetch('https://signet-api.example/api/blocks/tip/height'); await rgbFetch('https://signet-api.example/api/blocks/tip/height');
     assert.equal(asked.filter((u) => u.endsWith('/tip/height')).length, 2);
