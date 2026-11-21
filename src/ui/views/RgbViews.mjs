@@ -145,6 +145,14 @@ export class RgbHome {
       <button class="hint hint-cta" data-rgb="retry" ${r.busy ? 'disabled' : ''}><span class="hint-ic">${I.mint}</span><span><b>Allow RGB to connect</b><span>RGB needs to reach its transfer server. Chrome asks once.</span></span><span class="chev">›</span></button>${msg(r)}</section>`;
     }
     if (!r.ready) {
+      // the last saved balances, shown the moment Home opens while the RGB engine starts (a few seconds) and checks the
+      // chain: read only, nothing to tap until RGB is open
+      const last = r.phase === 'error' ? null : r.peek?.();
+      if (last) {
+        const rows = r.assets().map((a) => { const { settled: s } = r.bal(a); return `<div class="tok-line">${rgbIcon(a.ticker)}<span class="bal-txt"><b class="tk">${esc(a.ticker)}</b><span>RGB</span></span><span class="bal-amt"><b>${r.amount(a, s)}</b><span>${esc(a.name)}</span></span></div>`; }).join('');
+        return `<section class="home-toks"><div class="list-h"><b>RGB tokens${r.isMain ? ' <span class="badge">beta</span>' : ''}</b><span class="muted small">Last saved · opening…</span></div>
+        <div class="tok-list">${rows || '<p class="muted small center">No RGB tokens yet.</p>'}</div></section>`;
+      }
       return `<section class="home-toks"><div class="list-h"><b>RGB tokens</b><span class="muted small">${r.phase === 'error' ? '' : 'opening…'}</span></div>
       ${r.phase === 'error' ? `${msg(r)}<button class="btn ghost wide" data-rgb="retry">Try again</button>` : ''}</section>`;
     }

@@ -514,6 +514,15 @@ export class WalletRgb {
   // v3: once more after the move to the RGB 0.11.2 engine (an upgraded wallet may rebuild its bitcoin view)
   needsScan() { try { return localStorage.getItem(`${this.profile.vaultKey}.scanned-v3`) !== '1'; } catch { return true; } }
   get snapshotKey() { return `${this.profile.vaultKey}.snapshot`; }
+  /**
+   * Before RGB is open: the last saved balances (this browser's own copy, written after every refresh), so Home shows
+   * them at once instead of "opening…". Returns them, or null when there are none. Read only.
+   */
+  peek() {
+    if (this.ready) return this.data;
+    if (!this.data && this.exists) this.data = this.cachedSnapshot();
+    return this.data;
+  }
   /** Something that changes on its own soon: a transfer not settled, a listing or lot not on sale yet, a purchase not confirmed. */
   underWay() {
     const open = ['WaitingCounterparty', 'WaitingConfirmations', 'Initiated'];
