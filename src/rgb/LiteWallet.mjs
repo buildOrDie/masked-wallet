@@ -752,9 +752,9 @@ export class LiteWallet {
   }
 
   /** This wallet's plain bitcoin coins: confirmed, and all (with its own unconfirmed change). */
-  async btcCoins() {
+  async btcCoins({ skipSync = false } = {}) {
     const online = this.requireOnline();
-    const all = (await this.wallet.listUnspentsVanilla(online, 0, false)) || [];
+    const all = (await this.wallet.listUnspentsVanilla(online, 0, skipSync)) || [];
     const confirmed = (await this.wallet.listUnspentsVanilla(online, 1, true)) || [];
     // never a coin this wallet's own transaction spent a moment ago: the block server may not show it spent yet, and
     // a second transaction on it is refused ("insufficient fee", the second of two Instant buys in a row)
@@ -2130,11 +2130,12 @@ export class LiteWallet {
       store.del?.(o.offerId);
     }
     const online = this.requireOnline();
-    onStep(`Checking the listing and your bitcoin on ${hostOf(this.indexer)}…`);
+    onStep(`Checking the listing on ${hostOf(this.indexer)}…`);
     const l = listing || {};
-    // the listing's checks (block server, RGB) don't touch this wallet: they run while it syncs
-    const [, pre] = await Promise.all([this.wallet.sync(online), this.instantListingFetch(o, l)]);
-    lap('syncAndCheck');
+    // the listing's checks (block server, RGB) don't touch this wallet. No wallet sync first (2.31.1): the coins it
+    // picks from what it already knows are checked unspent on the block server below; it syncs only when they aren't
+    const pre = await this.instantListingFetch(o, l);
+    lap('check');
     const { info, si, consignment, check } = pre;
     if ((await this.ownOutpoints()).has(String(info.sellerOutpoint))) throw new Error('This is your own listing.');
     // pay: one confirmed coin covering the price, the seal and the fee
@@ -2144,9 +2145,19 @@ export class LiteWallet {
     const feeFor = (ins, change = true) => BigInt(Math.ceil(rate * txVbytes([info.sellerScript || P2TR_SCRIPT, ...ins], [OPRET_SCRIPT, info.payoutScript || P2TR_SCRIPT, P2TR_SCRIPT, ...(change ? [P2TR_SCRIPT] : [])])));
     const perInput = feeFor([P2TR_SCRIPT, P2TR_SCRIPT]) - feeFor([P2TR_SCRIPT]);
     const base = o.priceSats + BigInt(INSTANT_SEAL_SATS);
-    // confirmed coins first; change from this wallet's last trade too, and several coins if one isn't enough
-    const { all, confirmed } = await this.btcCoins();
-    const pay = payCoinsFor(confirmed, all, base + feeFor([P2TR_SCRIPT]), perInput);
+    // confirmed coins first; change from this wallet's last trade too, and several coins if one isn't enough. From
+    // what the wallet knows, each checked unspent on the block server (at once); a sync only if that isn't enough
+    let { all, confirmed } = await this.btcCoins({ skipSync: true });
+    let pay = payCoinsFor(confirmed, all, base + feeFor([P2TR_SCRIPT]), perInput);
+    const unspent = async (p) => !!p && (await Promise.all(p.coins.map((c) => { const [t, v] = String(c.outpoint).split(':'); return this.outspend(t, v).then((x) => !x?.spent).catch(() => false); }))).every(Boolean);
+    if (!(await unspent(pay))) {
+      onStep(`Checking your bitcoin on ${hostOf(this.indexer)}…`);
+      await this.wallet.sync(online);
+      ({ all, confirmed } = await this.btcCoins({ skipSync: true }));
+      pay = payCoinsFor(confirmed, all, base + feeFor([P2TR_SCRIPT]), perInput);
+      ms.synced = 1;
+    }
+    lap('coins');
     if (!pay) {
       // what the wallet saw, so a shortfall can be told from a coin it can't see yet
       const seen = all.filter((c) => !c.is_spent).map((c) => Number(c.txout?.value ?? 0)).sort((a, b) => b - a);
@@ -2155,7 +2166,7 @@ export class LiteWallet {
     }
     // the coins' transactions (block server) while the wallet makes the invoice for the tokens
     const [bis, r] = await Promise.all([Promise.all(pay.coins.map((c) => this.outpointInfo(c.outpoint))), this.onchainReceive({ assetId: null, amount: Number(o.amount), durationSeconds: 86400, witness: true })]);
-    lap('coinsAndInvoice');
+    lap('invoice');
     const seal = this.lib.WasmWallet.witnessSealScript(r.invoice);
     const paid = bis.reduce((t, b) => t + BigInt(b.sats), 0n);
     let change = paid - base - feeFor(bis.map((b) => b.script));
