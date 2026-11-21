@@ -2220,7 +2220,7 @@ export class LiteWallet {
    */
   async instantBuyCombined({ items, network, feeRate, onStep = (_t) => {} }, store) {
     this.requirePresign(); this.checkNet(network);
-    const notPaid = (why) => ({ notPaid: String(why?.message || why) });
+    const notPaid = (why) => { const w = String(why?.message || why); try { console.info('[MASKED] Combined buy not possible, buying one by one:', w); } catch { /* no console */ } return { notPaid: w }; };
     if (!this.canCombine) return notPaid('This RGB engine buys listings one at a time.');
     if (!Array.isArray(items) || items.length < 2 || items.length > COMBINED_MAX) return notPaid(`A combined purchase takes 2 to ${COMBINED_MAX} listings.`);
     let os, checked, pay, bis, r, seal, prices, total, change, templates, txHex, txid, completed;
@@ -2250,6 +2250,14 @@ export class LiteWallet {
       const base = prices + BigInt(INSTANT_SEAL_SATS);
       const { all, confirmed } = await this.btcCoins();
       pay = payCoinsForCombined(confirmed, all, base + feeFor([P2TR_SCRIPT, P2TR_SCRIPT]), perInput);
+      // a combined purchase needs two coins of the buyer's (the seal is output 2, so input 2 is the buyer's). With one
+      // coin that covers everything, a spare empty RGB output of this wallet is the second: its few sats come back in
+      // the change (2.31.1; before, three listings with one coin went as three transactions)
+      if (!pay) {
+        const one = payCoinsFor(confirmed, all, base + feeFor([P2TR_SCRIPT, P2TR_SCRIPT]), perInput);
+        const spare = [...(this.spareOutputs() || [])].filter((op) => !this.reserved.has(op) && !this.justSpent().has(op));
+        if (one?.coins?.length === 1 && spare.length >= 2) pay = { coins: [one.coins[0], { outpoint: spare[0], sats: '0' }], total: BigInt(String(one.coins[0].sats)) };
+      }
       if (!pay) return notPaid('Not enough bitcoin coins to combine the purchases.');
       bis = await Promise.all(pay.coins.map((c) => this.outpointInfo(c.outpoint)));
       const paid = bis.reduce((t, b) => t + BigInt(b.sats), 0n);
