@@ -1242,7 +1242,7 @@ index a3a9f46..a9943da 100644
      }
  
 diff --git a/src/wallet/online.rs b/src/wallet/online.rs
-index ca96b4a..e934ec5 100644
+index ca96b4a..635bbdf 100644
 --- a/src/wallet/online.rs
 +++ b/src/wallet/online.rs
 @@ -4,6 +4,12 @@
@@ -2093,7 +2093,7 @@ index ca96b4a..e934ec5 100644
                  TransferStatus::Initiated,
                  1,
                  None,
-@@ -12074,3 +12602,892 @@ mod bfa_tests {
+@@ -12074,3 +12602,897 @@ mod bfa_tests {
          assert!(options(&format!(r#","evm_chains":{{"mainnet":{chain}}}"#)).is_err());
      }
  }
@@ -2568,7 +2568,12 @@ index ca96b4a..e934ec5 100644
 +        }
 +        let mut held = 0u64;
 +        for (_seal, states) in runtime.contract_assignments_for(contract_id, [bdk_op])? {
-+            for (_opout, state) in states {
++            for (opout, state) in states {
++                // only the token itself: any other right of this contract on the output (an inflation allowance, a
++                // replace or burn right, anything this wallet can't account for) would go to the buyer with the sale
++                if opout.ty != OS_ASSET {
++                    return Err(Error::Internal { details: s!("that output also holds a right of this token (like inflation): move the tokens to their own output first") });
++                }
 +                match state {
 +                    AllocatedState::Amount(a) => held = held.saturating_add(a.as_u64()),
 +                    _ => return Err(Error::Internal { details: s!("that output holds non-fungible state") }),
