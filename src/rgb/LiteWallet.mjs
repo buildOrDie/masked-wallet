@@ -8,6 +8,7 @@ import { hex, base64 } from '@scure/base';
 import { isInvoiceV1, readInvoiceV1, invoiceIdOf, pickEndpoint, newSenderKey, sharedKeys, deliverConsignment, endpointUrl, rpc, PROXY_V1 } from './proxyV1.mjs';
 import { SEAL_SATS, SEAL_OUTPUT, SWAP_SIZE_VB, b64, buyerOutputs, outpointOf, completionBlocker, readOffer, buyerCoinFor, offerable, heldBreakdown, payoutFor, changedTerms, unb64, exactCoinFor, freeSellerCoinFor, sendCoinsFor, instantAmounts, INSTANT_SEAL_OUTPUT, INSTANT_SEAL_SATS, payCoinsFor, txVbytes, OPRET_SCRIPT, P2TR_SCRIPT, BUY_FEE_MIN, COMBINED_MAX, payCoinsForCombined } from './swap.mjs';
 import { RGB_UTXO_SATS, RGB_KEEP_SPARE } from './config.mjs';
+import { keptFetch } from './rgbFetch.mjs';
 
 /** rgb-lib names for our network ids. Utexo's custom Signet uses Signet rules too. */
 const NETWORKS = { mainnet: 'Mainnet', signet: 'Signet', utexo: 'Signet', testnet: 'Testnet', testnet4: 'Testnet4', regtest: 'Regtest' };
@@ -624,7 +625,8 @@ export class LiteWallet {
   async outpointInfo(op) {
     const [txid, vout] = String(op).split(':');
     const base = this.indexer || this.indexers()[0];
-    const [j, h] = await Promise.all([fetch(`${base}/tx/${txid}`), fetch(`${base}/tx/${txid}/hex`)]);
+    // the transaction's bytes (and its outputs) never change: from what MASKED already fetched when it can
+    const [j, h] = await Promise.all([keptFetch(`${base}/tx/${txid}`), keptFetch(`${base}/tx/${txid}/hex`)]);
     if (!j.ok || !h.ok) throw new Error(`Can't read ${short(op)} from the block server (${j.ok ? h.status : j.status}).`);
     const out = (await j.json()).vout?.[Number(vout)];
     if (!Number.isSafeInteger(out?.value)) throw new Error(`${short(op)} does not exist.`);
@@ -2190,7 +2192,7 @@ export class LiteWallet {
       await this.waitKnown(txid, 15_000);
       try { await this.wallet.sync(online); } catch { /* the next refresh */ }
     }
-    await this.instantPost(o.offerId, store).catch(() => false); // retried on refresh if it didn't get through
+    await this.instantPost(o.offerId, store, { justSent: true }).catch(() => false); // retried on refresh if it didn't get through
     await this.save();
     lap('handOver');
     console.info('[MASKED] Instant buy', { totalMs: Date.now() - t0, ...ms });
@@ -2276,11 +2278,12 @@ export class LiteWallet {
     return { txid, offerIds: ids };
   }
   /** Buyer: give this wallet the transfer (through the transfer server, like any incoming one). Retried on refresh. */
-  async instantPost(offerId, store) {
+  async instantPost(offerId, store, { justSent = false } = {}) {
     const e = store.get(String(offerId));
     if (!e || e.role !== 'buyer' || e.posted || e.failed) return false;
-    // the tokens are only expected once a block server has the purchase: send it (again) first
-    if (e.txHex && !(await this.knowsTx(e.txid))) {
+    // the tokens are only expected once a block server has the purchase: send it (again) first (not right after this
+    // wallet sent it: a block server accepted it a moment ago, asking again only cost a second)
+    if (e.txHex && !justSent && !(await this.knowsTx(e.txid))) {
       try { await this.ensureBroadcast(e.txHex, e.txid); } catch (err) {
         const why = String(err?.message || err);
         if (/no block server accepted it/.test(why)) store.set(String(offerId), { ...e, failed: why, completed: undefined, txHex: undefined, at: Date.now() });

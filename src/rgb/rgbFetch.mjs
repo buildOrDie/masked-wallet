@@ -41,6 +41,21 @@ export async function rgbFetch(input, init) {
   }
   return send(input, init);
 }
+/**
+ * The wallet's own lookup of one transaction (its bytes, or its JSON for an output's value and script): answered from
+ * what the engine already fetched when it can, kept the same way, and never queued behind the engine's requests.
+ * Anything else goes straight to the network. @param {string} url
+ */
+export async function keptFetch(url) {
+  const key = cacheKey(url, undefined);
+  if (!key) return fetch(url);
+  const hit = txCache.get(key);
+  if (hit && hit.until > Date.now()) { tally(false); return answer(hit, url); }
+  if (inflight.has(key)) { tally(false); return answer(await inflight.get(key), url); }
+  const p = fetchAndKeep(key, url, undefined, (u) => fetch(u));
+  inflight.set(key, p);
+  try { return answer(await p, url); } finally { inflight.delete(key); }
+}
 const urlOf = (input) => (typeof input === 'string' ? input : input instanceof URL ? input.href : /** @type {any} */ (input)?.url || '');
 // how many transaction lookups went to the network and how many were answered here, logged now and then
 const counts = { net: 0, kept: 0, at: 0 };
@@ -87,7 +102,7 @@ function sharedPut(key, e) {
     caches.open(SHARED).then((c) => c.put(key, new Response(e.body.slice(0), { status: 200, headers: { 'content-type': e.type || 'application/octet-stream', 'x-kept-until': String(e.until) } }))).catch(() => {});
   } catch { /* this window only */ }
 }
-async function fetchAndKeep(key, input, init) {
+async function fetchAndKeep(key, input, init, sender = send) {
   const kept = await sharedGet(key);
   if (kept) {
     tally(false);
@@ -96,7 +111,7 @@ async function fetchAndKeep(key, input, init) {
     return kept;
   }
   tally(true);
-  const r = await send(input, init);
+  const r = await sender(input, init);
   const body = await r.arrayBuffer();
   const type = r.headers.get('content-type') || '';
   let keepMs = 0;
