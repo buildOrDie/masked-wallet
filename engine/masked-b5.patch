@@ -407,6 +407,19 @@ index 51b6efd..d55126d 100644
 +    .map_err(|e| JsValue::from_str(&e.to_string()))?;
 +    to_js(&result)
 +}
+diff --git a/src/utils.rs b/src/utils.rs
+index 0440f89..78ba361 100644
+--- a/src/utils.rs
++++ b/src/utils.rs
+@@ -25,7 +25,7 @@ pub(crate) const INDEXER_TIMEOUT: u8 = 10;
+ #[cfg(feature = "esplora")]
+ pub(crate) const INDEXER_RETRIES: u8 = 3;
+ #[cfg(feature = "esplora")]
+-pub(crate) const INDEXER_PARALLEL_REQUESTS: usize = 5;
++pub(crate) const INDEXER_PARALLEL_REQUESTS: usize = 8; // MASKED: 5 upstream; 8 still well under public servers' limits
+ 
+ #[cfg(feature = "esplora")]
+ #[derive(Clone)]
 diff --git a/src/wallet/backup.rs b/src/wallet/backup.rs
 index 2300f6a..c681a3a 100644
 --- a/src/wallet/backup.rs
@@ -1077,10 +1090,10 @@ index c5c45b2..46cf640 100644
  pub(crate) mod offline;
  #[cfg(feature = "esplora")]
 diff --git a/src/wallet/offline.rs b/src/wallet/offline.rs
-index a3a9f46..15922a7 100644
+index a3a9f46..a9943da 100644
 --- a/src/wallet/offline.rs
 +++ b/src/wallet/offline.rs
-@@ -1312,9 +1312,60 @@ pub struct Wallet {
+@@ -1312,9 +1312,62 @@ pub struct Wallet {
      pub(crate) rgb_stock: std::rc::Rc<std::cell::RefCell<Option<crate::utils::MemStock>>>,
      pub(crate) vss_client: Option<super::vss::VssBackupClient>,
      pub(crate) last_vss_backup_error: std::cell::RefCell<Option<String>>,
@@ -1090,6 +1103,8 @@ index a3a9f46..15922a7 100644
 +    /// sync ran (unix seconds)
 +    pub(crate) light_recent: Option<u32>,
 +    pub(crate) last_full_sync: u64,
++    /// MASKED: when the last sync (light or full) finished, in seconds: syncs inside one refresh reuse it
++    pub(crate) last_sync_at: u64,
 +    /// Witness invoices of pre-signed purchases (MASKED): their seal blinding isn't derived.
 +    pub(crate) presigned_receives: HashSet<String>,
 +    /// MASKED: transactions this wallet made and broadcast itself (listing and lot moves) whose outputs may be spent
@@ -1141,7 +1156,7 @@ index a3a9f46..15922a7 100644
      /// Create a wallet and restore its latest durable IndexedDB snapshot, if one exists.
      ///
      /// The returned wallet is ready for use only after the IndexedDB read and snapshot
-@@ -1325,6 +1376,31 @@ impl Wallet {
+@@ -1325,6 +1378,31 @@ impl Wallet {
          let snapshot = super::idb_store::load_snapshot(&wallet.idb_key())
              .await
              .map_err(|details| Error::Persistence { details })?;
@@ -1173,13 +1188,14 @@ index a3a9f46..15922a7 100644
          if let Some(snapshot) = snapshot {
              wallet.idb_loaded = Some((snapshot.writer, snapshot.sequence));
              wallet
-@@ -1475,6 +1551,14 @@ impl Wallet {
+@@ -1475,6 +1553,15 @@ impl Wallet {
              },
              vss_client: None,
              last_vss_backup_error: std::cell::RefCell::new(None),
 +            reserved_outpoints: HashSet::new(),
 +            light_recent: None,
 +            last_full_sync: 0,
++            last_sync_at: 0,
 +            presigned_receives: HashSet::new(),
 +            own_unconfirmed: HashSet::new(),
 +            swap_change_vout: None,
@@ -1188,7 +1204,7 @@ index a3a9f46..15922a7 100644
          })
      }
  
-@@ -1690,8 +1774,10 @@ impl Wallet {
+@@ -1690,8 +1777,10 @@ impl Wallet {
              None => rgb_allocations.as_deref().unwrap(),
          };
  
@@ -1200,7 +1216,7 @@ index a3a9f46..15922a7 100644
          allocatable.sort_by_key(|t| t.rgb_allocations.len() + t.pending_blinded as usize);
          match allocatable.first() {
              Some(mut selected) => {
-@@ -2618,7 +2704,7 @@ impl Wallet {
+@@ -2618,7 +2707,7 @@ impl Wallet {
          Ok(psbt.to_string())
      }
  
@@ -1209,13 +1225,14 @@ index a3a9f46..15922a7 100644
          let sign_options = sign_options.unwrap_or_default();
          let [colored, vanilla] = &self.signers;
          self.bdk_wallet
-@@ -4215,6 +4301,14 @@ pub(crate) mod address_reuse_tests {
+@@ -4215,6 +4304,15 @@ pub(crate) mod address_reuse_tests {
              rgb_stock: std::rc::Rc::new(std::cell::RefCell::new(None)),
              vss_client: None,
              last_vss_backup_error: std::cell::RefCell::new(None),
 +            reserved_outpoints: HashSet::new(),
 +            light_recent: None,
 +            last_full_sync: 0,
++            last_sync_at: 0,
 +            presigned_receives: HashSet::new(),
 +            own_unconfirmed: HashSet::new(),
 +            swap_change_vout: None,
@@ -1225,20 +1242,23 @@ index a3a9f46..15922a7 100644
      }
  
 diff --git a/src/wallet/online.rs b/src/wallet/online.rs
-index ca96b4a..5d48494 100644
+index ca96b4a..e934ec5 100644
 --- a/src/wallet/online.rs
 +++ b/src/wallet/online.rs
-@@ -4,6 +4,9 @@
+@@ -4,6 +4,12 @@
  
  use super::*;
  
 +/// MASKED: with light syncs on, a full sync still runs at most this many seconds apart.
 +const LIGHT_SYNC_FULL_EVERY: u64 = 30 * 60;
++/// MASKED: a sync this recent (seconds) is reused by the syncs inside a refresh, a failed transfer or a coin list,
++/// instead of asking the block server again (a refresh used to sync once per confirmed incoming transfer).
++const SYNC_REUSE_SECS: u64 = 20;
 +
  const SCHEMAS_SUPPORTING_INFLATION: [database::enums::AssetSchema; 1] = [AssetSchema::Ifa];
  const SCHEMAS_SUPPORTING_BURN: [database::enums::AssetSchema; 2] =
      [AssetSchema::Ifa, AssetSchema::Bfa];
-@@ -361,6 +364,15 @@ struct BtcChange {
+@@ -361,6 +367,15 @@ struct BtcChange {
      amount: u64,
  }
  
@@ -1254,7 +1274,7 @@ index ca96b4a..5d48494 100644
  // map txo idx to assignments
  type TxoAssignments = HashMap<i32, Vec<Assignment>>;
  
-@@ -377,6 +389,9 @@ pub(crate) struct InfoBatchTransfer {
+@@ -377,6 +392,9 @@ pub(crate) struct InfoBatchTransfer {
      operation_secret_key: Option<Vec<u8>>,
      /// the sender's own proxy endpoint, where the recipients post their ACK
      sender_transport_endpoint: Option<String>,
@@ -1264,7 +1284,7 @@ index ca96b4a..5d48494 100644
  }
  
  impl std::fmt::Debug for InfoBatchTransfer {
-@@ -791,8 +806,9 @@ pub(crate) struct ConsignmentPayment<'c> {
+@@ -791,8 +809,9 @@ pub(crate) struct ConsignmentPayment<'c> {
  
  pub(crate) enum ReceiveMatcher {
      Blind(SecretSeal),
@@ -1276,7 +1296,7 @@ index ca96b4a..5d48494 100644
  }
  
  impl DbTransfer {
-@@ -817,7 +833,7 @@ impl DbTransfer {
+@@ -817,7 +836,7 @@ impl DbTransfer {
              RecipientTypeFull::Witness { .. } => {
                  let script_pubkey = script_buf_from_recipient_id(recipient_id)?
                      .expect("witness recipient ID should yield a script");
@@ -1285,7 +1305,7 @@ index ca96b4a..5d48494 100644
              }
          }
      }
-@@ -1598,7 +1614,7 @@ impl Wallet {
+@@ -1598,7 +1617,7 @@ impl Wallet {
                          }
                          // the blinding is derived from the keys of both parties, so a seal with a
                          // different one doesn't pay this transfer
@@ -1294,7 +1314,7 @@ index ca96b4a..5d48494 100644
                              continue;
                          }
                          let vout = seal.vout.into_u32();
-@@ -1778,11 +1794,20 @@ impl Wallet {
+@@ -1778,11 +1797,20 @@ impl Wallet {
          let mut assignments_collected = AssignmentsCollection::default();
          let mut input_btc_amt = 0;
          for unspent in mut_unspents {
@@ -1317,7 +1337,7 @@ index ca96b4a..5d48494 100644
                  .collect();
  
              // skip UTXOs with no allocations
-@@ -2093,6 +2118,7 @@ impl Wallet {
+@@ -2093,6 +2121,7 @@ impl Wallet {
          extra_allocations: HashMap<String, TxoAssignments>,
          change_utxo_idx: Option<i32>,
          btc_change: Option<BtcChange>,
@@ -1325,7 +1345,7 @@ index ca96b4a..5d48494 100644
          status: TransferStatus,
          min_confirmations: u8,
          expiration_timestamp: Option<i64>,
-@@ -2174,6 +2200,29 @@ impl Wallet {
+@@ -2174,6 +2203,29 @@ impl Wallet {
                      self.database.set_coloring(db_coloring)?;
                  }
              }
@@ -1355,7 +1375,7 @@ index ca96b4a..5d48494 100644
              if transfer_info.change.fungible > 0 {
                  let db_coloring = DbColoringActMod {
                      txo_idx: ActiveValue::Set(change_utxo_idx.unwrap()),
-@@ -2373,6 +2422,7 @@ impl Wallet {
+@@ -2373,6 +2425,7 @@ impl Wallet {
                  info.extra_allocations.clone(),
                  info.change_utxo_idx,
                  info.btc_change.clone(),
@@ -1363,7 +1383,7 @@ index ca96b4a..5d48494 100644
                  status,
                  info.min_confirmations,
                  info.expiration_timestamp,
-@@ -2441,6 +2491,17 @@ impl Wallet {
+@@ -2441,6 +2494,17 @@ impl Wallet {
      pub(crate) fn get_input_unspents(
          &self,
          unspents: &[LocalUnspent],
@@ -1381,7 +1401,7 @@ index ca96b4a..5d48494 100644
      ) -> Result<Vec<LocalUnspent>, Error> {
          let mut input_unspents = unspents.to_vec();
          // consider the following UTXOs unspendable:
-@@ -2449,16 +2510,35 @@ impl Wallet {
+@@ -2449,16 +2513,35 @@ impl Wallet {
          // - pending incoming witness
          // - pending incoming blinded
          // - inexistent
@@ -1422,7 +1442,7 @@ index ca96b4a..5d48494 100644
          });
          Ok(input_unspents)
      }
-@@ -2685,13 +2765,23 @@ impl Wallet {
+@@ -2685,13 +2768,23 @@ impl Wallet {
          // Use js_sys::Date::now() for WASM-compatible timestamp
          // (std::time::UNIX_EPOCH.elapsed() panics on wasm32-unknown-unknown)
          let start_time = (js_sys::Date::now() / 1000.0) as u64;
@@ -1446,15 +1466,26 @@ index ca96b4a..5d48494 100644
          self.bdk_wallet
              .apply_update(update)
              .map_err(|e| Error::FailedBdkSync {
-@@ -2699,6 +2789,16 @@ impl Wallet {
+@@ -2699,6 +2792,27 @@ impl Wallet {
              })?;
          self.bdk_wallet.persist(&mut self.bdk_database)?;
  
 +        self._save_new_txos()?;
++        self.last_sync_at = (js_sys::Date::now() / 1000.0) as u64;
 +
 +        debug!(self.logger, "Synced TXOs");
 +
 +        Ok(())
++    }
++
++    /// MASKED: sync unless one finished in the last `SYNC_REUSE_SECS` (the explicit `sync` and `full_scan` always run).
++    pub(crate) async fn sync_db_txos_if_stale(&mut self) -> Result<(), Error> {
++        let now = (js_sys::Date::now() / 1000.0) as u64;
++        if self.last_sync_at > 0 && now.saturating_sub(self.last_sync_at) < SYNC_REUSE_SECS {
++            debug!(self.logger, "Reusing the sync from {}s ago", now.saturating_sub(self.last_sync_at));
++            return Ok(());
++        }
++        self.sync_db_txos(false).await
 +    }
 +
 +    /// Record in the database the RGB-side outputs BDK's graph has and the database doesn't yet (after a sync, or
@@ -1463,7 +1494,7 @@ index ca96b4a..5d48494 100644
          let pending_witness_scripts = self._reconcile_pending_witness()?;
  
          let db_txos = self.database.iter_txos()?;
-@@ -2730,10 +2830,72 @@ impl Wallet {
+@@ -2730,10 +2844,72 @@ impl Wallet {
              }
              self.database.set_txo(new_db_utxo.clone())?;
          }
@@ -1538,7 +1569,7 @@ index ca96b4a..5d48494 100644
      }
  
      /// Sync and save the state, also when the sync fails part way.
-@@ -2815,11 +2977,11 @@ impl Wallet {
+@@ -2815,17 +2991,17 @@ impl Wallet {
              if internal_unspents_outpoints.contains(&(txid.clone(), vout)) {
                  continue;
              }
@@ -1555,7 +1586,14 @@ index ca96b4a..5d48494 100644
              db_txo.spent = ActiveValue::Set(true);
              self.database.update_txo(db_txo)?;
          }
-@@ -3080,6 +3242,11 @@ impl Wallet {
+ 
+         if !skip_sync {
+-            self.sync_db_txos(false).await?;
++            self.sync_db_txos_if_stale().await?;
+         }
+ 
+         // Keep the transaction in BDK's graph after the optional sync. Esplora may not have
+@@ -3080,6 +3256,11 @@ impl Wallet {
      ) -> Result<Option<Vec<u8>>, Error> {
          let mut change_utxo_option = None;
          let mut change_utxo_idx = None;
@@ -1567,7 +1605,7 @@ index ca96b4a..5d48494 100644
  
          let prev_outputs = psbt
              .unsigned_tx
-@@ -3217,6 +3384,19 @@ impl Wallet {
+@@ -3217,6 +3398,19 @@ impl Wallet {
                  )?;
              }
  
@@ -1587,7 +1625,7 @@ index ca96b4a..5d48494 100644
              let change = inputs_added.change(&transfer_info.original_assignments_needed);
  
              if change != AssignmentsCollection::default() {
-@@ -3614,6 +3794,7 @@ impl Wallet {
+@@ -3614,6 +3808,7 @@ impl Wallet {
              entropy,
              operation_secret_key: None,
              sender_transport_endpoint: None,
@@ -1595,7 +1633,7 @@ index ca96b4a..5d48494 100644
          };
          self.transfer_artifacts
              .entry(txid_key.to_string())
-@@ -3732,6 +3913,7 @@ impl Wallet {
+@@ -3732,6 +3927,7 @@ impl Wallet {
                  info.extra_allocations,
                  info.change_utxo_idx,
                  info.btc_change,
@@ -1603,7 +1641,7 @@ index ca96b4a..5d48494 100644
                  TransferStatus::Initiated,
                  min_confirmations,
                  expiration_timestamp,
-@@ -4723,6 +4905,22 @@ impl Wallet {
+@@ -4723,6 +4919,22 @@ impl Wallet {
                  &data.consignment_hash,
              ) {
                  Ok(bytes) => {
@@ -1626,7 +1664,7 @@ index ca96b4a..5d48494 100644
                      self.received_consignments
                          .insert(recipient_id.clone(), bytes);
                  }
-@@ -4871,7 +5069,14 @@ impl Wallet {
+@@ -4871,7 +5083,14 @@ impl Wallet {
                  .await;
          };
          let blinding = derive_shared(&ed25519_from_seed(&seed), &sender_vk)?.seal_blinding;
@@ -1642,7 +1680,7 @@ index ca96b4a..5d48494 100644
          let spent = Self::known_spent_opouts(&consignment);
          let mut payments: Vec<_> = self.find_payments(&consignment, &matcher, &spent).collect();
          if payments.len() != 1 {
-@@ -4904,7 +5109,10 @@ impl Wallet {
+@@ -4904,7 +5123,10 @@ impl Wallet {
          let witness_id = paying_bundle.witness_id();
          let txid = witness_id.to_string();
  
@@ -1654,7 +1692,7 @@ index ca96b4a..5d48494 100644
              error!(
                  self.logger,
                  "Consignment pays this recipient {} allocations, refusing it",
-@@ -5805,6 +6013,8 @@ impl Wallet {
+@@ -5805,17 +6027,23 @@ impl Wallet {
                      details: s!("consignment not found in memory"),
                  })?
                  .clone();
@@ -1663,7 +1701,34 @@ index ca96b4a..5d48494 100644
              let consignment =
                  RgbTransfer::load(&consignment_bytes[..]).map_err(InternalError::from)?;
  
-@@ -7053,6 +7263,10 @@ impl Wallet {
+             if let Some(RecipientTypeFull::Witness { vout }) = transfer.recipient_type {
+-                if !skip_sync {
+-                    self.sync_db_txos(false).await?;
+-                }
+                 let outpoint = Outpoint {
+                     txid: txid.clone(),
+                     vout: vout.unwrap(),
+                 };
++                if !skip_sync {
++                    self.sync_db_txos_if_stale().await?;
++                    // the reused sync may predate this transaction: a fresh one before relying on its output
++                    if self.database.get_txo(&outpoint)?.is_none() {
++                        self.sync_db_txos(false).await?;
++                    }
++                }
+                 let txo = self.database.get_txo(&outpoint)?.expect("txo must exist");
+                 let mut txo: DbTxoActMod = txo.into();
+                 txo.pending_witness = ActiveValue::Set(false);
+@@ -6446,7 +6674,7 @@ impl Wallet {
+         skip_sync: bool,
+     ) -> Result<bool, Error> {
+         if !skip_sync {
+-            self.sync_db_txos(false).await?;
++            self.sync_db_txos_if_stale().await?;
+         }
+ 
+         let mut db_data = self.database.get_db_data(false)?;
+@@ -7053,6 +7281,10 @@ impl Wallet {
          batch: bool,
      ) -> Result<(), Error> {
          for recipient in recipients {
@@ -1674,7 +1739,7 @@ index ca96b4a..5d48494 100644
              let recipient_id = &recipient.recipient_id;
              let recipient_vk = verifying_key_from_bytes(&recipient.public_key)?;
              let derived = derive_shared(sender_sk, &recipient_vk)?;
-@@ -7590,6 +7804,246 @@ impl Wallet {
+@@ -7590,6 +7822,246 @@ impl Wallet {
          Ok(tx.compute_txid().to_string())
      }
  
@@ -1921,7 +1986,7 @@ index ca96b4a..5d48494 100644
      /// Prepare the PSBT to inflate an IFA asset.
      pub async fn inflate_begin(
          &mut self,
-@@ -7782,6 +8236,7 @@ impl Wallet {
+@@ -7782,6 +8254,7 @@ impl Wallet {
              info_contents.extra_allocations,
              info_contents.change_utxo_idx,
              info_contents.btc_change,
@@ -1929,7 +1994,7 @@ index ca96b4a..5d48494 100644
              TransferStatus::WaitingConfirmations,
              info_contents.min_confirmations,
              info_contents.expiration_timestamp,
-@@ -8119,6 +8574,7 @@ impl Wallet {
+@@ -8119,6 +8592,7 @@ impl Wallet {
                  info_contents.extra_allocations,
                  info_contents.change_utxo_idx,
                  info_contents.btc_change,
@@ -1937,7 +2002,16 @@ index ca96b4a..5d48494 100644
                  TransferStatus::WaitingConfirmations,
                  info_contents.min_confirmations,
                  None,
-@@ -9321,6 +9777,7 @@ mod send_end_tests {
+@@ -8838,7 +9312,7 @@ impl Wallet {
+         self.check_online(online)?;
+ 
+         if !skip_sync {
+-            self.sync_db_txos(false).await?;
++            self.sync_db_txos_if_stale().await?;
+             self.flush().await?;
+         }
+ 
+@@ -9321,6 +9795,7 @@ mod send_end_tests {
              entropy: 0,
              operation_secret_key: Some(OPERATION_SEED.to_vec()),
              sender_transport_endpoint: None,
@@ -1945,7 +2019,7 @@ index ca96b4a..5d48494 100644
          };
          let db = DbBatchTransfer {
              idx: 1,
-@@ -9427,6 +9884,7 @@ mod send_end_tests {
+@@ -9427,6 +9902,7 @@ mod send_end_tests {
              entropy: 0,
              operation_secret_key: Some(OPERATION_SEED.to_vec()),
              sender_transport_endpoint: Some(s!("rpc://127.0.0.1:1")),
@@ -1953,7 +2027,7 @@ index ca96b4a..5d48494 100644
          }
      }
  
-@@ -10024,6 +10482,57 @@ mod send_end_tests {
+@@ -10024,6 +10500,57 @@ mod send_end_tests {
          assert!(kept.signed_psbt.is_none());
      }
  
@@ -2011,7 +2085,7 @@ index ca96b4a..5d48494 100644
      #[test]
      fn update_or_save_transfers_updates_outgoing_batch() {
          let (wallet, _) = setup();
-@@ -10051,6 +10560,7 @@ mod send_end_tests {
+@@ -10051,6 +10578,7 @@ mod send_end_tests {
                  info.extra_allocations.clone(),
                  info.change_utxo_idx,
                  None,
@@ -2019,7 +2093,7 @@ index ca96b4a..5d48494 100644
                  TransferStatus::Initiated,
                  1,
                  None,
-@@ -12074,3 +12584,892 @@ mod bfa_tests {
+@@ -12074,3 +12602,892 @@ mod bfa_tests {
          assert!(options(&format!(r#","evm_chains":{{"mainnet":{chain}}}"#)).is_err());
      }
  }

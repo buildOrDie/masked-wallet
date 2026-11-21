@@ -132,6 +132,7 @@ export class SignetWallet {
   async snapshot({ full = false, sync = true } = {}) {
     return this.exclusive(async () => {
       const wallet = this.requireWallet();
+      const t0 = Date.now(), took = {};
       await wallet.preferFirst?.();
       // the block server in use is busy or gone: try the next one once before giving up
       if (sync) try { await wallet.syncWallet({ full }); } catch (e) {
@@ -146,7 +147,10 @@ export class SignetWallet {
         this.unpaidAt = Date.now();
         try { await wallet.cancelUnpaidReceives(); } catch { /* next time */ }
       }
+      took.sync = Date.now() - t0;
+      const t1 = Date.now();
       const refreshed = await wallet.refreshWallet() || {};
+      took.transfers = Date.now() - t1;
       const stranded = Object.entries(refreshed).filter(([, r]) => /signed PSBT not found/i.test(JSON.stringify(r?.failure ?? ''))).map(([idx]) => Number(idx));
       // Sequential: the WASM wallet has a shared RefCell and does not support overlapping calls.
       const address = await wallet.getAddress();
@@ -157,6 +161,10 @@ export class SignetWallet {
       for (const a of Object.values(groups || {}).flat()) if (a?.assetId) transfers[a.assetId] = await wallet.listTransfers(a.assetId);
       const locked = typeof wallet.lockedCoins === 'function' ? await wallet.lockedCoins() : [];
       const snapshot = { address, btc, groups, transfers, stranded, locked };
+      took.total = Date.now() - t0;
+      // where an RGB refresh spends its time (the block server, the transfer server, this browser): in the console
+      this.lastTimings = { ...took, full, at: Date.now() };
+      try { console.info('[MASKED] RGB refresh', JSON.stringify(this.lastTimings)); } catch { /* no console */ }
       const encoded = new TextEncoder().encode(JSON.stringify(snapshot, (_, value) => typeof value === 'bigint' ? value.toString() : value));
       const revision = b64(new Uint8Array(await crypto.subtle.digest('SHA-256', encoded)));
       const key = `${this.vaultKey}.sync-revision`;
