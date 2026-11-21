@@ -230,7 +230,9 @@ export class ApprovalController {
       // own stale records ("none of its inputs…", "not settled and free", wrong balances)
       // only reading (which tokens, what's where): what MASKED saw in the last 10 minutes is good enough, so the
       // screen is ready at once instead of after a catch-up with the chain
-      const maxAge = m === 'rgbListAssets' || m === 'rgbOutputs' ? 600_000 : 60_000;
+      // an Instant buy syncs the coins it pays with itself and checks the listing on the chain: no catch-up first
+      // (it held the screen for a whole refresh, 2.31.1)
+      const maxAge = m === 'rgbListAssets' || m === 'rgbOutputs' ? 600_000 : m === 'rgbInstantBuy' || m === 'rgbInstantBuyMany' ? Infinity : 60_000;
       if (r.ready && typeof r.refresh === 'function' && Date.now() - (r.sharedRefreshAt ? r.sharedRefreshAt() : r.refreshedAt || 0) > maxAge) {
         try { await this.rgbBusy(() => r.refresh()); } catch { /* the step itself says what's wrong */ }
       }
@@ -604,7 +606,7 @@ export class ApprovalController {
       });
       case 'rgbInstantBuy': step('Waiting for RGB…'); return this.rgbBusy(async () => {
         prepared(''); const r = app.rgb, P = a.params;
-        const out = await r.service.instantBuy({ ...P, feeRate: P.feeRate || Number(r.fee()), onStep: step });
+        const out = await r.service.instantBuy({ ...P, feeRate: P.feeRate || Number(r.fee()), quick: true, onStep: step });
         later(r);
         return out;
       });

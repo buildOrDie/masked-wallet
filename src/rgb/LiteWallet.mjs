@@ -1234,13 +1234,20 @@ export class LiteWallet {
       const held = (plain(this.wallet.listUnspents(false)) || []).filter((u) => u.utxo?.exists !== false && (u.rgbAllocations || []).some((a) => a.assetId === assetId && a.settled));
       const own = this.ownTxids(extra), gone = [], mine = new Set();
       /** @type {Record<string, string>} */ const spentBy = {};
-      for (const u of held.slice(0, 40)) {
-        const [txid, vout] = opOf(u).split(':');
-        try {
-          const sp = await this.outspend(txid, vout);
-          if (sp?.spent) { if (sp.txid && own.has(String(sp.txid).toLowerCase())) mine.add(opOf(u)); else { gone.push(opOf(u)); spentBy[opOf(u)] = String(sp.txid || ''); } }
-        } catch { /* the block server didn't answer: not counted */ }
-      }
+      // asked 8 at a time (one after another, a wallet with 30 token outputs waited for 30 answers before a listing)
+      const list = held.slice(0, 40), answers = new Array(list.length);
+      let next = 0;
+      const worker = async () => {
+        while (next < list.length) {
+          const k = next++, [txid, vout] = opOf(list[k]).split(':');
+          try { answers[k] = await this.outspend(txid, vout); } catch { answers[k] = null; /* the block server didn't answer: not counted */ }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(8, list.length) }, worker));
+      list.forEach((u, k) => {
+        const sp = answers[k];
+        if (sp?.spent) { if (sp.txid && own.has(String(sp.txid).toLowerCase())) mine.add(opOf(u)); else { gone.push(opOf(u)); spentBy[opOf(u)] = String(sp.txid || ''); } }
+      });
       return { gone, mine, spentBy };
     };
     onStep('Checking this wallet is up to date with the chain…');
@@ -1541,8 +1548,11 @@ export class LiteWallet {
     }
     if (prev && !['cancelled'].includes(prev.stage)) return this.instantView(o.offerId, prev);
     onStep(`Checking your tokens on ${hostOf(this.indexer)}…`);
+    const t0 = Date.now();
     await this.wallet.sync(this.requireOnline());
+    const tSync = Date.now();
     const pendingSpent = await this.requireInSync(o.assetId, onStep, { allowOwn: true, own: storeMoveTxids(store) });
+    console.info('[MASKED] Instant list checks', { syncMs: tSync - t0, chainCheckMs: Date.now() - tSync });
     this.syncOwnUnconfirmed(store);
     const unspents = this.listable(plain(this.wallet.listUnspents(false)) || []);
     // market and token: where this wallet sends the signed listing when it's signed later (after the move)
@@ -2067,18 +2077,22 @@ export class LiteWallet {
    * `check(bytes, txid, amount?)` checks a transfer the same way (a completed one, a combined one).
    */
   async instantListingChecked(o, listing) {
+    const r = await this.instantListingFetch(o, listing);
+    if ((await this.ownOutpoints()).has(String(r.info.sellerOutpoint))) throw new Error('This is your own listing.');
+    return r;
+  }
+  /** `instantListingChecked` without this wallet: block server and RGB checks only, so it can run while the wallet syncs. */
+  async instantListingFetch(o, listing) {
     const l = listing || {};
     let info;
     try { info = plain(this.lib.WasmWallet.presignedListingInfo(String(l.psbt || ''))); } catch (e) { throw new Error(`The listing does not check out: ${e?.message || e}`); }
     if (String(info.templateTxid) !== String(l.templateTxid)) throw new Error('The listing does not match its transfer.');
     if (BigInt(String(info.payoutSats)) - BigInt(String(info.sellerSats)) !== o.priceSats) throw new Error('The signed price is not the offer\'s price.');
-    if (this.oldConsignment(unb64(String(l.consignment || '')), info.templateTxid)) throw new Error('This listing was signed by a MASKED older than 2.29, in the old RGB format, and can\'t be bought any more. Nothing was paid. The seller cancels it on the market and lists it again.');
-    if ((await this.ownOutpoints()).has(String(info.sellerOutpoint))) throw new Error('This is your own listing.');
-    // the seller's output is still there, and is what the signature says
-    const si = await this.outpointInfo(info.sellerOutpoint);
-    if (String(si.sats) !== String(info.sellerSats) || si.script !== info.sellerScript) throw new Error('The seller\'s output is not what the listing says.');
+    // the seller's output is still there, and is what the signature says (both asked at once)
     const [st, sv] = String(info.sellerOutpoint).split(':');
-    if ((await (await this.esplora(`/tx/${st}/outspend/${sv}`)).json())?.spent) throw new Error('Someone just bought this, or the seller cancelled it.');
+    const [si, spent] = await Promise.all([this.outpointInfo(info.sellerOutpoint), this.esplora(`/tx/${st}/outspend/${sv}`).then((x) => x.json()).then((j) => !!j?.spent)]);
+    if (String(si.sats) !== String(info.sellerSats) || si.script !== info.sellerScript) throw new Error('The seller\'s output is not what the listing says.');
+    if (spent) throw new Error('Someone just bought this, or the seller cancelled it.');
     // the tokens: valid history, this token, this amount on the buyer's seal
     const check = (bytes, txid, amount = o.amount) => {
       let v;
@@ -2089,12 +2103,18 @@ export class LiteWallet {
       if (sealAmount == null || BigInt(String(sealAmount)) !== BigInt(amount)) throw new Error(`The transfer gives you ${sealAmount ?? 'nothing'}, the offer says ${amount}.`);
     };
     const consignment = unb64(String(l.consignment || ''));
-    check(consignment, info.templateTxid);
+    // checked once (it used to be checked twice: once only to tell an old-format listing)
+    try { check(consignment, info.templateTxid); } catch (e) {
+      if (OLD_CONSIGNMENT.test(String(e?.message || e))) throw new Error('This listing was signed by a MASKED older than 2.29, in the old RGB format, and can\'t be bought any more. Nothing was paid. The seller cancels it on the market and lists it again.');
+      throw e;
+    }
     return { info, si, consignment, check };
   }
   /** Buyer: check an Instant listing and buy it in one go: sign, broadcast, and hand the transfer to this wallet. */
-  async instantBuy({ offerId, network, offer, listing, feeRate, onStep = (_t) => {} }, store) {
+  async instantBuy({ offerId, network, offer, listing, feeRate, quick = false, onStep = (_t) => {} }, store) {
     this.requirePresign(); this.checkNet(network);
+    const t0 = Date.now(), ms = {}; let tl = t0;
+    const lap = (k) => { const n = Date.now(); ms[k] = n - tl; tl = n; };
     const o = readOffer(offer, offerId);
     if (o.state && o.state !== 'OPEN') throw new Error(`The offer is ${o.state.toLowerCase()}.`);
     // bought before from this wallet: the same purchase, if the network has it (or takes it again); otherwise it never
@@ -2108,10 +2128,13 @@ export class LiteWallet {
       store.del?.(o.offerId);
     }
     const online = this.requireOnline();
-    onStep(`Checking your bitcoin on ${hostOf(this.indexer)}…`);
-    await this.wallet.sync(online);
+    onStep(`Checking the listing and your bitcoin on ${hostOf(this.indexer)}…`);
     const l = listing || {};
-    const { info, si, consignment, check } = await this.instantListingChecked(o, l);
+    // the listing's checks (block server, RGB) don't touch this wallet: they run while it syncs
+    const [, pre] = await Promise.all([this.wallet.sync(online), this.instantListingFetch(o, l)]);
+    lap('syncAndCheck');
+    const { info, si, consignment, check } = pre;
+    if ((await this.ownOutpoints()).has(String(info.sellerOutpoint))) throw new Error('This is your own listing.');
     // pay: one confirmed coin covering the price, the seal and the fee
     // economy rates below 1 sat/vB are fine here: the fee is worked out below, not by the RGB engine (2.29.29)
     const rate = Math.max(BUY_FEE_MIN, Number(feeRate) || 1);
@@ -2128,8 +2151,9 @@ export class LiteWallet {
       const held = this.justSpent().size;
       throw new Error(`Your RGB wallet needs ${(base + feeFor([P2TR_SCRIPT])).toLocaleString('en-US')} sats in bitcoin for this. Tap Add from Bitcoin under RGB balance on Home. (It sees ${seen.length ? `${seen.length} coin${seen.length === 1 ? '' : 's'}: ${seen.slice(0, 5).map((v) => v.toLocaleString('en-US')).join(', ')} sats` : 'no coin'}, ${confirmed.length} confirmed${held ? `; ${held} just spent by this wallet` : ''}.)`);
     }
-    const bis = await Promise.all(pay.coins.map((c) => this.outpointInfo(c.outpoint)));
-    const r = await this.onchainReceive({ assetId: null, amount: Number(o.amount), durationSeconds: 86400, witness: true });
+    // the coins' transactions (block server) while the wallet makes the invoice for the tokens
+    const [bis, r] = await Promise.all([Promise.all(pay.coins.map((c) => this.outpointInfo(c.outpoint))), this.onchainReceive({ assetId: null, amount: Number(o.amount), durationSeconds: 86400, witness: true })]);
+    lap('coinsAndInvoice');
     const seal = this.lib.WasmWallet.witnessSealScript(r.invoice);
     const paid = bis.reduce((t, b) => t + BigInt(b.sats), 0n);
     let change = paid - base - feeFor(bis.map((b) => b.script));
@@ -2143,6 +2167,7 @@ export class LiteWallet {
     const txid = this.lib.WasmWallet.checkPresignedFinal(String(l.psbt), txHex, seal);
     const completed = this.lib.WasmWallet.completePresignedConsignment(consignment, info.templateTxid, txHex);
     check(completed, txid);
+    lap('sign');
     // kept with the purchase: if a server drops it, a refresh sends it again; the wallet only expects the tokens
     // once a block server has the transaction
     store.set(o.offerId, { role: 'buyer', assetId: o.assetId, amount: String(o.amount), priceSats: String(o.priceSats), recipientId: r.recipientId, invoice: r.invoice, txid, txHex, completed: b64(completed), posted: false, at: Date.now() });
@@ -2156,13 +2181,19 @@ export class LiteWallet {
       }
       throw err; // a network problem: kept, and sent again on the next refresh
     }
-    // the wallet learns at once that its coins are spent, and the purchase's change: the next buy of a sweep can
+    lap('broadcast');
+    // in a sweep, the wallet learns at once that its coins are spent, and the purchase's change: the next buy can
     // spend that change (it waits for the block server to have this purchase first, a few seconds; before, the next
-    // buy found no coin at all when the RGB balance had only one: "Bought 1 of 3")
-    await this.waitKnown(txid, 15_000);
-    try { await this.wallet.sync(online); } catch { /* the next refresh */ }
-    await this.instantPost(o.offerId, store);
+    // buy found no coin at all when the RGB balance had only one: "Bought 1 of 3"). A single buy doesn't wait: the
+    // wallet's next refresh learns the same (2.31.1)
+    if (!quick) {
+      await this.waitKnown(txid, 15_000);
+      try { await this.wallet.sync(online); } catch { /* the next refresh */ }
+    }
+    await this.instantPost(o.offerId, store).catch(() => false); // retried on refresh if it didn't get through
     await this.save();
+    lap('handOver');
+    console.info('[MASKED] Instant buy', { totalMs: Date.now() - t0, ...ms });
     return { txid };
   }
   /** Can this RGB engine buy several Instant listings in one transaction (2.30)? */
