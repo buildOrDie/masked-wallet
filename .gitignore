@@ -7,3 +7,4 @@ vendor/rgb-lib-wasm/
 
 # the phone app's web files, built by scripts/build-mobile.mjs
 dist/
+store/
