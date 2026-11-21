@@ -1,0 +1,10 @@
+{
+  "appName": {
+    "message": "MASKED Wallet",
+    "description": "Extension name (brand, keep as is)"
+  },
+  "appDesc": {
+    "message": "带有公开余额与隐私余额（静默支付）的比特币钱包。可铸造、部署和交易 BRC-20 与 BRC2.0。自托管。",
+    "description": "Chrome Web Store / chrome://extensions description, max 132 characters"
+  }
+}

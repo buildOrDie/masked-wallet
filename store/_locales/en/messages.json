@@ -1,0 +1,10 @@
+{
+  "appName": {
+    "message": "MASKED Wallet",
+    "description": "Extension name (brand, keep as is)"
+  },
+  "appDesc": {
+    "message": "Bitcoin wallet with a Public and a Shielded (silent payments) balance. Mint, deploy and trade BRC-20 and BRC2.0. Self-custody.",
+    "description": "Chrome Web Store / chrome://extensions description, max 132 characters"
+  }
+}
