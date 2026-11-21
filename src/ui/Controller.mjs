@@ -89,6 +89,7 @@ export class Controller {
     if (t.hasAttribute?.('data-leafscan')) { app.leaf.setScanShielded(t.checked); this.render(); return; }
     if (t.hasAttribute?.('data-backed')) { this.f.backed = t.checked; this.render(); return; }
     if (t.id === 'autoLockSel') { app.vault.setAutoLock(t.value); app.lock.refreshSession(); this.toast(`Auto-lock: ${t.selectedOptions[0].text}`); return; }
+    if (t.hasAttribute?.('data-sharekeep')) { if (this.app.approvals?.active) this.app.approvals.active.remember = t.checked; this.render(); return; }
     if (t.hasAttribute?.('data-risk')) { this.f.apRisk = t.checked; this.state.status.approve = null; this.render(); return; }
     if (t.id === 'netSel2') app.setNet(t.value);
   }

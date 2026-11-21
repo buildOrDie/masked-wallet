@@ -103,7 +103,11 @@ chrome.runtime.onConnect.addListener((port) => {
 
 
 // every site request is checked and answered in ../dapp/requests.mjs (shared with the phone app's in-app market)
-const handle = makeHandler({ getPublic, getTrade, getSites, setSites, openApproval, emitTo });
+/** The RGB token list MASKED last saw for this network and account (RAM only, written by the wallet's windows). */
+async function getRgbShare(net, address) {
+  try { const all = (await chrome.storage.session.get('masked.rgb.share'))['masked.rgb.share'] || {}; return all[`${net}:${address}`] || null; } catch { return null; }
+}
+const handle = makeHandler({ getPublic, getTrade, getSites, setSites, openApproval, emitTo, getRgbShare });
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'masked-rpc') return;

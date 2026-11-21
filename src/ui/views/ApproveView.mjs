@@ -159,7 +159,8 @@ export class ApproveView extends View {
     if (a.method === 'rgbListAssets') {
       const list = b?.list || [];
       return `<div class="kv">${rowKV('Tokens', b ? (list.length ? list.map((x) => esc(x.ticker || short(x.assetId, 6))).join(', ') : 'none yet') : '…')}${rowKV('Network', esc(this.app.rgb.profile.label))}</div>
-      <p class="info">The site sees which RGB tokens you hold, their asset IDs and how much of each. Nothing moves.</p>${this.rgbWait(a)}${this.error(a)}`;
+      <p class="info">The site sees which RGB tokens you hold, their asset IDs and how much of each. Nothing moves.</p>
+      <label class="risk"><input type="checkbox" data-sharekeep ${a.remember ? 'checked' : ''}><span><b>Share without asking next time.</b> This site then gets your token list at once, as MASKED last saw it (up to 30 minutes old). Disconnect the site to stop it.</span></label>${this.rgbWait(a)}${this.error(a)}`;
     }
     if (a.method === 'rgbFreeSpare') {
       return `<div class="kv">${rowKV('Spare outputs freed', b ? `${b.freed} (${sats(b.sats)})` : '…')}${rowKV('Kept for receiving', b ? String(b.keep) : '…')}${rowKV('Bitcoin for buys after', b ? `${sats(b.sats + b.coinSats)} in 4 coins, less the fee` : '…')}${b?.unpaid ? rowKV('Unused invoices given up', String(b.unpaid)) : ''}${b?.freed ? rowKV('Fee rate', `${b.rate} sat/vB`) : ''}</div>

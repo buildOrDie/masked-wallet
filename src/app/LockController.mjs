@@ -87,6 +87,7 @@ export class LockController {
     } catch {}
     await this.session.clear();
     Keyring.forgetRoot();
+    await this.app.rgb.forgetShare?.();
     await this.app.rgb.forget();
     this.state.wallet = null; this.secret = null;
     location.reload(); // drops every key from memory

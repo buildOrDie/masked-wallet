@@ -552,7 +552,27 @@ export class WalletRgb {
     await this.instantCheck();
     this.autoFund().catch(() => {});
     this.checkDropped().catch(() => {});
+    this.publishShare().catch(() => {});
   }
+  /**
+   * Keep the token list sites may see (what "Share your RGB tokens" gives) in the browser's memory, so a site you
+   * let see it without asking gets an answer at once instead of a window and a catch-up with the chain. RAM only
+   * (chrome.storage.session): gone when the browser closes. Never keys, outputs or history: tickers, IDs, amounts.
+   * @param {any[]} [list] the list just shared (else read now)
+   */
+  async publishShare(list) {
+    const p = this.app.platform;
+    if (!p?.hasExt || !this.ready || typeof p.sessionSet !== 'function') return;
+    const address = this.app.account?.funding?.()?.address, net = this.app.account?.net;
+    if (!address || !net) return;
+    const items = list || this.withoutDropped(await this.service.assetList());
+    const clean = JSON.parse(JSON.stringify(items, (_, v) => (typeof v === 'bigint' ? v.toString() : v)));
+    const all = (await p.sessionGet('masked.rgb.share')) || {};
+    all[`${net}:${address}`] = { at: Date.now(), list: clean };
+    await p.sessionSet({ 'masked.rgb.share': all });
+  }
+  /** Forget the token list sites may see (on lock, or when this wallet goes). */
+  async forgetShare() { try { await this.app.platform?.sessionRemove?.('masked.rgb.share'); } catch { /* RAM only anyway */ } }
   // ---- incoming transfers whose transaction the network dropped (never confirmed, gone from the mempool) ----
   get droppedKey() { return `${this.profile.vaultKey}.dropped`; }
   dropped() { try { return JSON.parse(localStorage.getItem(this.droppedKey) || '{}') || {}; } catch { return {}; } }

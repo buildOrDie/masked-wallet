@@ -203,7 +203,7 @@ await window.masked.rgb.payInvoice(escrowInvoice, { assetId, amount: '1500' });
 
 The RGB tokens this wallet holds, after the person agrees to share them: `spendable` and `max` (the most one offer
 can sell, since one offer uses one output) in base units. Outputs promised to Instant listings don't count. A market
-uses it for "pick a token" instead of asking for the asset ID. `instant` *(2.28.2+)*: the amounts (base units, largest
+uses it for "pick a token" instead of asking for the asset ID. From 2.30.3 the person can tick "Share without asking next time": that site then gets the list at once, as MASKED last saw it (at most 30 minutes old), until they disconnect it or lock MASKED. `instant` *(2.28.2+)*: the amounts (base units, largest
 first) that sit alone on one output: an Instant listing of exactly one of them is live at once, any other amount
 first moves the tokens (one transaction, live after a block).
 

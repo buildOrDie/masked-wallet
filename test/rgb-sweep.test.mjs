@@ -150,3 +150,23 @@ test('a sweep with a combining engine: one transaction for the lot, one by one w
   out = await a.approvals.run({ ...act, id: 'c3', params: { ...P, items: [item('a'), item('b'), item('c'), item('d'), item('e'), item('f'), item('g'), item('h'), item('i'), item('j'), item('k')] } }).catch((e) => ({ error: String(e.message) }));
   assert.deepEqual(calls, [['combined', 6], ['combined', 5]], 'two combined purchases of 6 and 5, never one by one');
 });
+
+test('getAssets: a site allowed to see the token list gets it at once; otherwise, or when stale, MASKED asks', async () => {
+  const opened = [];
+  const sites = { [SITE]: { connectedAt: 1, rgbShare: true }, 'https://other.example': { connectedAt: 1 } };
+  let share = { at: Date.now() - 60_000, list: [{ assetId: 'rgb:x', ticker: 'MSK', held: { free: '5' } }] };
+  const h = makeHandler({
+    getPublic: async () => ({ address: 'tb1pme', net: 'signet' }), getTrade: async () => null,
+    getSites: async () => sites, setSites: async () => {}, emitTo: () => {},
+    openApproval: async (o, m) => { opened.push([o, m]); return [{ assetId: 'rgb:x', ticker: 'MSK', asked: true }]; },
+    getRgbShare: async (net, addr) => (net === 'signet' && addr === 'tb1pme' ? share : null),
+  });
+  assert.deepEqual(await h(SITE, 'rgbListAssets', {}), share.list, 'at once, no window');
+  assert.equal(opened.length, 0);
+  assert.equal((await h('https://other.example', 'rgbListAssets', {}))[0].asked, true, 'a site not allowed: asked');
+  share = { ...share, at: Date.now() - 31 * 60_000 };
+  assert.equal((await h(SITE, 'rgbListAssets', {}))[0].asked, true, 'too old: asked');
+  share = null;
+  assert.equal((await h(SITE, 'rgbListAssets', {}))[0].asked, true, 'nothing kept (browser restarted, locked): asked');
+  assert.equal(opened.length, 3);
+});

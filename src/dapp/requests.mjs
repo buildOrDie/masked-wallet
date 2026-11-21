@@ -14,6 +14,9 @@ const FROM_UNISAT = { livenet: 'main', mainnet: 'main', testnet: 'signet', signe
 const FROM_CHAIN = { BITCOIN_MAINNET: 'main', BITCOIN_SIGNET: 'signet' };
 
 export const TRADE_SITES = new Set(['https://maskedwallet.com', 'https://www.maskedwallet.com']);
+/** How long a remembered RGB token list answers a site that's allowed to see it, without asking again. */
+export const RGB_SHARE_FRESH_MS = 30 * 60_000;
+
 export const err = (code, message) => Object.assign(new Error(message), { code });
 export const chainInfo = (net) => ({ enum: NETS[net].chain, name: NETS[net].name, network: NETS[net].unisat });
 
@@ -118,10 +121,10 @@ export const tradeView = (t) => ({ address: t.address, publicKey: t.publicKey, i
 /**
  * @param {{ getPublic: () => Promise<any>, getTrade: () => Promise<any>, getSites: () => Promise<Record<string, any>>,
  *   setSites: (s: Record<string, any>) => Promise<void>, openApproval: (origin: string, method: string, params: any) => Promise<any>,
- *   emitTo: (origin: string, event: string, data: any) => void }} deps
+ *   emitTo: (origin: string, event: string, data: any) => void, getRgbShare?: ((net: string, address: string) => Promise<{ at: number, list: any[] } | null>) | null }} deps
  * @returns {(origin: string, method: string, params: any) => Promise<any>}
  */
-export function makeHandler({ getPublic, getTrade, getSites, setSites, openApproval, emitTo }) {
+export function makeHandler({ getPublic, getTrade, getSites, setSites, openApproval, emitTo, getRgbShare = null }) {
   return async function handle(origin, method, params) {
     const pub = await getPublic();
     if (!pub?.address) throw err(4100, 'Open MASKED and set up a wallet first.');
@@ -283,9 +286,16 @@ export function makeHandler({ getPublic, getTrade, getSites, setSites, openAppro
         return openApproval(origin, 'rgbPay', { invoice, assetId, amount, feeRate });
       }
       // ---- RGB peer-to-peer swaps: tokens for BTC in one transaction, wallet to wallet ----
-      case 'rgbListAssets':
+      case 'rgbListAssets': {
         needConnected();
+        // a site you let see your RGB tokens without asking: answered at once from what MASKED last saw (kept in
+        // memory only, for this account and network, at most RGB_SHARE_FRESH_MS old); otherwise MASKED asks
+        if (sites[origin]?.rgbShare && typeof getRgbShare === 'function') {
+          const c = await getRgbShare(net, pub.address).catch(() => null);
+          if (c && Array.isArray(c.list) && Date.now() - Number(c.at) < RGB_SHARE_FRESH_MS) return c.list;
+        }
         return openApproval(origin, 'rgbListAssets', {});
+      }
       case 'rgbOutputs':
         needConnected();
         return openApproval(origin, 'rgbOutputs', {});

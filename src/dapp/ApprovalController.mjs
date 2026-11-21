@@ -6,6 +6,9 @@ import { instantBuyVbytes, combinedBuyVbytes, combinedChunks, instantMoveVbytes,
 import { UNISAT_NET } from '../bitcoin/networks.mjs';
 import { signMessageBip322, signMessageEcdsa } from '../bitcoin/messages.mjs';
 import { TRADE_SITES } from '../trade/TradeAccount.mjs';
+
+/** MASKED's own sites: "Share without asking next time" starts ticked there. */
+const isMaskedSite = (origin) => { try { const h = new URL(origin).hostname; return h === 'maskedwallet.com' || h.endsWith('.maskedwallet.com'); } catch { return false; } };
 import { lockKeyOf, peekToken } from '../ecash/EcashBook.mjs';
 import { toBase, fromBase } from '../rgb/config.mjs';
 import { rgbFundParts, proxyUrl, rgbError, RGB_CONFLICT_MSG } from '../rgb/WalletRgb.mjs';
@@ -223,7 +226,10 @@ export class ApprovalController {
       // the market works from what this wallet knows: catch up first (a claim, a purchase or a sale that arrived, a
       // move that confirmed), unless that was just done. Without it, a wallet that was closed a while trips on its
       // own stale records ("none of its inputs…", "not settled and free", wrong balances)
-      if (r.ready && typeof r.refresh === 'function' && Date.now() - (r.sharedRefreshAt ? r.sharedRefreshAt() : r.refreshedAt || 0) > 60_000) {
+      // only reading (which tokens, what's where): what MASKED saw in the last 10 minutes is good enough, so the
+      // screen is ready at once instead of after a catch-up with the chain
+      const maxAge = m === 'rgbListAssets' || m === 'rgbOutputs' ? 600_000 : 60_000;
+      if (r.ready && typeof r.refresh === 'function' && Date.now() - (r.sharedRefreshAt ? r.sharedRefreshAt() : r.refreshedAt || 0) > maxAge) {
         try { await this.rgbBusy(() => r.refresh()); } catch { /* the step itself says what's wrong */ }
       }
       if (m === 'rgbFreeSpare') {
@@ -239,7 +245,7 @@ export class ApprovalController {
         return { keep, freed: freed.length, sats: freed.reduce((n, o) => n + o.sats, 0), coinSats: coins.reduce((n, c) => n + c.sats, 0), unpaid: rep.unpaidReceives || 0, rate: P.feeRate || Number(r.fee()) };
       }
       if (m === 'rgbOutputs') return { list: r.assets().map((x) => ({ ticker: x.ticker, assetId: x.assetId })) };
-      if (m === 'rgbListAssets') return { list: r.assets().map((x) => ({ ticker: x.ticker, assetId: x.assetId })) };
+      if (m === 'rgbListAssets') { if (a.remember == null) a.remember = isMaskedSite(a.origin); return { list: r.assets().map((x) => ({ ticker: x.ticker, assetId: x.assetId })) }; }
       if (!r.service?.canSwap) throw new Error('This MASKED version can\'t swap RGB tokens yet. Update MASKED.');
       if (MOVES_TOKENS.includes(m)) { if (r.requireLatest) await r.requireLatest(); else if (r.cloud?.conflict) throw new Error(RGB_CONFLICT_MSG); }
       if (m === 'rgbSwapAvailable') {
@@ -534,7 +540,16 @@ export class ApprovalController {
         return out;
       });
       case 'rgbOutputs': return this.rgbBusy(async () => { prepared(''); return app.rgb.withoutDropped(await app.rgb.service.outputsReport()); });
-      case 'rgbListAssets': return this.rgbBusy(async () => { prepared(''); return app.rgb.withoutDropped(await app.rgb.service.assetList()); });
+      case 'rgbListAssets': return this.rgbBusy(async () => {
+        prepared('');
+        const list = app.rgb.withoutDropped(await app.rgb.service.assetList());
+        await app.rgb.publishShare?.(list).catch(() => {});
+        // "Share without asking next time": the site gets this list at once from now on (until you disconnect it)
+        if (a.remember && app.platform?.hasExt) {
+          try { const all = (await app.platform.storageGet('masked.sites')) || {}; if (all[a.origin]) { all[a.origin] = { ...all[a.origin], rgbShare: true }; await app.platform.storageSet({ 'masked.sites': all }); } } catch { /* asks again next time */ }
+        }
+        return list;
+      });
       case 'rgbSwapAvailable': return this.rgbBusy(async () => { prepared(''); return app.rgb.service.offerableAmount({ assetId: a.params.assetId }); });
       case 'rgbBuyPrepare': return this.rgbBusy(async () => {
         const b = prepared(''), r = app.rgb;
