@@ -277,6 +277,23 @@ How it works:
   listing; then the sale goes through at the seller's price. MASKED notices sales and cancels on chain at each refresh.
 - Instant listings are MASKED-only (a different transaction layout from the four-step swaps).
 
+### Wallet-to-wallet swaps in UniSat's P2P flow: `rgb.p2pListable`, `p2pBuyPrepare`, `p2pSaleSign`, `p2pBuySign`, `p2pSaleCommit`, `p2pBuyAccept`, `p2pSaleFinish`, `p2pCancel` *(2.31+, engine with `colorP2pSwap`)*
+
+The same seven steps as UniSat Wallet's pure P2P mode (`signBuySwapCommit`, UniSat 1.8.4+), so a MASKED wallet trades with a UniSat wallet as well as with another MASKED. Both sides take turns online; nothing is broadcast until both have signed and the buyer has accepted. Every call takes `{ offerId, offer: { assetId, amount, priceSats }, network }` (`offerId` is the market's trade id) plus:
+
+| Step | Who | Call | Extra fields | Returns |
+|---|---|---|---|---|
+| List | seller | `p2pListable` 🔐 | `partial?` | `{ sealTxid, sealVout, sealSatoshis, sealScriptPubKey, sealAmount, sellerAddress }`: the RGB output sold from (only this token on it, exactly `amount` unless `partial`) and where the price is paid |
+| Join | buyer | `p2pBuyPrepare` 🔐 | `seller: { sealTxid, sealVout, sealSatoshis, sealScriptPubKey, address }`, `partial?`, `sealAmount?`, `feeRate?` | `{ invoice, recipientId, draftPsbtHex }`: a blinded invoice and the draft (inputs: the seller's output, then the buyer's coins; outputs: an empty OP_RETURN, the price to the seller, 600 sats back to the seller's output script for the rest of a partial buy, the buyer's change) |
+| Seller signs | seller | `p2pSaleSign` 🔐 | `invoice`, `draftPsbtHex` | `{ transferId, makerSignedPsbtHex, coloredPsbtHex, txid }`: the draft coloured, the token transfer posted to the buyer's transfer server (no transaction yet), the seller's input signed |
+| Buyer signs | buyer | `p2pBuySign` 🔐 | `coloredPsbtHex`, `txid?` | `{ buyerSignedPsbt, txid }` (hex): only once the buyer's wallet holds the seller's checked token transfer for exactly this transaction and amount, and every input, output and the fee match the draft |
+| Seller commits | seller | `p2pSaleCommit` (no screen) | `buyerSignedPsbtHex` | `{ commitment, proxyTransferId, senderPublicKey, txid, buyerSignedPsbtHash }`: the complete transaction is registered with the seller's transfer server (released to the buyer when it accepts), then the commitment |
+| Buyer accepts | buyer | `p2pBuyAccept` (no screen) | `commitment` (or UniSat's `backendCommit`) | `{ status: 'accepted', txid }`: the commitment checked, the transfer accepted, the transaction released and broadcast |
+| Finish | seller | `p2pSaleFinish` (no screen) | | `{ txid }` once the buyer accepted and the swap went out |
+| Leave | either | `p2pCancel` (no screen) | | `{ cancelled }`, before the buyer accepts |
+
+The commitment is UniSat's: an Ed25519 signature, with the key the token transfer was posted with (`senderPublicKey`), over the SHA-256 of `rgb-buy-swap/commit/v1:{proxyTransferId}:{txid}:{buyerSignedPsbtHash}`, where `buyerSignedPsbtHash` is the SHA-256 (hex) of the buyer-signed PSBT's bytes. A buyer's wallet holds the seller's token transfer, checked but not accepted, until that commitment checks out for the transaction it signed. The steps without a screen follow from one the person already approved: they open MASKED briefly and run by themselves. PSBTs go both ways as hex.
+
 ## Events
 
 ```js

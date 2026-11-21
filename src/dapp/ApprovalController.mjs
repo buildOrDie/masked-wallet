@@ -14,16 +14,18 @@ import { toBase, fromBase } from '../rgb/config.mjs';
 import { rgbFundParts, proxyUrl, rgbError, RGB_CONFLICT_MSG } from '../rgb/WalletRgb.mjs';
 
 /** Methods whose approve button waits for a prepared transaction. */
-export const NEEDS_PREP = ['sendBitcoin', 'inscribeTransfer', 'shareTrade', 'fundTrade', 'moveToTrade', 'returnToShielded', 'cancelShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbInvoice', 'rgbPay', 'rgbSwapAvailable', 'rgbListAssets', 'rgbOutputs', 'rgbFreeSpare', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantListLots', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel'];
-const SWAP_METHODS = ['rgbSwapAvailable', 'rgbListAssets', 'rgbOutputs', 'rgbFreeSpare', 'rgbOutputs', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantListLots', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel'];
+export const NEEDS_PREP = ['sendBitcoin', 'inscribeTransfer', 'shareTrade', 'fundTrade', 'moveToTrade', 'returnToShielded', 'cancelShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbInvoice', 'rgbPay', 'rgbSwapAvailable', 'rgbListAssets', 'rgbOutputs', 'rgbFreeSpare', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantListLots', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel', 'rgbP2pList', 'rgbP2pBuyPrepare', 'rgbP2pSaleSign', 'rgbP2pBuySign', 'rgbP2pSaleCommit', 'rgbP2pBuyAccept', 'rgbP2pSaleFinish', 'rgbP2pCancel'];
+const SWAP_METHODS = ['rgbSwapAvailable', 'rgbListAssets', 'rgbOutputs', 'rgbFreeSpare', 'rgbOutputs', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantListLots', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel', 'rgbP2pList', 'rgbP2pBuyPrepare', 'rgbP2pSaleSign', 'rgbP2pBuySign', 'rgbP2pSaleCommit', 'rgbP2pBuyAccept', 'rgbP2pSaleFinish', 'rgbP2pCancel'];
 const RGB_METHODS = ['rgbInvoice', 'rgbPay', ...SWAP_METHODS];
 const SWAP_SIZE_VB = 320;
 /** Steps that move this wallet's tokens: stopped while another copy of this wallet saved newer RGB data. */
 // (receiving and buying too: tokens taken in here would be missing from the newer copy, and this copy couldn't back them up)
-const MOVES_TOKENS = ['rgbFreeSpare', 'rgbInvoice', 'rgbPay', 'rgbBuyPrepare', 'rgbBuySign', 'rgbSalePrepare', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantListLots', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel'];
+const MOVES_TOKENS = ['rgbFreeSpare', 'rgbInvoice', 'rgbPay', 'rgbBuyPrepare', 'rgbBuySign', 'rgbSalePrepare', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantListLots', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel', 'rgbP2pBuyPrepare', 'rgbP2pSaleSign', 'rgbP2pBuySign', 'rgbP2pSaleCommit', 'rgbP2pBuyAccept', 'rgbP2pSaleFinish', 'rgbP2pCancel'];
+/** P2P swap steps that already follow from one you approved (UniSat's flow): they run as soon as they're ready, no button. */
+export const AUTO_RUN = ['rgbP2pSaleCommit', 'rgbP2pBuyAccept', 'rgbP2pSaleFinish', 'rgbP2pCancel'];
 /** Kept on top of a purchase's own cost when topping up the RGB balance (the exact fee depends on the coins). */
 const TOP_UP_MARGIN = 1000;
-const BUYS = ['rgbBuyPrepare', 'rgbInstantBuy', 'rgbInstantBuyMany'];
+const BUYS = ['rgbBuyPrepare', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbP2pBuyPrepare'];
 /** A purchase the RGB balance can't pay: how much to add from the Bitcoin balance (null when it can). */
 export function topUpFor(r, cost) {
   // a purchase also pays from coins not confirmed yet (the change of this wallet's own moves and purchases, bitcoin
@@ -83,7 +85,7 @@ export class ApprovalController {
       const once = (fn) => {
         if (a.prep || a.prepBusy || (a.prepErr && (sync.syncing || a.errGen === sync.gen))) return;
         a.prepBusy = true; a.prepErr = null;
-        fn().then((b) => { a.prep = b; }).catch((e) => { a.prepErr = friendly(e?.message || e); a.errGen = sync.gen; }).finally(() => { a.prepBusy = false; app.render(); });
+        fn().then((b) => { a.prep = b; if (AUTO_RUN.includes(a.method) && !a.autoRan && !this.state.busy) { a.autoRan = true; setTimeout(() => this.approve(), 0); } }).catch((e) => { a.prepErr = friendly(e?.message || e); a.errGen = sync.gen; }).finally(() => { a.prepBusy = false; app.render(); });
       };
       const P = a.params || {};
       const trading = a.method === 'inscribeTransfer' && (P.options?.account === 'trade' || P.options?.account === 'shielded');
@@ -330,6 +332,22 @@ export class ApprovalController {
         if ((!e || e.role !== 'seller') && P.sellerOutpoint) return { ...base, fee, rate, vb, stage: 'ready', fromOutput: true };
         if (!e || e.role !== 'seller') throw new Error('This wallet has no Instant listing with that id.');
         return { ...base, fee: e.stage === 'ready' ? fee : 0, rate, vb, stage: e.stage };
+      }
+      if (m.startsWith('rgbP2p')) {
+        if (!r.service.canP2p) throw new Error('This MASKED version can\'t trade with other wallets yet. Update MASKED.');
+        if (m === 'rgbP2pList' || m === 'rgbP2pSaleSign') {
+          if (!asset) throw new Error('You don\'t hold this token in RGB.');
+          if (Number(o.amount) > r.bal(asset).spendable) throw new Error(`You can sell up to ${r.amount(asset, r.bal(asset).spendable)} ${asset.ticker}.`);
+          return { ...base, p2p: true };
+        }
+        if (m === 'rgbP2pBuyPrepare') {
+          const rate = P.feeRate || Number(r.fee());
+          const fee = Math.max(500, Math.ceil(rate * txVbytes([P2TR_SCRIPT, P2TR_SCRIPT], [OPRET_SCRIPT, P2TR_SCRIPT, P2TR_SCRIPT])));
+          return { ...base, fee, rate, p2p: true, topUp: topUpFor(r, base.price + fee) };
+        }
+        const stored = r.service.swapStore('p2p').get(P.offerId);
+        if (!stored && m !== 'rgbP2pCancel') throw new Error('This wallet has no part in that trade (or it already finished).');
+        return { ...base, p2p: true, fee: stored?.feeSats ? Number(stored.feeSats) : null };
       }
       if (m === 'rgbSalePrepare') {
         if (!asset) throw new Error('You don\'t hold this token in RGB.');
@@ -639,6 +657,28 @@ export class ApprovalController {
         await this.rgbBackedUp(r).catch(() => {});
         return out;
       });
+      // wallet-to-wallet swaps in UniSat's P2P flow (2.31)
+      case 'rgbP2pList': return this.rgbBusy(async () => { prepared(''); const o = a.params.offer; return app.rgb.service.p2pListable({ assetId: o.assetId, amount: o.amount, partial: !!a.params.partial }); });
+      case 'rgbP2pBuyPrepare': return this.rgbBusy(async () => {
+        const b = prepared(''), r = app.rgb, P = a.params, o = P.offer;
+        await this.rgbBackedUp(r);
+        const out = await r.service.p2pBuyPrepare({ tradeId: P.offerId, assetId: o.assetId, amount: o.amount, priceSats: o.priceSats, seller: P.seller, partial: !!P.partial, sealAmount: P.sealAmount ?? null, feeRate: b.rate });
+        await this.rgbBackedUp(r);
+        if (!r.canShareInvoice) throw new Error('Save your RGB backup first (Settings → RGB backup), then try again.');
+        return out;
+      });
+      case 'rgbP2pSaleSign': return this.rgbBusy(async () => {
+        prepared(''); const r = app.rgb, P = a.params, o = P.offer;
+        await this.rgbBackedUp(r);
+        const out = await r.service.p2pSaleSign({ tradeId: P.offerId, assetId: o.assetId, amount: o.amount, priceSats: o.priceSats, invoice: P.invoice, draftPsbtHex: P.draftPsbtHex });
+        await this.rgbBackedUp(r).catch(() => {});
+        return out;
+      });
+      case 'rgbP2pBuySign': return this.rgbBusy(async () => { prepared(''); const P = a.params; return app.rgb.service.p2pBuySign({ tradeId: P.offerId, coloredPsbtHex: P.coloredPsbtHex, txid: P.txid }); });
+      case 'rgbP2pSaleCommit': return this.rgbBusy(async () => { prepared(''); const P = a.params; return app.rgb.service.p2pSaleCommit({ tradeId: P.offerId, buyerSignedPsbtHex: P.buyerSignedPsbtHex }); });
+      case 'rgbP2pBuyAccept': return this.rgbBusy(async () => { prepared(''); const r = app.rgb, P = a.params; const out = await r.service.p2pBuyAccept({ tradeId: P.offerId, commitment: P.commitment }); later(r); return out; });
+      case 'rgbP2pSaleFinish': return this.rgbBusy(async () => { prepared(''); const r = app.rgb; const out = await r.service.p2pSaleFinish({ tradeId: a.params.offerId }); await this.rgbBackedUp(r).catch(() => {}); later(r); return out; });
+      case 'rgbP2pCancel': return this.rgbBusy(async () => { prepared(''); return app.rgb.service.p2pCancel({ tradeId: a.params.offerId }); });
       case 'rgbSaleComplete': return this.rgbBusy(async () => {
         prepared(''); const r = app.rgb;
         const out = await r.service.completeSale(a.params);

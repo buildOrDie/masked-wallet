@@ -57,6 +57,8 @@ export class SignetWallet {
         wallet.setPayoutScript?.(this.payoutHex || null);
         // Instant purchases whose transfer is still to arrive (protocol 1.0: matched without the derived blinding)
         wallet.expectPurchases?.(Object.values(this.instantStore().all()).filter((e) => e?.role === 'buyer' && e.recipientId).map((e) => String(e.recipientId)));
+        // P2P buys (UniSat's flow): their token transfer waits for the seller's commitment before it's accepted
+        wallet.p2pHoldsFrom?.(this.swapStore('p2p'));
         if (backup) {
           if (typeof payload.rgbBackup !== 'string') throw new Error('Backup does not contain RGB state.');
           if (replace) {
@@ -249,6 +251,7 @@ export class SignetWallet {
       get: (id) => read()[String(id)] || null,
       set: (id, v) => { const m = read(); m[String(id)] = v; for (const [k, x] of Object.entries(m)) if (Date.now() - (x?.at || 0) > 7 * 86400_000) delete m[k]; write(m); },
       del: (id) => { const m = read(); delete m[String(id)]; write(m); },
+      all: () => read(),
     };
   }
   /** Instant listings and purchases, kept until done (listings last up to 30 days). */
@@ -344,6 +347,16 @@ export class SignetWallet {
   prepareSale(p) { return this.mutate((w) => w.prepareSale(p, this.swapStore('sold'))); }
   signBuy(p) { return this.mutate((w) => w.signBuy(p, this.swapStore('bought'))); }
   completeSale(p) { return this.mutate((w) => w.completeSale(p, this.swapStore('sold'))); }
+  // wallet-to-wallet swaps in UniSat's P2P flow (2.31)
+  get canP2p() { return !!this.wallet?.canP2p; }
+  p2pListable(p) { return this.exclusive(() => this.requireWallet().p2pListable(p)); }
+  p2pBuyPrepare(p) { return this.mutate((w) => w.p2pBuyPrepare(p, this.swapStore('p2p'))); }
+  p2pSaleSign(p) { return this.mutate((w) => w.p2pSaleSign(p, this.swapStore('p2p'))); }
+  p2pBuySign(p) { return this.mutate((w) => w.p2pBuySign(p, this.swapStore('p2p'))); }
+  p2pSaleCommit(p) { return this.mutate((w) => w.p2pSaleCommit(p, this.swapStore('p2p'))); }
+  p2pBuyAccept(p) { return this.mutate((w) => w.p2pBuyAccept(p, this.swapStore('p2p'))); }
+  p2pSaleFinish(p) { return this.mutate((w) => w.p2pSaleFinish(p, this.swapStore('p2p'))); }
+  p2pCancel(p) { return this.mutate((w) => w.p2pCancel(p, this.swapStore('p2p'))); }
   /** @param {string} url an https:// transfer server URL */
   checkProxy(url) { return this.exclusive(() => this.requireWallet().checkProxy(url)); }
   /** An NFT's image (data: URL) from the transfer servers, checked against its digest. Doesn't touch the wallet state. */

@@ -71,6 +71,30 @@ function swapParams(method, p) {
     if (!/^[0-9a-f]{64}:\d{1,5}$/.test(String(p.sellerOutpoint))) throw err(4000, 'sellerOutpoint must be txid:vout.');
     out.sellerOutpoint = String(p.sellerOutpoint);
   }
+  // wallet-to-wallet swaps in UniSat's P2P flow (2.31): PSBTs as hex, the commitment as a hex signature
+  const hexOf = (v, max, what) => { const x = str(v, max, what); if (!/^[0-9a-fA-F]+$/.test(x) || x.length % 2) throw err(4000, `${what} must be hex.`); return x.toLowerCase(); };
+  if (['rgbP2pList', 'rgbP2pBuyPrepare'].includes(method)) out.partial = p.partial === true;
+  if (method === 'rgbP2pBuyPrepare') {
+    const s = p.seller;
+    if (!s || typeof s !== 'object') throw err(4000, 'seller (the listing\'s RGB output) is required.');
+    if (!/^[0-9a-fA-F]{64}$/.test(String(s.sealTxid || '')) || !Number.isInteger(Number(s.sealVout)) || Number(s.sealVout) < 0 || !(Number(s.sealSatoshis) > 0) || !Number.isSafeInteger(Number(s.sealSatoshis))) throw err(4000, 'seller needs sealTxid, sealVout and sealSatoshis.');
+    const addr = String(s.address || '');
+    if (!/^[A-Za-z0-9]{14,100}$/.test(addr)) throw err(4000, 'seller.address must be a Bitcoin address.');
+    out.seller = { sealTxid: String(s.sealTxid).toLowerCase(), sealVout: Number(s.sealVout), sealSatoshis: Number(s.sealSatoshis), sealScriptPubKey: hexOf(s.sealScriptPubKey, 200, 'seller.sealScriptPubKey'), address: addr };
+    if (p.sealAmount != null) { if (!/^\d{1,20}$/.test(String(p.sealAmount))) throw err(4000, 'sealAmount must be a whole number.'); out.sealAmount = String(p.sealAmount); }
+    if (p.feeRate != null) { const f = Number(p.feeRate); if (!(f >= 1 && f <= 500)) throw err(4000, 'feeRate must be between 1 and 500 sat/vB.'); out.feeRate = f; }
+  }
+  if (method === 'rgbP2pSaleSign') {
+    const inv = str(p.invoice, 4000, 'invoice');
+    if (!/^rgb:/i.test(inv)) throw err(4000, 'invoice must be the buyer\'s RGB invoice.');
+    out.invoice = inv; out.draftPsbtHex = hexOf(p.draftPsbtHex, 200_000, 'draftPsbtHex');
+  }
+  if (method === 'rgbP2pBuySign') {
+    out.coloredPsbtHex = hexOf(p.coloredPsbtHex, 400_000, 'coloredPsbtHex');
+    if (p.txid != null) { if (!/^[0-9a-fA-F]{64}$/.test(String(p.txid))) throw err(4000, 'txid must be a transaction id.'); out.txid = String(p.txid).toLowerCase(); }
+  }
+  if (method === 'rgbP2pSaleCommit') out.buyerSignedPsbtHex = hexOf(p.buyerSignedPsbtHex, 400_000, 'buyerSignedPsbtHex');
+  if (method === 'rgbP2pBuyAccept') { const c = String(p.commitment ?? p.backendCommit ?? ''); if (!/^[0-9a-fA-F]{128}$/.test(c)) throw err(4000, 'commitment must be the seller\'s signature (hex).'); out.commitment = c.toLowerCase(); }
   if (method === 'rgbInstantBuy') {
     const l = p.listing;
     if (!l || typeof l !== 'object') throw err(4000, 'listing (the signed listing from the market) is required.');
@@ -309,6 +333,11 @@ export function makeHandler({ getPublic, getTrade, getSites, setSites, openAppro
         needConnected();
         return openApproval(origin, 'rgbSwapAvailable', { assetId: optAssetId(params.assetId) || (() => { throw err(4000, 'assetId is required.'); })() });
       case 'rgbBuyPrepare': case 'rgbSalePrepare': case 'rgbBuySign': case 'rgbSaleComplete': {
+        needConnected();
+        return openApproval(origin, method, swapParams(method, params));
+      }
+      // wallet-to-wallet swaps in UniSat's P2P flow: trades with UniSat wallets on P2P markets (2.31)
+      case 'rgbP2pList': case 'rgbP2pBuyPrepare': case 'rgbP2pSaleSign': case 'rgbP2pBuySign': case 'rgbP2pSaleCommit': case 'rgbP2pBuyAccept': case 'rgbP2pSaleFinish': case 'rgbP2pCancel': {
         needConnected();
         return openApproval(origin, method, swapParams(method, params));
       }

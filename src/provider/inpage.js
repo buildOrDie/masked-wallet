@@ -112,6 +112,24 @@
       buyInstantMany: (o = {}) => request('rgbInstantBuyMany', o),
       /** seller: { offerId, offer, feeRate? } → { stage, txid } (moves the signed output: an on-chain transaction) */
       cancelInstant: (o = {}) => request('rgbInstantCancel', o),
+      // wallet-to-wallet swaps in UniSat's P2P flow, with UniSat wallets too (2.31, docs/PROVIDER.md). Each call takes
+      // { offerId (the trade id), offer: { assetId, amount, priceSats }, network } and:
+      /** seller, listing: { partial? } → { sealTxid, sealVout, sealSatoshis, sealScriptPubKey, sealAmount, sellerAddress } */
+      p2pListable: (o = {}) => request('rgbP2pList', o),
+      /** buyer: { seller: { sealTxid, sealVout, sealSatoshis, sealScriptPubKey, address }, partial?, sealAmount?, feeRate? } → { invoice, recipientId, draftPsbtHex } */
+      p2pBuyPrepare: (o = {}) => request('rgbP2pBuyPrepare', o),
+      /** seller: { invoice, draftPsbtHex } → { transferId, makerSignedPsbtHex, coloredPsbtHex, txid } */
+      p2pSaleSign: (o = {}) => request('rgbP2pSaleSign', o),
+      /** buyer: { coloredPsbtHex, txid? } → { buyerSignedPsbt, txid } */
+      p2pBuySign: (o = {}) => request('rgbP2pBuySign', o),
+      /** seller (no approval screen): { buyerSignedPsbtHex } → { commitment, proxyTransferId, senderPublicKey, txid, buyerSignedPsbtHash } */
+      p2pSaleCommit: (o = {}) => request('rgbP2pSaleCommit', o),
+      /** buyer (no approval screen): { commitment } → { status, txid } */
+      p2pBuyAccept: (o = {}) => request('rgbP2pBuyAccept', o),
+      /** seller (no approval screen): {} → { txid } once the buyer accepted and the swap went out */
+      p2pSaleFinish: (o = {}) => request('rgbP2pSaleFinish', o),
+      /** either side, before the buyer accepts (no approval screen): {} → { cancelled } */
+      p2pCancel: (o = {}) => request('rgbP2pCancel', o),
     }),
     // events: accountsChanged, networkChanged, chainChanged, tradeAccountChanged
     on: (event, fn) => { if (!listeners.has(event)) listeners.set(event, new Set()); listeners.get(event).add(fn); },

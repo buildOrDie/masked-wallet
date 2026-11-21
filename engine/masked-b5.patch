@@ -11,10 +11,10 @@ index 884d686..e2896b5 100644
  rgb-strict-encoding = { version = "=1.0.5", default-features = false, features = [
      "bitcoin",
 diff --git a/bindings/wasm/src/lib.rs b/bindings/wasm/src/lib.rs
-index 51b6efd..d55126d 100644
+index 51b6efd..eaf8302 100644
 --- a/bindings/wasm/src/lib.rs
 +++ b/bindings/wasm/src/lib.rs
-@@ -635,6 +635,258 @@ impl WasmWallet {
+@@ -635,6 +635,349 @@ impl WasmWallet {
          to_js(&result)
      }
  
@@ -165,6 +165,97 @@ index 51b6efd..d55126d 100644
 +        Ok(())
 +    }
 +
++    /// P2P swap (UniSat's flow), seller: colour the buyer's draft `psbt` (hex or base64) for `amount` of
++    /// `assetId` to the buyer's blinded `invoice`; the asset change (if any) on output `changeVout`.
++    /// Returns `{ psbt, txid, transferId, senderPubkey }`, nothing posted yet.
++    #[wasm_bindgen(js_name = "colorP2pSwap")]
++    pub async fn color_p2p_swap(
++        &self,
++        online_js: JsValue,
++        psbt: &str,
++        asset_id: &str,
++        amount: u64,
++        invoice: &str,
++        change_vout: Option<u32>,
++        min_confirmations: u8,
++        sender_transport_endpoint: &str,
++    ) -> Result<JsValue, JsValue> {
++        let online: Online = serde_wasm_bindgen::from_value(online_js)
++            .map_err(|e| JsValue::from_str(&format!("Invalid Online object: {e}")))?;
++        let mut wallet = self.inner.borrow_mut();
++        let sale = wallet
++            .color_p2p_swap(online, psbt.to_string(), asset_id.to_string(), amount, invoice.to_string(), change_vout, min_confirmations, sender_transport_endpoint.to_string())
++            .await
++            .map_err(|e| JsValue::from_str(&e.to_string()))?;
++        to_js(&sale)
++    }
++
++    /// P2P swap, seller: post the consignment of `txid` (coloured by `colorP2pSwap`) to the buyer's proxy.
++    #[wasm_bindgen(js_name = "publishP2pSwap")]
++    pub async fn publish_p2p_swap(&self, online_js: JsValue, txid: &str) -> Result<(), JsValue> {
++        let online: Online = serde_wasm_bindgen::from_value(online_js)
++            .map_err(|e| JsValue::from_str(&format!("Invalid Online object: {e}")))?;
++        let mut wallet = self.inner.borrow_mut();
++        wallet.publish_p2p_swap(online, txid.to_string()).await.map_err(|e| JsValue::from_str(&e.to_string()))
++    }
++
++    /// P2P swap, seller: the commitment to the PSBT the buyer signed (hex, hashed as given), after `sendEnd`
++    /// registered the complete transaction. `{ signature, transferId, senderPubkey, txid, psbtHash }`.
++    #[wasm_bindgen(js_name = "p2pCommit")]
++    pub fn p2p_commit(&self, txid: &str, buyer_psbt_hex: &str) -> Result<JsValue, JsValue> {
++        let c = self.inner.borrow().p2p_commit(txid.to_string(), buyer_psbt_hex.to_string()).map_err(|e| JsValue::from_str(&e.to_string()))?;
++        to_js(&c)
++    }
++
++    /// P2P swap, buyer: the receives (recipient IDs) whose consignment is checked but not ACKed until
++    /// `releaseSwapHold`. Set it every time the wallet opens, before refreshing.
++    #[wasm_bindgen(js_name = "setSwapHolds")]
++    pub fn set_swap_holds(&self, ids_js: JsValue) -> Result<(), JsValue> {
++        let ids: Vec<String> = if ids_js.is_null() || ids_js.is_undefined() { vec![] } else {
++            serde_wasm_bindgen::from_value(ids_js).map_err(|e| JsValue::from_str(&format!("Invalid recipient IDs: {e}")))?
++        };
++        self.inner.borrow_mut().set_swap_holds(ids);
++        Ok(())
++    }
++
++    /// P2P swap, buyer: what a held receive gives once its consignment is checked
++    /// (`{ recipientId, assetId, amount, txid, transferId, senderPubkey }`), or null.
++    #[wasm_bindgen(js_name = "heldSwap")]
++    pub fn held_swap(&self, recipient_id: &str) -> Result<JsValue, JsValue> {
++        match self.inner.borrow().held_swap(recipient_id.to_string()) {
++            Some(h) => to_js(&h),
++            None => Ok(JsValue::NULL),
++        }
++    }
++
++    /// P2P swap, buyer: check the seller's commitment (hex `signature` over the held transaction and `psbtHash`,
++    /// the hash of the PSBT this wallet signed) and let the next refresh ACK the receive.
++    #[wasm_bindgen(js_name = "releaseSwapHold")]
++    pub fn release_swap_hold(&self, recipient_id: &str, signature: &str, psbt_hash: &str) -> Result<(), JsValue> {
++        self.inner
++            .borrow_mut()
++            .release_swap_hold(recipient_id.to_string(), signature.to_string(), psbt_hash.to_string())
++            .map_err(|e| JsValue::from_str(&e.to_string()))
++    }
++
++    /// P2P swap: `a` with the signatures of `b` added and every input finalized (base64).
++    #[wasm_bindgen(js_name = "p2pCompletePsbt")]
++    pub fn p2p_complete_psbt(a: &str, b: &str) -> Result<String, JsValue> {
++        rgb_lib_wasm::wallet::p2p_complete_psbt(a, b).map_err(|e| JsValue::from_str(&e.to_string()))
++    }
++
++    /// P2P swap: SHA-256 (hex) of a PSBT's bytes, given as hex.
++    #[wasm_bindgen(js_name = "p2pPsbtHash")]
++    pub fn p2p_psbt_hash(psbt_hex: &str) -> Result<String, JsValue> {
++        rgb_lib_wasm::wallet::p2p_psbt_hash(psbt_hex).map_err(|e| JsValue::from_str(&e.to_string()))
++    }
++
++    /// P2P swap: check a seller's commitment (all hex) to `txid` and `psbtHash` for `transferId`.
++    #[wasm_bindgen(js_name = "p2pVerifyCommit")]
++    pub fn p2p_verify_commit(sender_pubkey: &str, signature: &str, transfer_id: &str, txid: &str, psbt_hash: &str) -> bool {
++        rgb_lib_wasm::wallet::p2p_verify_commit(sender_pubkey, signature, transfer_id, txid, psbt_hash)
++    }
++
 +    /// A pre-signed listing was bought: mark its output spent (the caller checked it on chain).
 +    #[wasm_bindgen(js_name = "markOutpointSpent")]
 +    pub fn mark_outpoint_spent(&self, outpoint: &str) -> Result<bool, JsValue> {
@@ -273,7 +364,7 @@ index 51b6efd..d55126d 100644
      /// Send RGB assets (end): broadcast a signed PSBT. Returns an OperationResult JS object.
      #[wasm_bindgen(js_name = "sendEnd")]
      pub async fn send_end(
-@@ -763,6 +1015,56 @@ impl WasmWallet {
+@@ -763,6 +1106,56 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -330,7 +421,7 @@ index 51b6efd..d55126d 100644
      /// Drain all wallet funds (end): broadcast a signed PSBT. Returns the txid string.
      #[wasm_bindgen(js_name = "drainToEnd")]
      pub async fn drain_to_end(
-@@ -1074,6 +1376,22 @@ impl WasmWallet {
+@@ -1074,6 +1467,22 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -353,7 +444,7 @@ index 51b6efd..d55126d 100644
      /// Check if the wallet needs a backup. Returns true if modified since last backup.
      #[wasm_bindgen(js_name = "backupInfo")]
      pub fn backup_info(&self) -> Result<bool, JsValue> {
-@@ -1217,7 +1535,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
+@@ -1217,7 +1626,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
  /// Works before the witness transaction is broadcast. Takes the raw consignment
  /// bytes (strict-encoded, not base64), the witness transaction ID, and the Bitcoin network.
  ///
@@ -363,7 +454,7 @@ index 51b6efd..d55126d 100644
  #[wasm_bindgen(js_name = "validateConsignmentOffchain")]
  pub fn validate_consignment_offchain(
      consignment_bytes: &[u8],
-@@ -1235,3 +1554,43 @@ pub fn validate_consignment_offchain(
+@@ -1235,3 +1645,43 @@ pub fn validate_consignment_offchain(
      .map_err(|e| JsValue::from_str(&e.to_string()))?;
      to_js(&result)
  }
@@ -385,7 +476,7 @@ index 51b6efd..d55126d 100644
 +/// MASKED: the features of this engine build.
 +#[wasm_bindgen(js_name = "engineFeatures")]
 +pub fn engine_features() -> Vec<String> {
-+    vec!["swap".into(), "presign".into(), "proxy-v1".into(), "legacy-migration".into(), "legacy-consignments".into(), "legacy-backup".into()]
++    vec!["swap".into(), "presign".into(), "proxy-v1".into(), "p2p-swap".into(), "legacy-migration".into(), "legacy-consignments".into(), "legacy-backup".into()]
 +}
 +
 +#[wasm_bindgen(js_name = "inspectSwapConsignment")]
@@ -1090,10 +1181,10 @@ index c5c45b2..46cf640 100644
  pub(crate) mod offline;
  #[cfg(feature = "esplora")]
 diff --git a/src/wallet/offline.rs b/src/wallet/offline.rs
-index a3a9f46..a9943da 100644
+index a3a9f46..17942dd 100644
 --- a/src/wallet/offline.rs
 +++ b/src/wallet/offline.rs
-@@ -1312,9 +1312,62 @@ pub struct Wallet {
+@@ -1312,9 +1312,69 @@ pub struct Wallet {
      pub(crate) rgb_stock: std::rc::Rc<std::cell::RefCell<Option<crate::utils::MemStock>>>,
      pub(crate) vss_client: Option<super::vss::VssBackupClient>,
      pub(crate) last_vss_backup_error: std::cell::RefCell<Option<String>>,
@@ -1117,6 +1208,13 @@ index a3a9f46..a9943da 100644
 +    pub(crate) swap_lots: Vec<(u32, u64)>,
 +    /// MASKED: the lots of the colouring under way, from `color_swap` to `_prepare_rgb_psbt_wasm`.
 +    pub(crate) lots_now: Vec<crate::wallet::online::LotOut>,
++    /// MASKED: receives (recipient IDs) of P2P swap buys whose consignment is checked but not ACKed until the
++    /// seller's commitment is verified (`set_swap_holds`, `release_swap_hold`). Set every time the wallet opens.
++    pub(crate) swap_holds: HashSet<String>,
++    /// MASKED: held receives released by a verified seller commitment: recipient ID -> the txid committed to.
++    pub(crate) swap_releases: HashMap<String, String>,
++    /// MASKED: what a held receive's checked consignment gives (filled by the refresh).
++    pub(crate) held_swaps: HashMap<String, crate::wallet::online::HeldSwap>,
  }
  
  impl Wallet {
@@ -1156,7 +1254,7 @@ index a3a9f46..a9943da 100644
      /// Create a wallet and restore its latest durable IndexedDB snapshot, if one exists.
      ///
      /// The returned wallet is ready for use only after the IndexedDB read and snapshot
-@@ -1325,6 +1378,31 @@ impl Wallet {
+@@ -1325,6 +1385,31 @@ impl Wallet {
          let snapshot = super::idb_store::load_snapshot(&wallet.idb_key())
              .await
              .map_err(|details| Error::Persistence { details })?;
@@ -1188,7 +1286,7 @@ index a3a9f46..a9943da 100644
          if let Some(snapshot) = snapshot {
              wallet.idb_loaded = Some((snapshot.writer, snapshot.sequence));
              wallet
-@@ -1475,6 +1553,15 @@ impl Wallet {
+@@ -1475,6 +1560,18 @@ impl Wallet {
              },
              vss_client: None,
              last_vss_backup_error: std::cell::RefCell::new(None),
@@ -1201,10 +1299,13 @@ index a3a9f46..a9943da 100644
 +            swap_change_vout: None,
 +            swap_lots: vec![],
 +            lots_now: vec![],
++            swap_holds: HashSet::new(),
++            swap_releases: HashMap::new(),
++            held_swaps: HashMap::new(),
          })
      }
  
-@@ -1690,8 +1777,10 @@ impl Wallet {
+@@ -1690,8 +1787,10 @@ impl Wallet {
              None => rgb_allocations.as_deref().unwrap(),
          };
  
@@ -1216,7 +1317,7 @@ index a3a9f46..a9943da 100644
          allocatable.sort_by_key(|t| t.rgb_allocations.len() + t.pending_blinded as usize);
          match allocatable.first() {
              Some(mut selected) => {
-@@ -2618,7 +2707,7 @@ impl Wallet {
+@@ -2618,7 +2717,7 @@ impl Wallet {
          Ok(psbt.to_string())
      }
  
@@ -1225,7 +1326,7 @@ index a3a9f46..a9943da 100644
          let sign_options = sign_options.unwrap_or_default();
          let [colored, vanilla] = &self.signers;
          self.bdk_wallet
-@@ -4215,6 +4304,15 @@ pub(crate) mod address_reuse_tests {
+@@ -4215,6 +4314,18 @@ pub(crate) mod address_reuse_tests {
              rgb_stock: std::rc::Rc::new(std::cell::RefCell::new(None)),
              vss_client: None,
              last_vss_backup_error: std::cell::RefCell::new(None),
@@ -1238,11 +1339,14 @@ index a3a9f46..a9943da 100644
 +            swap_change_vout: None,
 +            swap_lots: vec![],
 +            lots_now: vec![],
++            swap_holds: HashSet::new(),
++            swap_releases: HashMap::new(),
++            held_swaps: HashMap::new(),
          }
      }
  
 diff --git a/src/wallet/online.rs b/src/wallet/online.rs
-index ca96b4a..635bbdf 100644
+index ca96b4a..097ac15 100644
 --- a/src/wallet/online.rs
 +++ b/src/wallet/online.rs
 @@ -4,6 +4,12 @@
@@ -1692,7 +1796,39 @@ index ca96b4a..635bbdf 100644
              error!(
                  self.logger,
                  "Consignment pays this recipient {} allocations, refusing it",
-@@ -5805,17 +6027,23 @@ impl Wallet {
+@@ -5288,6 +5510,31 @@ impl Wallet {
+             retention_grace = Some(grace);
+         }
+ 
++        // MASKED: a P2P swap buy is ACKed only once the seller has committed to the transaction the buyer signed
++        // (`release_swap_hold`): until then keep the checked consignment and what it gives, and wait
++        if self.swap_holds.contains(&recipient_id) && self.swap_releases.get(&recipient_id) != Some(&txid) {
++            let amount = received
++                .values()
++                .map(|a| match a {
++                    Assignment::Fungible(v) => *v,
++                    _ => 0,
++                })
++                .sum::<u64>();
++            self.held_swaps.insert(
++                recipient_id.clone(),
++                HeldSwap {
++                    recipient_id: recipient_id.clone(),
++                    asset_id: asset_id.clone(),
++                    amount,
++                    txid: txid.clone(),
++                    transfer_id: data.transfer_id.clone(),
++                    sender_pubkey: data.sender_pubkey.clone(),
++                },
++            );
++            debug!(self.logger, "P2P swap buy held until the seller commits");
++            return Ok(None);
++        }
++
+         updated_batch_transfer.txid = ActiveValue::Set(Some(txid.clone()));
+ 
+         let utxo_idx = match transfer.recipient_type {
+@@ -5805,17 +6052,23 @@ impl Wallet {
                      details: s!("consignment not found in memory"),
                  })?
                  .clone();
@@ -1719,7 +1855,7 @@ index ca96b4a..635bbdf 100644
                  let txo = self.database.get_txo(&outpoint)?.expect("txo must exist");
                  let mut txo: DbTxoActMod = txo.into();
                  txo.pending_witness = ActiveValue::Set(false);
-@@ -6446,7 +6674,7 @@ impl Wallet {
+@@ -6446,7 +6699,7 @@ impl Wallet {
          skip_sync: bool,
      ) -> Result<bool, Error> {
          if !skip_sync {
@@ -1728,7 +1864,7 @@ index ca96b4a..635bbdf 100644
          }
  
          let mut db_data = self.database.get_db_data(false)?;
-@@ -7053,6 +7281,10 @@ impl Wallet {
+@@ -7053,6 +7306,10 @@ impl Wallet {
          batch: bool,
      ) -> Result<(), Error> {
          for recipient in recipients {
@@ -1739,7 +1875,7 @@ index ca96b4a..635bbdf 100644
              let recipient_id = &recipient.recipient_id;
              let recipient_vk = verifying_key_from_bytes(&recipient.public_key)?;
              let derived = derive_shared(sender_sk, &recipient_vk)?;
-@@ -7590,6 +7822,246 @@ impl Wallet {
+@@ -7590,6 +7847,246 @@ impl Wallet {
          Ok(tx.compute_txid().to_string())
      }
  
@@ -1986,7 +2122,7 @@ index ca96b4a..635bbdf 100644
      /// Prepare the PSBT to inflate an IFA asset.
      pub async fn inflate_begin(
          &mut self,
-@@ -7782,6 +8254,7 @@ impl Wallet {
+@@ -7782,6 +8279,7 @@ impl Wallet {
              info_contents.extra_allocations,
              info_contents.change_utxo_idx,
              info_contents.btc_change,
@@ -1994,7 +2130,7 @@ index ca96b4a..635bbdf 100644
              TransferStatus::WaitingConfirmations,
              info_contents.min_confirmations,
              info_contents.expiration_timestamp,
-@@ -8119,6 +8592,7 @@ impl Wallet {
+@@ -8119,6 +8617,7 @@ impl Wallet {
                  info_contents.extra_allocations,
                  info_contents.change_utxo_idx,
                  info_contents.btc_change,
@@ -2002,7 +2138,7 @@ index ca96b4a..635bbdf 100644
                  TransferStatus::WaitingConfirmations,
                  info_contents.min_confirmations,
                  None,
-@@ -8838,7 +9312,7 @@ impl Wallet {
+@@ -8838,7 +9337,7 @@ impl Wallet {
          self.check_online(online)?;
  
          if !skip_sync {
@@ -2011,7 +2147,7 @@ index ca96b4a..635bbdf 100644
              self.flush().await?;
          }
  
-@@ -9321,6 +9795,7 @@ mod send_end_tests {
+@@ -9321,6 +9820,7 @@ mod send_end_tests {
              entropy: 0,
              operation_secret_key: Some(OPERATION_SEED.to_vec()),
              sender_transport_endpoint: None,
@@ -2019,7 +2155,7 @@ index ca96b4a..635bbdf 100644
          };
          let db = DbBatchTransfer {
              idx: 1,
-@@ -9427,6 +9902,7 @@ mod send_end_tests {
+@@ -9427,6 +9927,7 @@ mod send_end_tests {
              entropy: 0,
              operation_secret_key: Some(OPERATION_SEED.to_vec()),
              sender_transport_endpoint: Some(s!("rpc://127.0.0.1:1")),
@@ -2027,7 +2163,7 @@ index ca96b4a..635bbdf 100644
          }
      }
  
-@@ -10024,6 +10500,57 @@ mod send_end_tests {
+@@ -10024,6 +10525,128 @@ mod send_end_tests {
          assert!(kept.signed_psbt.is_none());
      }
  
@@ -2082,10 +2218,81 @@ index ca96b4a..635bbdf 100644
 +        assert!(info.lots.is_empty());
 +    }
 +
++    /// The P2P commitment is UniSat's: Ed25519 over SHA-256 of "rgb-buy-swap/commit/v1:{transfer}:{txid}:{hash}".
++    #[test]
++    fn p2p_commit_signs_and_verifies() {
++        let sk = crate::encryption::gen_ed25519();
++        let pk = hex::encode(sk.verifying_key().to_bytes());
++        let (tid, txid, hash) = ("tr1", "aa".repeat(32), "bb".repeat(32));
++        assert_eq!(p2p_commit_message(tid, &txid, &hash), format!("rgb-buy-swap/commit/v1:tr1:{txid}:{hash}"));
++        let sig = hex::encode(sign_ed25519(&sk, &sha256_digest(p2p_commit_message(tid, &txid, &hash).as_bytes())));
++        assert!(p2p_verify_commit(&pk, &sig, tid, &txid, &hash));
++        // anything else changed: refused
++        assert!(!p2p_verify_commit(&pk, &sig, "tr2", &txid, &hash));
++        assert!(!p2p_verify_commit(&pk, &sig, tid, &"ab".repeat(32), &hash));
++        assert!(!p2p_verify_commit(&pk, &sig, tid, &txid, &"cd".repeat(32)));
++        let other = hex::encode(crate::encryption::gen_ed25519().verifying_key().to_bytes());
++        assert!(!p2p_verify_commit(&other, &sig, tid, &txid, &hash));
++        assert!(!p2p_verify_commit(&pk, "zz", tid, &txid, &hash));
++        // the hash is of the bytes as given
++        assert_eq!(p2p_psbt_hash("00ff").unwrap(), hex::encode(sha256_digest(&[0x00, 0xff])));
++        assert!(p2p_psbt_hash("not hex").is_err());
++    }
++
++    /// Completing a P2P swap PSBT takes the other side's signatures and finalizes key-path inputs.
++    #[test]
++    fn p2p_complete_psbt_merges_and_finalizes() {
++        use bdk_wallet::bitcoin::{Amount, OutPoint as BOut, Sequence, TxIn, TxOut, Witness, absolute::LockTime, transaction::Version, taproot};
++        let tx = BdkTransaction {
++            version: Version::TWO,
++            lock_time: LockTime::ZERO,
++            input: (0..2u32).map(|v| TxIn { previous_output: BOut { txid: bdk_wallet::bitcoin::Txid::from_str(&"11".repeat(32)).unwrap(), vout: v }, script_sig: ScriptBuf::new(), sequence: Sequence::ENABLE_RBF_NO_LOCKTIME, witness: Witness::new() }).collect(),
++            output: vec![TxOut { value: Amount::ZERO, script_pubkey: ScriptBuf::new_op_return([]) }],
++        };
++        let base = Psbt::from_unsigned_tx(tx).unwrap();
++        let sig = |b: u8| taproot::Signature::from_slice(&[b; 64]).unwrap();
++        let mut a = base.clone();
++        a.inputs[0].tap_key_sig = Some(sig(1));
++        let mut b = base.clone();
++        b.inputs[1].tap_key_sig = Some(sig(2));
++        let done = Psbt::from_str(&p2p_complete_psbt(&a.to_string(), &b.to_string()).unwrap()).unwrap();
++        assert_eq!(done.inputs[0].final_script_witness.as_ref().unwrap().to_vec(), vec![vec![1u8; 64]]);
++        assert_eq!(done.inputs[1].final_script_witness.as_ref().unwrap().to_vec(), vec![vec![2u8; 64]]);
++        // an input nobody signed: refused
++        assert!(p2p_complete_psbt(&a.to_string(), &base.to_string()).is_err());
++        // another transaction: refused
++        let mut c = base.clone();
++        c.unsigned_tx.lock_time = LockTime::from_consensus(1);
++        let c = Psbt::from_unsigned_tx(c.unsigned_tx).unwrap();
++        assert!(p2p_complete_psbt(&a.to_string(), &c.to_string()).is_err());
++    }
++
++    /// A held P2P buy is released only by a valid commitment to the held transaction.
++    #[test]
++    fn swap_hold_release_needs_a_valid_commit() {
++        let (mut wallet, _) = setup();
++        let sk = crate::encryption::gen_ed25519();
++        let pk = hex::encode(sk.verifying_key().to_bytes());
++        let txid = "aa".repeat(32);
++        wallet.set_swap_holds(vec![s!("rid")]);
++        // nothing received yet
++        assert!(wallet.release_swap_hold(s!("rid"), s!("00"), "bb".repeat(32)).is_err());
++        wallet.held_swaps.insert(s!("rid"), HeldSwap { recipient_id: s!("rid"), asset_id: s!("a"), amount: 5, txid: txid.clone(), transfer_id: s!("tr"), sender_pubkey: pk });
++        let hash = "bb".repeat(32);
++        let sig = hex::encode(sign_ed25519(&sk, &sha256_digest(p2p_commit_message("tr", &txid, &hash).as_bytes())));
++        assert!(wallet.release_swap_hold(s!("rid"), sig.clone(), "cc".repeat(32)).is_err());
++        assert!(wallet.swap_releases.is_empty());
++        wallet.release_swap_hold(s!("rid"), sig, hash).unwrap();
++        assert_eq!(wallet.swap_releases.get("rid"), Some(&txid));
++        // a new list drops what it no longer names
++        wallet.set_swap_holds(vec![]);
++        assert!(wallet.swap_releases.is_empty() && wallet.held_swaps.is_empty());
++    }
++
      #[test]
      fn update_or_save_transfers_updates_outgoing_batch() {
          let (wallet, _) = setup();
-@@ -10051,6 +10578,7 @@ mod send_end_tests {
+@@ -10051,6 +10674,7 @@ mod send_end_tests {
                  info.extra_allocations.clone(),
                  info.change_utxo_idx,
                  None,
@@ -2093,7 +2300,7 @@ index ca96b4a..635bbdf 100644
                  TransferStatus::Initiated,
                  1,
                  None,
-@@ -12074,3 +12602,897 @@ mod bfa_tests {
+@@ -12074,3 +12698,1214 @@ mod bfa_tests {
          assert!(options(&format!(r#","evm_chains":{{"mainnet":{chain}}}"#)).is_err());
      }
  }
@@ -2300,7 +2507,7 @@ index ca96b4a..635bbdf 100644
 +        let needed_total = amount.checked_add(lots_total).ok_or(Error::Internal { details: s!("lots too large") })?;
 +        self.lots_now = lots;
 +        let colored = self
-+            ._color_swap_psbt(psbt, &asset_id, needed_total, recipient, unspents, &mut runtime, min_confirmations, operation_sk.to_bytes().to_vec(), sender_transport_endpoint, btc_change)
++            ._color_swap_psbt(psbt, &asset_id, needed_total, recipient, unspents, &mut runtime, min_confirmations, operation_sk.to_bytes().to_vec(), sender_transport_endpoint, btc_change, true)
 +            .await;
 +        self.lots_now = vec![];
 +        let psbt = colored?;
@@ -2337,6 +2544,7 @@ index ca96b4a..635bbdf 100644
 +        operation_secret_key: Vec<u8>,
 +        sender_transport_endpoint: Option<String>,
 +        btc_change: Option<BtcChange>,
++        donation: bool,
 +    ) -> Result<Psbt, Error> {
 +        let asset_id = asset_id.to_string();
 +        let asset = self.database.check_asset_exists(asset_id.clone())?;
@@ -2396,7 +2604,7 @@ index ca96b4a..635bbdf 100644
 +                &mut psbt,
 +                &mut transfer_info_map,
 +                &txid,
-+                true,
++                donation,
 +                unspents,
 +                runtime,
 +                min_confirmations,
@@ -2436,6 +2644,322 @@ index ca96b4a..635bbdf 100644
 +            .and_then(|a| a.consignment_bytes.get(&asset_id))
 +            .cloned()
 +            .ok_or(Error::UnknownTransfer { txid })
++    }
++}
++
++
++// ---- wallet-to-wallet swaps in UniSat's P2P flow ----
++// The buyer drafts the transaction (the seller's RGB output first, then its coins; output 0 an empty OP_RETURN, then
++// the price to the seller, an optional change output for the seller's rest, the buyer's change) and gives a
++// blinded invoice. The seller colours the draft (`color_p2p_swap`), signs its input and posts the consignment to the
++// buyer's proxy (`publish_p2p_swap`), without the transaction. The buyer checks the consignment (held, not ACKed:
++// `set_swap_holds`) and signs its coins. The seller completes the transaction (`p2p_complete_psbt`), registers it on
++// its proxy with `send_end` (the ACK releases it to the buyer) and commits to the exact PSBT the buyer signed
++// (`p2p_commit`). The buyer verifies the commitment (`release_swap_hold`) and ACKs on the next refresh; either
++// side broadcasts.
++
++/// What the seller signs to commit to the buyer's signed PSBT: "rgb-buy-swap/commit/v1:{transfer}:{txid}:{hash}",
++/// `hash` the SHA-256 (hex) of the buyer-signed PSBT's bytes. Ed25519 over its SHA-256, with the operation key whose
++/// public key the consignment was posted with.
++pub fn p2p_commit_message(transfer_id: &str, txid: &str, psbt_hash: &str) -> String {
++    format!("rgb-buy-swap/commit/v1:{transfer_id}:{txid}:{psbt_hash}")
++}
++
++/// SHA-256 (hex) of a PSBT's bytes, given as hex (hashed as is: never re-encoded).
++pub fn p2p_psbt_hash(psbt_hex: &str) -> Result<String, Error> {
++    let bytes = hex::decode(psbt_hex.trim()).map_err(|_| Error::Internal { details: s!("the PSBT must be hex") })?;
++    Ok(hex::encode(sha256_digest(&bytes)))
++}
++
++/// Check a seller's commitment (hex signature) to `txid` and `psbt_hash` for `transfer_id`, by `sender_pubkey` (hex).
++pub fn p2p_verify_commit(sender_pubkey: &str, signature: &str, transfer_id: &str, txid: &str, psbt_hash: &str) -> bool {
++    let (Ok(pk), Ok(sig)) = (hex::decode(sender_pubkey.trim()), hex::decode(signature.trim())) else {
++        return false;
++    };
++    let Ok(vk) = verifying_key_from_bytes(&pk) else {
++        return false;
++    };
++    let digest = sha256_digest(p2p_commit_message(transfer_id, txid, psbt_hash).as_bytes());
++    crate::encryption::verify_ed25519(&vk, &digest, &sig)
++}
++
++/// A P2P swap sale coloured by the seller.
++#[derive(Debug, Clone, Serialize, Deserialize)]
++#[cfg_attr(feature = "camel_case", serde(rename_all = "camelCase"))]
++pub struct P2pSale {
++    /// the coloured PSBT, unsigned (base64)
++    pub psbt: String,
++    /// its txid
++    pub txid: String,
++    /// the transfer's ID on the buyer's proxy
++    pub transfer_id: String,
++    /// the operation's public key (hex), that the commitment is signed with
++    pub sender_pubkey: String,
++}
++
++/// A seller's commitment to the buyer's signed PSBT.
++#[derive(Debug, Clone, Serialize, Deserialize)]
++#[cfg_attr(feature = "camel_case", serde(rename_all = "camelCase"))]
++pub struct P2pCommit {
++    /// Ed25519 signature, hex
++    pub signature: String,
++    /// the transfer's ID on the buyer's proxy
++    pub transfer_id: String,
++    /// the seller's operation public key (hex)
++    pub sender_pubkey: String,
++    /// the swap transaction
++    pub txid: String,
++    /// SHA-256 (hex) of the buyer-signed PSBT's bytes
++    pub psbt_hash: String,
++}
++
++/// A P2P swap buy whose consignment is checked and held until the seller commits.
++#[derive(Debug, Clone, Serialize, Deserialize)]
++#[cfg_attr(feature = "camel_case", serde(rename_all = "camelCase"))]
++pub struct HeldSwap {
++    /// the receive (recipient ID)
++    pub recipient_id: String,
++    /// the asset
++    pub asset_id: String,
++    /// the amount the consignment gives this wallet
++    pub amount: u64,
++    /// the transaction it is anchored to
++    /// the swap transaction
++    pub txid: String,
++    /// the transfer's ID on the buyer's proxy
++    pub transfer_id: String,
++    /// the seller's operation public key (hex)
++    pub sender_pubkey: String,
++}
++
++/// `a` with the signatures of `b` added (the same unsigned transaction), and every input that has a key-path
++/// taproot signature or one P2WPKH signature finalized.
++pub fn p2p_complete_psbt(a: &str, b: &str) -> Result<String, Error> {
++    use bdk_wallet::bitcoin::Witness;
++    let mut pa = Psbt::from_str(a.trim())?;
++    let pb = Psbt::from_str(b.trim())?;
++    if pa.unsigned_tx.compute_txid() != pb.unsigned_tx.compute_txid() {
++        return Err(Error::Internal { details: s!("the two PSBTs are not the same transaction") });
++    }
++    for (i, (ia, ib)) in pa.inputs.iter_mut().zip(pb.inputs.iter()).enumerate() {
++        if ia.final_script_witness.is_none() {
++            if ib.final_script_witness.is_some() {
++                ia.final_script_witness = ib.final_script_witness.clone();
++                ia.final_script_sig = ib.final_script_sig.clone();
++            } else {
++                if ia.tap_key_sig.is_none() {
++                    ia.tap_key_sig = ib.tap_key_sig;
++                }
++                for (k, v) in &ib.partial_sigs {
++                    ia.partial_sigs.entry(*k).or_insert(*v);
++                }
++                if ia.witness_utxo.is_none() {
++                    ia.witness_utxo = ib.witness_utxo.clone();
++                }
++            }
++        }
++        if ia.final_script_witness.is_none() {
++            if let Some(sig) = ia.tap_key_sig {
++                ia.final_script_witness = Some(Witness::from_slice(&[sig.to_vec()]));
++            } else if ia.partial_sigs.len() == 1 {
++                let (pk, sig) = ia.partial_sigs.iter().next().map(|(k, v)| (*k, *v)).expect("one");
++                ia.final_script_witness = Some(Witness::from_slice(&[sig.to_vec(), pk.to_bytes()]));
++            } else {
++                return Err(Error::Internal { details: format!("input {i} is not signed") });
++            }
++        }
++        // a finalized input keeps only what a broadcast needs
++        ia.partial_sigs.clear();
++        ia.tap_key_sig = None;
++        ia.tap_script_sigs.clear();
++        ia.bip32_derivation.clear();
++        ia.tap_key_origins.clear();
++        ia.tap_internal_key = None;
++        ia.tap_merkle_root = None;
++        ia.sighash_type = None;
++        ia.redeem_script = None;
++        ia.witness_script = None;
++    }
++    Ok(pa.to_string())
++}
++
++impl Wallet {
++    /// The seller's half of a P2P swap: colour the buyer's `psbt` (hex or base64) for `amount` of `asset_id` to
++    /// `invoice`, the buyer's blinded invoice (protocol 1.0: transport endpoints, a public key and an expiration).
++    /// Input 0 must be this wallet's output holding the asset, output 0 an empty OP_RETURN. The asset change, if
++    /// any, goes to output `change_vout` (one of this wallet's outputs). Not posted yet: see `publish_p2p_swap`.
++    #[allow(clippy::too_many_arguments)]
++    pub async fn color_p2p_swap(
++        &mut self,
++        online: Online,
++        psbt: String,
++        asset_id: String,
++        amount: u64,
++        invoice: String,
++        change_vout: Option<u32>,
++        min_confirmations: u8,
++        sender_transport_endpoint: String,
++    ) -> Result<P2pSale, Error> {
++        info!(self.logger, "P2P swap (colour) for {asset_id}...");
++        if amount == 0 {
++            return Err(Error::InvalidAmountZero);
++        }
++        let raw = psbt.trim();
++        let psbt = match hex::decode(raw) {
++            Ok(bytes) => Psbt::deserialize(&bytes).map_err(|e| Error::Internal { details: format!("not a PSBT: {e}") })?,
++            Err(_) => Psbt::from_str(raw)?,
++        };
++        let outputs = &psbt.unsigned_tx.output;
++        if outputs.is_empty() || !outputs[0].script_pubkey.is_op_return() || outputs[0].value.to_sat() != 0 {
++            return Err(Error::Internal { details: s!("swap PSBT: output 0 must be an empty OP_RETURN") });
++        }
++        if psbt.inputs.iter().any(|i| i.witness_utxo.is_none() && i.non_witness_utxo.is_none()) {
++            return Err(Error::Internal { details: s!("swap PSBT: an input has no amount") });
++        }
++        let (_fee_rate, unspents, _input_unspents, mut runtime) = self._get_transfer_begin_data(online, 1)?;
++        let asset = self.database.check_asset_exists(asset_id.clone())?;
++        self.check_schema_support(&asset.schema)?;
++        if !matches!(asset.schema, AssetSchema::Nia | AssetSchema::Ifa) {
++            return Err(Error::InvalidAssignment);
++        }
++        let chainnet: ChainNet = self.bitcoin_network().into();
++        let d = Invoice::new(invoice.trim().to_string())?.invoice_data();
++        if d.transport_endpoints.is_empty() {
++            return Err(Error::InvalidTransportEndpoint { details: s!("the buyer's invoice has no transport endpoint") });
++        }
++        let operation_sk = crate::encryption::gen_ed25519();
++        let sender_pubkey = hex::encode(operation_sk.verifying_key().to_bytes());
++        let r = Recipient {
++            recipient_id: d.recipient_id.clone(),
++            witness_data: None,
++            assignment: Assignment::Fungible(amount),
++            transport_endpoints: d.transport_endpoints.clone(),
++            public_key: d.public_key.clone(),
++            encryption: d.encryption,
++            expiration_timestamp: d.expiration_timestamp,
++        };
++        let mut vout = 0;
++        let mut witness_recipients = vec![];
++        let recipient = self
++            ._parse_recipient(&r, asset.schema, chainnet, &operation_sk, now().unix_timestamp(), &mut witness_recipients, &mut vout, false)
++            .await
++            .map_err(|e| match e {
++                Error::InvalidRecipientData { .. } => Error::InvalidRecipientData { details: s!("a P2P swap pays a blinded invoice") },
++                e => e,
++            })?;
++        if !matches!(recipient.local_recipient_data, LocalRecipientData::Blind(_)) {
++            return Err(Error::InvalidRecipientData { details: s!("a P2P swap pays a blinded invoice") });
++        }
++        let (_invoice_id, transfer_id) = recipient.proxy_ids(&sender_pubkey);
++        self.swap_change_vout = change_vout;
++        let colored = self
++            ._color_swap_psbt(psbt, &asset_id, amount, recipient, unspents, &mut runtime, min_confirmations, operation_sk.to_bytes().to_vec(), Some(sender_transport_endpoint), None, false)
++            .await;
++        self.swap_change_vout = None;
++        let colored = colored?;
++        // the seller's own RGB output must be input 0 (the buyer's draft puts it there)
++        let first = Outpoint::from(colored.unsigned_tx.input[0].previous_output);
++        if self.database.get_txo(&first)?.is_none() {
++            return Err(Error::Internal { details: s!("swap PSBT: input 0 is not this wallet's RGB output") });
++        }
++        let txid = colored.unsigned_tx.compute_txid().to_string();
++        info!(self.logger, "P2P swap (colour) completed");
++        Ok(P2pSale { psbt: colored.to_string(), txid, transfer_id, sender_pubkey })
++    }
++
++    /// Post the consignment of a P2P swap coloured by `color_p2p_swap` to the buyer's proxy, before the transaction
++    /// is complete (it is registered later by `send_end`, which then posts nothing again).
++    pub async fn publish_p2p_swap(&mut self, online: Online, txid: String) -> Result<(), Error> {
++        self.check_online(online)?;
++        let artifacts = self.transfer_artifacts.get(&txid).ok_or(Error::UnknownTransfer { txid: txid.clone() })?;
++        let info = artifacts.batch_info.clone().ok_or(Error::Internal { details: s!("missing batch info in transfer artifacts") })?;
++        if info.donation {
++            return Err(Error::Internal { details: s!("not a P2P swap") });
++        }
++        let mut asset_infos = artifacts.asset_infos.clone();
++        let consignment_bytes = artifacts.consignment_bytes.clone();
++        let seed: [u8; 32] = info
++            .operation_secret_key
++            .clone()
++            .and_then(|s| s.try_into().ok())
++            .ok_or_else(|| Error::Internal { details: s!("missing operation secret key") })?;
++        let sender_sk = ed25519_from_seed(&seed);
++        let sender_pubkey_hex = hex::encode(sender_sk.verifying_key().to_bytes());
++        let endpoint = info.sender_transport_endpoint.clone().ok_or_else(|| Error::Internal { details: s!("missing sender transport endpoint") })?;
++        let mut result = Ok(());
++        for (asset_id, info_asset) in asset_infos.iter_mut() {
++            let bytes = consignment_bytes.get(asset_id).ok_or(Error::Internal { details: s!("missing consignment bytes") })?;
++            let hash = hex::encode(sha256_digest(bytes));
++            result = self
++                .post_transfer_data(&mut info_asset.recipients, bytes, &sender_sk, &sender_pubkey_hex, &endpoint, &hash, false)
++                .await;
++            if result.is_err() {
++                break;
++            }
++        }
++        // keep the used flags: `send_end` doesn't post to the same endpoints again
++        self.transfer_artifacts.get_mut(&txid).expect("checked above").asset_infos = asset_infos;
++        self.flush().await?;
++        result
++    }
++
++    /// The seller's commitment to the PSBT the buyer signed (`buyer_psbt_hex`, hashed as given) of the P2P swap
++    /// `txid`, signed with the operation key. Call it after `send_end` registered the complete transaction.
++    pub fn p2p_commit(&self, txid: String, buyer_psbt_hex: String) -> Result<P2pCommit, Error> {
++        let bytes = hex::decode(buyer_psbt_hex.trim()).map_err(|_| Error::Internal { details: s!("the PSBT must be hex") })?;
++        let buyer = Psbt::deserialize(&bytes).map_err(|e| Error::Internal { details: format!("not a PSBT: {e}") })?;
++        if buyer.unsigned_tx.compute_txid().to_string() != txid {
++            return Err(Error::Internal { details: s!("the buyer signed another transaction") });
++        }
++        let artifacts = self.transfer_artifacts.get(&txid).ok_or(Error::UnknownTransfer { txid: txid.clone() })?;
++        if artifacts.signed_psbt.is_none() {
++            return Err(Error::Internal { details: s!("register the complete transaction first (send_end)") });
++        }
++        let info = artifacts.batch_info.clone().ok_or(Error::Internal { details: s!("missing batch info in transfer artifacts") })?;
++        let seed: [u8; 32] = info
++            .operation_secret_key
++            .clone()
++            .and_then(|s| s.try_into().ok())
++            .ok_or_else(|| Error::Internal { details: s!("missing operation secret key") })?;
++        let sk = ed25519_from_seed(&seed);
++        let sender_pubkey = hex::encode(sk.verifying_key().to_bytes());
++        let mut ids = vec![];
++        for a in artifacts.asset_infos.values() {
++            for r in &a.recipients {
++                ids.push(r.proxy_ids(&sender_pubkey).1);
++            }
++        }
++        let [transfer_id] = ids.as_slice() else {
++            return Err(Error::Internal { details: s!("a P2P swap has one recipient") });
++        };
++        let psbt_hash = hex::encode(sha256_digest(&bytes));
++        let digest = sha256_digest(p2p_commit_message(transfer_id, &txid, &psbt_hash).as_bytes());
++        let signature = hex::encode(sign_ed25519(&sk, &digest));
++        Ok(P2pCommit { signature, transfer_id: transfer_id.clone(), sender_pubkey, txid, psbt_hash })
++    }
++
++    /// Receives (recipient IDs) of P2P swap buys: their consignment is checked by the refresh but not ACKed until
++    /// `release_swap_hold`. The list lives in memory; MASKED sets it every time it opens the wallet, before refreshing.
++    pub fn set_swap_holds(&mut self, recipient_ids: Vec<String>) {
++        self.swap_holds = recipient_ids.into_iter().collect();
++        self.swap_releases.retain(|k, _| self.swap_holds.contains(k));
++        self.held_swaps.retain(|k, _| self.swap_holds.contains(k));
++    }
++
++    /// What the held receive `recipient_id` gives, once the refresh has checked its consignment.
++    pub fn held_swap(&self, recipient_id: String) -> Option<HeldSwap> {
++        self.held_swaps.get(&recipient_id).cloned()
++    }
++
++    /// Let the next refresh ACK the held receive `recipient_id`, once the seller's commitment (`signature`, hex) to
++    /// the held transaction and to `psbt_hash` (the PSBT this wallet signed) checks out.
++    pub fn release_swap_hold(&mut self, recipient_id: String, signature: String, psbt_hash: String) -> Result<(), Error> {
++        let held = self.held_swaps.get(&recipient_id).ok_or(Error::Internal { details: s!("the seller's transfer hasn't been received and checked yet") })?;
++        if !p2p_verify_commit(&held.sender_pubkey, &signature, &held.transfer_id, &held.txid, psbt_hash.trim()) {
++            return Err(Error::Internal { details: s!("the seller's commitment is not valid") });
++        }
++        self.swap_releases.insert(recipient_id, held.txid.clone());
++        Ok(())
 +    }
 +}
 +
@@ -2622,7 +3146,7 @@ index ca96b4a..635bbdf 100644
 +        };
 +        let operation_sk = crate::encryption::gen_ed25519();
 +        let mut psbt = self
-+            ._color_swap_psbt(psbt, &asset_id, amount, recipient, unspents, &mut runtime, min_confirmations, operation_sk.to_bytes().to_vec(), None, None)
++            ._color_swap_psbt(psbt, &asset_id, amount, recipient, unspents, &mut runtime, min_confirmations, operation_sk.to_bytes().to_vec(), None, None, true)
 +            .await?;
 +        let template_txid = psbt.unsigned_tx.compute_txid().to_string();
 +        let artifacts = self.transfer_artifacts.remove(&template_txid);

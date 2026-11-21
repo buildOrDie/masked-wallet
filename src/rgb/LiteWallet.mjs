@@ -888,6 +888,263 @@ export class LiteWallet {
     return { txid: String(r?.txid || txid) };
   }
 
+  // ---- Wallet-to-wallet swaps in UniSat's P2P flow (2.31): MASKED trades with UniSat wallets on P2P markets ----
+  // Seven steps, both sides online in turn: the buyer drafts the transaction and gives a blinded invoice; the seller
+  // colours it, signs its input and posts the token transfer to the buyer's transfer server (no transaction yet); the
+  // buyer checks the transfer (held, not accepted) and signs its bitcoin; the seller completes the transaction,
+  // registers it with its transfer server and commits to the exact PSBT the buyer signed (Ed25519, the transfer's
+  // key); the buyer checks that commitment and accepts, which releases the transaction; either side broadcasts.
+  // PSBTs cross as hex (what UniSat uses); the engine takes base64.
+  get canP2p() { return this.canSwap && typeof this.wallet.colorP2pSwap === 'function' && typeof this.wallet.setSwapHolds === 'function'; }
+  requireP2p() { if (!this.canP2p) throw new Error('This MASKED build can\'t trade with other wallets yet. Update MASKED.'); }
+  /** Receives of P2P buys that wait for the seller's commitment before they're accepted (set on every open). */
+  p2pHolds(ids) { if (typeof this.wallet?.setSwapHolds === 'function') this.wallet.setSwapHolds([...new Set((ids || []).map(String))]); }
+  p2pHoldsFrom(store) {
+    let ids = [];
+    try { ids = Object.values(store?.all?.() || {}).filter((e) => e?.role === 'buyer' && e.recipientId && !e.done).map((e) => String(e.recipientId)); } catch { ids = []; }
+    this.p2pHolds(ids);
+  }
+  netCodec() { return btc.Address(this.net === 'Mainnet' ? btc.NETWORK : btc.TEST_NETWORK); }
+  scriptOfAddress(a) { try { return hex.encode(btc.OutScript.encode(this.netCodec().decode(String(a)))); } catch { throw new Error('The other side\'s address is not a valid address on this network.'); } }
+  addressOfScript(h) { return this.netCodec().encode(btc.OutScript.decode(hex.decode(String(h)))); }
+
+  /**
+   * Seller, listing: an RGB output to sell from (UniSat's buyers draft the transaction from it). It holds only this
+   * token and nothing pending; exactly `amount` unless `partial` (then the rest comes back to the same script).
+   * Returns the output, its script and sats, what it holds, and the address the price is paid to.
+   */
+  async p2pListable({ assetId, amount, partial = false }) {
+    this.requireP2p();
+    const online = this.requireOnline();
+    try { await this.wallet.sync(online); } catch { /* the last known outputs */ }
+    await this.requireInSync(assetId);
+    const unspents = plain(this.wallet.listUnspents(false)) || [];
+    let coin = exactCoinFor(unspents, assetId, amount, this.reserved);
+    if (!coin && partial) {
+      const want = BigInt(amount);
+      const only = unspents.filter((u) => {
+        if (!u.utxo?.colorable || u.utxo.exists === false) return false;
+        const o = u.utxo.outpoint, op = `${String(o.txid).toLowerCase()}:${o.vout}`;
+        const all = u.rgbAllocations || [];
+        return !this.reserved.has(op) && all.length && all.every((a) => a.assetId === assetId && a.settled && a.assignment?.Fungible != null);
+      }).map((u) => ({ u, held: (u.rgbAllocations || []).reduce((t, a) => t + BigInt(a.assignment.Fungible), 0n) })).filter((x) => x.held >= want)
+        .sort((a, b) => (a.held < b.held ? -1 : a.held > b.held ? 1 : 0))[0];
+      if (only) { const o = only.u.utxo.outpoint; coin = { outpoint: `${String(o.txid).toLowerCase()}:${o.vout}`, sats: String(only.u.utxo.btcAmount), held: String(only.held) }; }
+    }
+    if (!coin) throw new Error(partial
+      ? `No settled RGB output holds ${amount} of this token on its own. Wait for transfers to settle, or list an amount one output holds.`
+      : `To sell to other wallets, one RGB output must hold exactly ${amount} of this token and nothing else. List the amount one output holds, or turn on partial buys.`);
+    const info = await this.outpointInfo(coin.outpoint);
+    const payout = await this.payoutScript();
+    const [sealTxid, vout] = coin.outpoint.split(':');
+    return { sealTxid, sealVout: Number(vout), sealSatoshis: info.sats, sealScriptPubKey: info.script, sealAmount: String(coin.held ?? amount), sellerAddress: this.addressOfScript(payout) };
+  }
+
+  /** Buyer, step 1: a blinded invoice for the tokens and the draft transaction (the seller's output first). */
+  async p2pBuyPrepare({ tradeId, assetId, amount, priceSats, seller, partial = false, sealAmount = null, feeRate = 1 }, store) {
+    this.requireP2p();
+    const id = String(tradeId), o = { amount: BigInt(String(amount)), price: BigInt(String(priceSats)) };
+    const prev = store.get(id);
+    if (prev?.draftPsbtHex && prev.role === 'buyer') return { invoice: prev.invoice, recipientId: prev.recipientId, draftPsbtHex: prev.draftPsbtHex };
+    const sealOp = outpointOf(`${seller?.sealTxid}:${seller?.sealVout}`);
+    if (!sealOp || !/^[0-9a-f]{4,200}$/i.test(String(seller?.sealScriptPubKey || '')) || !(Number(seller?.sealSatoshis) > 0)) throw new Error('The listing is missing the seller\'s RGB output.');
+    if ((await this.ownOutpoints()).has(sealOp)) throw new Error('That listing is yours.');
+    const sellerScript = this.scriptOfAddress(seller.address);
+    const change = partial && sealAmount != null && BigInt(String(sealAmount)) > o.amount ? 600 : 0;
+    const r = await this.onchainReceive({ assetId: null, amount: Number(o.amount), durationSeconds: 86400, witness: false });
+    // held from now on: accepted only once the seller has committed to the transaction this wallet signs
+    store.set(id, { role: 'buyer', assetId: String(assetId), amount: String(o.amount), priceSats: String(o.price), recipientId: r.recipientId, batchTransferIdx: r.batchTransferIdx, invoice: r.invoice, at: Date.now() });
+    this.p2pHoldsFrom(store);
+    const back = await this.ownScript();
+    const outs = [OPRET_SCRIPT, sellerScript, ...(change ? [String(seller.sealScriptPubKey)] : []), back];
+    const { all, confirmed } = await this.btcCoins();
+    const pool = [...confirmed, ...all.filter((c) => !confirmed.some((x) => String(outpointOf(x.outpoint)) === String(outpointOf(c.outpoint))))]
+      .filter((c) => !c.is_spent).map((c) => ({ outpoint: String(outpointOf(c.outpoint)), sats: BigInt(String(c.txout?.value ?? 0)) })).filter((c) => c.outpoint !== 'null');
+    const rate = Math.max(1, Number(feeRate) || 1);
+    // UniSat's layout pays the seller's output's own sats to no one: they go to the network fee, so the buyer's coins
+    // only cover what's left of it
+    const sealSats = BigInt(Number(seller.sealSatoshis));
+    const pick = []; let got = 0n, fee = 0n, fromBuyer = 0n;
+    for (const c of pool) {
+      pick.push(c); got += c.sats;
+      fee = BigInt(Math.max(500, Math.ceil(rate * txVbytes([String(seller.sealScriptPubKey), ...pick.map(() => P2TR_SCRIPT)], outs))));
+      fromBuyer = fee > sealSats ? fee - sealSats : 0n;
+      if (got >= o.price + BigInt(change) + fromBuyer + 546n) break;
+    }
+    const left = got - o.price - BigInt(change) - fromBuyer;
+    fee = sealSats + got - o.price - BigInt(change) - left; // what the transaction leaves to the network
+    if (left < 546n) {
+      try { await this.wallet.failTransfers(this.requireOnline(), r.batchTransferIdx, false, true); } catch { /* it expires */ }
+      store.del(id); this.p2pHoldsFrom(store);
+      throw new Error(`Your RGB wallet needs about ${(o.price + BigInt(change) + fromBuyer + 546n).toLocaleString('en-US')} sats for this buy. Tap Add from Bitcoin under RGB balance on Home.`);
+    }
+    const ins = [{ outpoint: sealOp, sats: Number(seller.sealSatoshis), script: String(seller.sealScriptPubKey) }];
+    for (const c of pick) { const i = await this.outpointInfo(c.outpoint); ins.push({ outpoint: c.outpoint, sats: i.sats, script: i.script }); }
+    const outputs = [{ script: sellerScript, sats: Number(o.price) }, ...(change ? [{ script: String(seller.sealScriptPubKey), sats: change }] : []), { script: back, sats: Number(left) }];
+    const draft = this.lib.WasmWallet.newSwapPsbt(ins, outputs);
+    const draftPsbtHex = hex.encode(base64.decode(draft));
+    store.set(id, { ...store.get(id), draftPsbtHex, inputs: ins.map((x) => x.outpoint), outputs, changeAt: change ? 1 : -1, feeSats: String(fee), at: Date.now() });
+    await this.save();
+    return { invoice: r.invoice, recipientId: r.recipientId, draftPsbtHex };
+  }
+
+  /** Seller, step 2: colour the buyer's draft, sign this wallet's input, post the token transfer to the buyer. */
+  async p2pSaleSign({ tradeId, assetId, amount, priceSats, invoice, draftPsbtHex }, store) {
+    this.requireP2p();
+    const id = String(tradeId);
+    const prev = store.get(id);
+    if (prev?.role === 'seller' && prev.makerSignedPsbtHex) return { transferId: prev.transferId, makerSignedPsbtHex: prev.makerSignedPsbtHex, coloredPsbtHex: prev.coloredPsbtHex, txid: prev.txid };
+    const online = this.requireOnline();
+    await this.wallet.sync(online);
+    await this.requireInSync(assetId);
+    const inv = new this.lib.WasmInvoice(String(invoice || ''));
+    let d; try { d = plain(inv.invoiceData()); } finally { inv.free(); }
+    if (String(d.network).toLowerCase() !== this.net.toLowerCase()) throw new Error('The buyer\'s invoice is for another network.');
+    if (d.assignment?.Fungible != null && String(d.assignment.Fungible) !== String(amount)) throw new Error('The buyer\'s invoice asks for another amount.');
+    if (!/utxob:/.test(String(d.recipientId || ''))) throw new Error('The buyer\'s invoice must be a blinded one.');
+    const draft = base64.encode(hex.decode(String(draftPsbtHex || '')));
+    const ins = this.lib.WasmWallet.psbtOutpoints(draft).map(outpointOf);
+    const own = await this.ownOutpoints();
+    const mine = ins[0];
+    if (!mine || !own.has(mine)) throw new Error('The draft does not spend your RGB output first.');
+    if (ins.slice(1).some((x) => own.has(x))) throw new Error('The draft spends more of your outputs than the one you sell.');
+    if (this.reserved.has(mine)) throw new Error('That output is promised to an Instant listing.');
+    const tx = btc.Transaction.fromPSBT(base64.decode(draft), { allowUnknownOutputs: true });
+    const out = (i) => tx.getOutput(i);
+    const payout = await this.payoutScript();
+    if (tx.outputsLength < 2 || hex.encode(out(1).script) !== payout || out(1).amount < BigInt(String(priceSats))) throw new Error('The draft does not pay you the price.');
+    // the rest of the tokens (a partial buy): back to output 2, paid to the script of the output sold
+    const si = await this.outpointInfo(mine);
+    const changeVout = tx.outputsLength >= 3 && hex.encode(out(2).script) === String(si.script) ? 2 : null;
+    const unspents = plain(this.wallet.listUnspents(false)) || [];
+    const u = unspents.find((x) => `${String(x.utxo?.outpoint?.txid).toLowerCase()}:${x.utxo?.outpoint?.vout}` === mine);
+    const all = u?.rgbAllocations || [];
+    if (!all.length || all.some((a) => a.assetId !== assetId || !a.settled || a.assignment?.Fungible == null)) throw new Error('That RGB output also holds other tokens or pending transfers.');
+    const held = all.reduce((t, a) => t + BigInt(a.assignment.Fungible), 0n);
+    if (held < BigInt(String(amount)) || (held > BigInt(String(amount)) && changeVout == null)) throw new Error('The draft has no output for the rest of your tokens.');
+    const sale = plain(await this.wallet.colorP2pSwap(online, draft, String(assetId), BigInt(String(amount)), String(invoice), changeVout, 1, this.transport));
+    await this.save();
+    try { await this.wallet.publishP2pSwap(online, String(sale.txid)); } catch (e) {
+      try { this.wallet.abandonColoring?.(String(sale.txid)); await this.save(); } catch { /* a reload drops it */ }
+      throw new Error(`Couldn't send the token transfer to the buyer's transfer server: ${e?.message || e}`);
+    }
+    const signed = this.sign(String(sale.psbt));
+    const rec = { role: 'seller', assetId: String(assetId), amount: String(amount), priceSats: String(priceSats), txid: String(sale.txid), transferId: String(sale.transferId), senderPubkey: String(sale.senderPubkey), coloredPsbt: String(sale.psbt), makerSigned: signed, coloredPsbtHex: hex.encode(base64.decode(String(sale.psbt))), makerSignedPsbtHex: hex.encode(base64.decode(signed)), sellerOutpoint: mine, at: Date.now() };
+    store.set(id, rec);
+    await this.save();
+    return { transferId: rec.transferId, makerSignedPsbtHex: rec.makerSignedPsbtHex, coloredPsbtHex: rec.coloredPsbtHex, txid: rec.txid };
+  }
+
+  /** Buyer, step 3: check the seller's token transfer (held) and the transaction, then sign this wallet's bitcoin. */
+  async p2pBuySign({ tradeId, coloredPsbtHex, txid }, store) {
+    this.requireP2p();
+    const id = String(tradeId), s = store.get(id);
+    if (!s || s.role !== 'buyer') throw new Error('This wallet did not prepare that purchase.');
+    if (s.buyerSignedPsbtHex) return { buyerSignedPsbt: s.buyerSignedPsbtHex, txid: s.txid };
+    const psbt = base64.encode(hex.decode(String(coloredPsbtHex || '')));
+    const t = this.lib.WasmWallet.psbtTxid(psbt);
+    if (txid && String(txid) !== t) throw new Error('The seller\'s transaction doesn\'t match this trade.');
+    this.p2pHoldsFrom(store);
+    const online = this.requireOnline();
+    let held = this.wallet.heldSwap(String(s.recipientId));
+    for (let i = 0; !held && i < 3; i++) {
+      try { await this.wallet.refresh(online, null, [], false); } catch { /* checked below */ }
+      held = this.wallet.heldSwap(String(s.recipientId));
+      if (!held && i < 2) await new Promise((ok) => setTimeout(ok, 4000));
+    }
+    await this.save();
+    held = held && plain(held);
+    if (!held) throw new Error('The seller\'s token transfer hasn\'t arrived yet. Try again in a minute.');
+    if (String(held.txid) !== t) throw new Error('The seller\'s token transfer is for another transaction.');
+    if (String(held.assetId) !== s.assetId) throw new Error('The transfer is for another token than the offer.');
+    if (BigInt(String(held.amount)) !== BigInt(s.amount)) throw new Error(`The transfer gives you ${held.amount}, the offer says ${s.amount}.`);
+    // the same inputs, outputs and fee as the draft (output 0 now carries the RGB commitment)
+    // (the seller's change output may be paid to another script of the seller's)
+    const outs = s.outputs.map((x, k) => ({ script: k === s.changeAt ? null : x.script, sats: x.sats }));
+    this.lib.WasmWallet.verifySwapPsbt(psbt, s.inputs, outs, BigInt(s.feeSats));
+    const signed = this.sign(psbt);
+    const buyerSignedPsbtHex = hex.encode(base64.decode(signed));
+    store.set(id, { ...s, txid: t, buyerSignedPsbtHex, psbtHash: this.lib.WasmWallet.p2pPsbtHash(buyerSignedPsbtHex), at: Date.now() });
+    await this.save();
+    return { buyerSignedPsbt: buyerSignedPsbtHex, txid: t };
+  }
+
+  /** Seller, step 4: complete the transaction with the buyer's signatures, register it, commit to the buyer's PSBT. */
+  async p2pSaleCommit({ tradeId, buyerSignedPsbtHex }, store) {
+    this.requireP2p();
+    const id = String(tradeId), s = store.get(id);
+    if (!s || s.role !== 'seller') throw new Error('This wallet did not prepare that sale.');
+    if (s.commit) return s.commit;
+    const buyer = base64.encode(hex.decode(String(buyerSignedPsbtHex || '')));
+    if (this.lib.WasmWallet.psbtTxid(buyer) !== s.txid) throw new Error('The buyer signed a different transaction.');
+    const online = this.requireOnline();
+    if (!s.sent) {
+      const full = this.lib.WasmWallet.p2pCompletePsbt(s.makerSigned, buyer);
+      const r = plain(await this.wallet.sendEnd(online, full, true));
+      store.set(id, { ...s, sent: true, batchTransferIdx: r?.batchTransferIdx ?? null, at: Date.now() });
+      await this.save();
+    }
+    const c = plain(this.wallet.p2pCommit(s.txid, String(buyerSignedPsbtHex)));
+    const commit = { commitment: String(c.signature), proxyTransferId: String(c.transferId), senderPublicKey: String(c.senderPubkey), txid: String(c.txid), buyerSignedPsbtHash: String(c.psbtHash) };
+    store.set(id, { ...store.get(id), commit, at: Date.now() });
+    return commit;
+  }
+
+  /** Buyer, step 5: check the seller's commitment, accept the transfer (the transaction is then released and sent). */
+  async p2pBuyAccept({ tradeId, commitment }, store) {
+    this.requireP2p();
+    const id = String(tradeId), s = store.get(id);
+    if (!s || s.role !== 'buyer' || !s.psbtHash) throw new Error('Sign the purchase first.');
+    if (s.accepted) return { status: 'accepted', txid: s.txid };
+    this.p2pHoldsFrom(store);
+    if (!this.wallet.heldSwap(String(s.recipientId))) { try { await this.wallet.refresh(this.requireOnline(), null, [], false); } catch { /* checked below */ } }
+    // throws unless the seller signed exactly the held transaction and the PSBT this wallet signed
+    this.wallet.releaseSwapHold(String(s.recipientId), String(commitment || ''), s.psbtHash);
+    // checked: no longer held, so the refresh accepts it (now, or on the next one) and sends the released transaction
+    store.set(id, { ...s, accepted: true, done: true, at: Date.now() });
+    this.p2pHoldsFrom(store);
+    try { await this.wallet.refresh(this.requireOnline(), null, [], false); } catch { /* accepted on the next refresh */ }
+    await this.save();
+    return { status: 'accepted', txid: s.txid };
+  }
+
+  /** Seller, last step: the buyer accepted, the transaction goes out (this wallet's refresh sends it). Returns { txid }. */
+  async p2pSaleFinish({ tradeId }, store) {
+    this.requireP2p();
+    const id = String(tradeId), s = store.get(id);
+    if (!s || s.role !== 'seller' || !s.sent) throw new Error('This sale isn\'t ready to finish.');
+    const online = this.requireOnline();
+    for (let i = 0; i < 4; i++) {
+      try { await this.wallet.refresh(online, s.assetId, [], false); } catch { /* again */ }
+      const t = (plain(this.engineTransfers(s.assetId)) || []).find((x) => String(x?.txid || '') === s.txid);
+      const st = String(t?.status || '');
+      if (st === 'Failed') throw new Error('The buyer didn\'t accept in time: the sale was cancelled. Nothing was sent.');
+      if (st && !['WaitingCounterparty', 'Initiated'].includes(st)) { store.set(id, { ...s, done: true, at: Date.now() }); await this.save(); return { txid: s.txid }; }
+      if (i < 3) await new Promise((ok) => setTimeout(ok, 5000));
+    }
+    await this.save();
+    throw new Error('Waiting for the buyer to accept. Try again in a minute.');
+  }
+
+  /** Leave a P2P trade before it's accepted: the coloured sale or the purchase's invoice is dropped. */
+  async p2pCancel({ tradeId }, store) {
+    this.requireP2p();
+    const id = String(tradeId), s = store.get(id);
+    if (!s) return { cancelled: false };
+    if (s.accepted) throw new Error('This purchase is already accepted.');
+    const online = this.requireOnline();
+    if (s.role === 'seller') {
+      if (s.sent && s.batchTransferIdx != null) { try { await this.wallet.failTransfers(online, s.batchTransferIdx, false, false); } catch { /* it expires */ } }
+      else { try { this.wallet.abandonColoring?.(s.txid); } catch { /* a reload drops it */ } }
+    } else if (s.batchTransferIdx != null) {
+      try { await this.wallet.failTransfers(online, s.batchTransferIdx, false, true); } catch { /* it expires */ }
+    }
+    store.del(id);
+    this.p2pHoldsFrom(store);
+    await this.save();
+    return { cancelled: true };
+  }
+
   // ---- Instant listings: pre-signed once, bought with the seller offline (engine: presign_sale) ----
   // Seller: the tokens go to their own output first if needed (one transaction), then MASKED signs that output with
   // SIGHASH_SINGLE|ANYONECANPAY: valid only with output 0 paying the seller its price. The output stays reserved in
