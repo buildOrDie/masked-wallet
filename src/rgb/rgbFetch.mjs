@@ -39,6 +39,8 @@ export async function rgbFetch(input, init) {
     inflight.set(key, p);
     try { return answer(await p, url); } finally { inflight.delete(key); }
   }
+  const u = urlOf(input);
+  if (TIP_PATH.test(safePath(u))) return tipChecked(u, () => send(input, init));
   return send(input, init);
 }
 /**
@@ -111,7 +113,11 @@ async function fetchAndKeep(key, input, init, sender = send) {
     return kept;
   }
   tally(true);
-  const r = await sender(input, init);
+  let r = await sender(input, init);
+  // a block server that says "not confirmed" (or doesn't know the transaction) can be behind or wrong: the RGB
+  // engine then waits for a block forever ("waiting for a block" on tokens confirmed days ago). Checked once more on
+  // mempool.space before it's believed (2.31.3)
+  if (/\/status$/i.test(key)) r = await statusChecked(urlOf(input), r);
   const body = await r.arrayBuffer();
   const type = r.headers.get('content-type') || '';
   let keepMs = 0;
@@ -141,6 +147,64 @@ const answer = (e, url = '') => {
 };
 /** For tests: forget what was kept. */
 export function rgbCacheClear() { txCache.clear(); inflight.clear(); try { globalThis.caches?.delete(SHARED).catch(() => {}); } catch { /* none */ } }
+
+
+// ---- a second opinion for the answers that decide "confirmed": a transaction's status and the chain tip ----
+const TIP_PATH = /\/blocks\/tip\/height$/i;
+const safePath = (u) => { try { return new URL(u).pathname; } catch { return ''; } };
+/**
+ * mempool.space's Signet API for a Signet block server other than mempool.space, else ''. Signet only: on Mainnet a
+ * server the person set for privacy is never second-guessed (that would show mempool.space their transactions), and
+ * other test networks (Utexo's) aren't mempool.space's.
+ */
+export function referenceFor(u) {
+  let x; try { x = new URL(u); } catch { return ''; }
+  if (x.hostname === 'mempool.space') return '';
+  return /signet/i.test(x.hostname + x.pathname) ? 'https://mempool.space/signet/api' : '';
+}
+async function refGet(path, base) {
+  const r = await globalThis.fetch(base + path, { signal: AbortSignal.timeout(8000) });
+  return r.ok ? r : null;
+}
+/** An unconfirmed (or unknown) status from another server: mempool.space's answer instead, when it says confirmed. */
+async function statusChecked(u, r) {
+  const ref = referenceFor(u);
+  if (!ref) return r;
+  let confirmed = false;
+  const own = r.clone();
+  try { confirmed = r.ok && !!(await own.json())?.confirmed; } catch { confirmed = false; }
+  if (confirmed) return r;
+  const m = /\/tx\/([0-9a-f]{64})\/status$/i.exec(safePath(u));
+  if (!m) return r;
+  try {
+    const x = await refGet(`/tx/${m[1]}/status`, ref);
+    if (!x) return r;
+    const body = await x.arrayBuffer();
+    if (!JSON.parse(new TextDecoder().decode(body))?.confirmed) return r;
+    console.info('[MASKED] confirmed on mempool.space, not on', new URL(u).host, m[1]);
+    return new Response(body, { status: 200, headers: { 'content-type': 'application/json' } });
+  } catch { return r; }
+}
+let refTip = { base: '', at: 0, height: 0 };
+/** The chain tip: the higher of this server's and mempool.space's (asked at most every 30 s), so a server stuck behind
+ * the chain can't make confirmed transfers look unconfirmed. */
+async function tipChecked(u, own) {
+  const ref = referenceFor(u);
+  const r = await own();
+  if (!ref || !r.ok) return r;
+  const text = (await r.clone().text()).trim();
+  const mine = Number(text);
+  if (refTip.base !== ref || Date.now() - refTip.at > 30_000) {
+    try { const x = await refGet('/blocks/tip/height', ref); const h = x ? Number((await x.text()).trim()) : 0; if (h > 0) refTip = { base: ref, at: Date.now(), height: h }; } catch { /* this server's own answer */ }
+  }
+  if (refTip.base === ref && refTip.height > mine + 1) {
+    console.info('[MASKED] block server', new URL(u).host, 'is behind the chain:', mine, 'vs', refTip.height);
+    const out = new Response(String(refTip.height), { status: 200, headers: { 'content-type': 'text/plain' } });
+    Object.defineProperty(out, 'url', { value: u, configurable: true });
+    return out;
+  }
+  return r;
+}
 
 async function send(input, init) {
   await slot();

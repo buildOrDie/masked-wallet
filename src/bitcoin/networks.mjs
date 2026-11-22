@@ -9,7 +9,8 @@ export const NETWORKS = {
 export const ESPLORA = {
   main: ['https://mempool.space/api/', 'https://blockstream.info/api/'],
   // memproxy.inscribe.dev answers with CORS headers, so it needs no extra permission
-  signet: ['https://signet-api.maskedwallet.com/api/', 'https://mempool.space/signet/api/', 'https://memproxy.inscribe.dev/signet/api/', 'https://blockstream.info/signet/api/'],
+  // memproxy.inscribe.dev last: it was seen behind the chain (RGB transfers "waiting for a block" for days)
+  signet: ['https://signet-api.maskedwallet.com/api/', 'https://mempool.space/signet/api/', 'https://blockstream.info/signet/api/', 'https://memproxy.inscribe.dev/signet/api/'],
 };
 
 export const BROADCAST = {

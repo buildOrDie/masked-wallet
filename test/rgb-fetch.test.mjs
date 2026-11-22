@@ -57,7 +57,7 @@ test('transaction lookups are answered from memory: a transaction once, a confir
     return Response.json({ confirmed: true, block_height: 5 });
   };
   try {
-    const base = 'https://signet-api.example/api/tx/';
+    const base = 'https://esplora.example/api/tx/'; // not Signet: no second opinion here (tested below)
     for (let i = 0; i < 3; i++) {
       assert.deepEqual([...new Uint8Array(await (await rgbFetch(`${base}${tx}/raw`)).arrayBuffer())], [1, 2, 3]);
       assert.equal((await (await rgbFetch(`${base}${tx}/status`)).json()).confirmed, true);
@@ -72,7 +72,7 @@ test('transaction lookups are answered from memory: a transaction once, a confir
     assert.equal(other.url, `https://other-server.example/api/tx/${tx}/raw`);
     assert.equal(asked.filter((u) => u.endsWith(`${tx}/raw`)).length, 1, 'one request whichever server');
     // anything else is not kept
-    await rgbFetch('https://signet-api.example/api/blocks/tip/height'); await rgbFetch('https://signet-api.example/api/blocks/tip/height');
+    await rgbFetch('https://esplora.example/api/blocks/tip/height'); await rgbFetch('https://esplora.example/api/blocks/tip/height');
     assert.equal(asked.filter((u) => u.endsWith('/tip/height')).length, 2);
   } finally { globalThis.fetch = was; rgbCacheClear(); }
 });
@@ -98,4 +98,32 @@ test('an answer from memory carries its address (the engine stops dead on an emp
     assert.equal(a.url, u); assert.equal(b.url, u);
     assert.doesNotThrow(() => new URL(b.url));
   } finally { globalThis.fetch = real; }
+});
+
+test('Signet: a block server that says "not confirmed" or is behind the chain gets a second opinion from mempool.space', async () => {
+  const { rgbCacheClear, referenceFor } = await import('../src/rgb/rgbFetch.mjs');
+  rgbCacheClear();
+  assert.equal(referenceFor('https://memproxy.inscribe.dev/signet/api/blocks/tip/height'), 'https://mempool.space/signet/api');
+  assert.equal(referenceFor('https://mempool.space/signet/api/x'), '', 'mempool.space itself: no second opinion');
+  assert.equal(referenceFor('https://my-node.example/api/x'), '', 'Mainnet: the person\'s own server is never second-guessed');
+  assert.equal(referenceFor('https://esplora-api.utexo.com/x'), '', 'other test networks: none');
+  const was = globalThis.fetch, asked = [];
+  const tx = 'ef'.repeat(32), tx2 = '12'.repeat(32);
+  globalThis.fetch = async (url) => {
+    const u = String(url); asked.push(u);
+    if (u.startsWith('https://mempool.space/signet/api/tx/' + tx)) return Response.json({ confirmed: true, block_height: 330553 });
+    if (u.startsWith('https://mempool.space/signet/api/tx/' + tx2)) return Response.json({ confirmed: false });
+    if (u === 'https://mempool.space/signet/api/blocks/tip/height') return new Response('331000');
+    if (u.endsWith('/blocks/tip/height')) return new Response('330000');
+    if (u.endsWith('/status')) return Response.json({ confirmed: false });
+    return new Response('?', { status: 404 });
+  };
+  try {
+    const lag = 'https://memproxy.inscribe.dev/signet/api';
+    assert.equal((await (await rgbFetch(`${lag}/tx/${tx}/status`)).json()).confirmed, true, 'confirmed on mempool.space: believed');
+    assert.equal((await (await rgbFetch(`${lag}/tx/${tx2}/status`)).json()).confirmed, false, 'not confirmed anywhere: still not');
+    assert.equal((await (await rgbFetch(`${lag}/blocks/tip/height`)).text()).trim(), '331000', 'a tip behind the chain is replaced');
+    assert.equal((await (await rgbFetch(`${lag}/blocks/tip/height`)).text()).trim(), '331000');
+    assert.equal(asked.filter((u) => u === 'https://mempool.space/signet/api/blocks/tip/height').length, 1, 'mempool.space\'s tip asked at most every 30 s');
+  } finally { globalThis.fetch = was; rgbCacheClear(); }
 });
