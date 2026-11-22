@@ -11,10 +11,10 @@ index 884d686..e2896b5 100644
  rgb-strict-encoding = { version = "=1.0.5", default-features = false, features = [
      "bitcoin",
 diff --git a/bindings/wasm/src/lib.rs b/bindings/wasm/src/lib.rs
-index 51b6efd..eaf8302 100644
+index 51b6efd..8138d5d 100644
 --- a/bindings/wasm/src/lib.rs
 +++ b/bindings/wasm/src/lib.rs
-@@ -635,6 +635,349 @@ impl WasmWallet {
+@@ -635,6 +635,364 @@ impl WasmWallet {
          to_js(&result)
      }
  
@@ -163,6 +163,21 @@ index 51b6efd..eaf8302 100644
 +        };
 +        self.inner.borrow_mut().set_swap_lots(lots.into_iter().map(|l| (l.vout, l.amount)).collect());
 +        Ok(())
++    }
++
++    /// What keeps this wallet's unspent RGB outputs from being spent: `[{ outpoint, batchTransferIdx, txid, status,
++    /// kind: "spends"|"receives"|"invoice", assetId, amount, createdAt, expiration }]`.
++    #[wasm_bindgen(js_name = "outputLocks")]
++    pub fn output_locks(&self) -> Result<JsValue, JsValue> {
++        let l = self.inner.borrow().output_locks().map_err(|e| JsValue::from_str(&e.to_string()))?;
++        to_js(&l)
++    }
++
++    /// Give up a transfer whose transaction never went out (the caller checked no block server has it), so the outputs
++    /// it holds are free again.
++    #[wasm_bindgen(js_name = "releaseUnbroadcast")]
++    pub fn release_unbroadcast(&self, batch_transfer_idx: i32) -> Result<(), JsValue> {
++        self.inner.borrow_mut().release_unbroadcast(batch_transfer_idx).map_err(|e| JsValue::from_str(&e.to_string()))
 +    }
 +
 +    /// P2P swap (UniSat's flow), seller: colour the buyer's draft `psbt` (hex or base64) for `amount` of
@@ -364,7 +379,7 @@ index 51b6efd..eaf8302 100644
      /// Send RGB assets (end): broadcast a signed PSBT. Returns an OperationResult JS object.
      #[wasm_bindgen(js_name = "sendEnd")]
      pub async fn send_end(
-@@ -763,6 +1106,56 @@ impl WasmWallet {
+@@ -763,6 +1121,56 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -421,7 +436,7 @@ index 51b6efd..eaf8302 100644
      /// Drain all wallet funds (end): broadcast a signed PSBT. Returns the txid string.
      #[wasm_bindgen(js_name = "drainToEnd")]
      pub async fn drain_to_end(
-@@ -1074,6 +1467,22 @@ impl WasmWallet {
+@@ -1074,6 +1482,22 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -444,7 +459,7 @@ index 51b6efd..eaf8302 100644
      /// Check if the wallet needs a backup. Returns true if modified since last backup.
      #[wasm_bindgen(js_name = "backupInfo")]
      pub fn backup_info(&self) -> Result<bool, JsValue> {
-@@ -1217,7 +1626,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
+@@ -1217,7 +1641,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
  /// Works before the witness transaction is broadcast. Takes the raw consignment
  /// bytes (strict-encoded, not base64), the witness transaction ID, and the Bitcoin network.
  ///
@@ -454,7 +469,7 @@ index 51b6efd..eaf8302 100644
  #[wasm_bindgen(js_name = "validateConsignmentOffchain")]
  pub fn validate_consignment_offchain(
      consignment_bytes: &[u8],
-@@ -1235,3 +1645,43 @@ pub fn validate_consignment_offchain(
+@@ -1235,3 +1660,43 @@ pub fn validate_consignment_offchain(
      .map_err(|e| JsValue::from_str(&e.to_string()))?;
      to_js(&result)
  }
@@ -476,7 +491,7 @@ index 51b6efd..eaf8302 100644
 +/// MASKED: the features of this engine build.
 +#[wasm_bindgen(js_name = "engineFeatures")]
 +pub fn engine_features() -> Vec<String> {
-+    vec!["swap".into(), "presign".into(), "proxy-v1".into(), "p2p-swap".into(), "legacy-migration".into(), "legacy-consignments".into(), "legacy-backup".into()]
++    vec!["swap".into(), "presign".into(), "proxy-v1".into(), "p2p-swap".into(), "output-locks".into(), "legacy-migration".into(), "legacy-consignments".into(), "legacy-backup".into()]
 +}
 +
 +#[wasm_bindgen(js_name = "inspectSwapConsignment")]
@@ -1346,7 +1361,7 @@ index a3a9f46..17942dd 100644
      }
  
 diff --git a/src/wallet/online.rs b/src/wallet/online.rs
-index ca96b4a..097ac15 100644
+index ca96b4a..38da3de 100644
 --- a/src/wallet/online.rs
 +++ b/src/wallet/online.rs
 @@ -4,6 +4,12 @@
@@ -2163,7 +2178,7 @@ index ca96b4a..097ac15 100644
          }
      }
  
-@@ -10024,6 +10525,128 @@ mod send_end_tests {
+@@ -10024,6 +10525,156 @@ mod send_end_tests {
          assert!(kept.signed_psbt.is_none());
      }
  
@@ -2216,6 +2231,34 @@ index ca96b4a..097ac15 100644
 +        v.as_object_mut().unwrap().remove("lots");
 +        let info: InfoBatchTransfer = serde_json::from_value(v).unwrap();
 +        assert!(info.lots.is_empty());
++    }
++
++    /// What holds an output: a sale that spends it and never went out shows up, and releasing it frees the output.
++    #[test]
++    fn output_locks_and_release_of_a_sale_that_never_went_out() {
++        let (mut wallet, _) = setup();
++        let held = seed_txo(&wallet, &"ab".repeat(32), 1);
++        let free = seed_txo(&wallet, &"cd".repeat(32), 0);
++        let sale = seed_batch(&wallet, &"ee".repeat(32), TransferStatus::WaitingCounterparty, false, None);
++        let done = seed_batch(&wallet, &"ff".repeat(32), TransferStatus::Settled, false, None);
++        let at = |b: i32| wallet.database.iter_asset_transfers().unwrap().into_iter().find(|a| a.batch_transfer_idx == b).unwrap().idx;
++        for (txo, b) in [(held, sale), (free, done)] {
++            wallet.database.set_coloring(DbColoringActMod {
++                txo_idx: ActiveValue::Set(txo),
++                asset_transfer_idx: ActiveValue::Set(at(b)),
++                r#type: ActiveValue::Set(ColoringType::Input),
++                assignment: ActiveValue::Set(Assignment::Fungible(104)),
++                ..Default::default()
++            }).unwrap();
++        }
++        let locks = wallet.output_locks().unwrap();
++        assert_eq!(locks.len(), 1, "a settled transfer holds nothing");
++        assert_eq!(locks[0].outpoint, format!("{}:1", "ab".repeat(32)));
++        assert_eq!((locks[0].kind.as_str(), locks[0].amount, locks[0].batch_transfer_idx), ("spends", 104, sale));
++        assert!(wallet.release_unbroadcast(done).is_err(), "a finished transfer can't be released");
++        wallet.release_unbroadcast(sale).unwrap();
++        assert!(wallet.output_locks().unwrap().is_empty(), "released: the output is free");
++        assert!(wallet.release_unbroadcast(sale).is_err(), "released once only");
 +    }
 +
 +    /// The P2P commitment is UniSat's: Ed25519 over SHA-256 of "rgb-buy-swap/commit/v1:{transfer}:{txid}:{hash}".
@@ -2292,7 +2335,7 @@ index ca96b4a..097ac15 100644
      #[test]
      fn update_or_save_transfers_updates_outgoing_batch() {
          let (wallet, _) = setup();
-@@ -10051,6 +10674,7 @@ mod send_end_tests {
+@@ -10051,6 +10702,7 @@ mod send_end_tests {
                  info.extra_allocations.clone(),
                  info.change_utxo_idx,
                  None,
@@ -2300,7 +2343,7 @@ index ca96b4a..097ac15 100644
                  TransferStatus::Initiated,
                  1,
                  None,
-@@ -12074,3 +12698,1214 @@ mod bfa_tests {
+@@ -12074,3 +12726,1313 @@ mod bfa_tests {
          assert!(options(&format!(r#","evm_chains":{{"mainnet":{chain}}}"#)).is_err());
      }
  }
@@ -2681,6 +2724,30 @@ index ca96b4a..097ac15 100644
 +    };
 +    let digest = sha256_digest(p2p_commit_message(transfer_id, txid, psbt_hash).as_bytes());
 +    crate::encryption::verify_ed25519(&vk, &digest, &sig)
++}
++
++/// What keeps one of this wallet's outputs from being spent (`output_locks`).
++#[derive(Debug, Clone, Serialize, Deserialize)]
++#[cfg_attr(feature = "camel_case", serde(rename_all = "camelCase"))]
++pub struct OutputLock {
++    /// the output, "txid:vout"
++    pub outpoint: String,
++    /// the transfer holding it
++    pub batch_transfer_idx: i32,
++    /// its transaction, once it has one
++    pub txid: Option<String>,
++    /// its status
++    pub status: TransferStatus,
++    /// "spends", "receives" or "invoice"
++    pub kind: String,
++    /// the asset, when known
++    pub asset_id: Option<String>,
++    /// the amount of it involved
++    pub amount: u64,
++    /// when the transfer was made (unix seconds)
++    pub created_at: i64,
++    /// when it expires, if it does
++    pub expiration: Option<i64>,
 +}
 +
 +/// A P2P swap sale coloured by the seller.
@@ -3185,6 +3252,81 @@ index ca96b4a..097ac15 100644
 +        self._sign_psbt(psbt, Some(sign_options))?;
 +        if psbt.inputs[PRESIGNED_SELLER_INDEX].final_script_witness.is_none() {
 +            return Err(Error::Internal { details: s!("the wallet could not sign its output") });
++        }
++        Ok(())
++    }
++
++    /// MASKED: what keeps this wallet's unspent RGB outputs from being spent: transfers not settled or failed that spend
++    /// one (`spends`), receive on one (`receives`) or wait on a blinded invoice for one (`invoice`). One entry per
++    /// output and transfer. The engine leaves those outputs' tokens out of the spendable balance until they finish.
++    pub fn output_locks(&self) -> Result<Vec<OutputLock>, Error> {
++        let txos: HashMap<i32, DbTxo> = self.database.iter_txos()?.into_iter().filter(|t| !t.spent).map(|t| (t.idx, t)).collect();
++        let asset_transfers: HashMap<i32, DbAssetTransfer> = self.database.iter_asset_transfers()?.into_iter().map(|a| (a.idx, a)).collect();
++        let batches: HashMap<i32, DbBatchTransfer> = self.database.iter_batch_transfers()?.into_iter().map(|b| (b.idx, b)).collect();
++        let open = |b: &DbBatchTransfer| !matches!(b.status, TransferStatus::Settled | TransferStatus::Failed);
++        let mut seen = HashSet::new();
++        let mut out = vec![];
++        let mut push = |txo: &DbTxo, b: &DbBatchTransfer, kind: &str, asset_id: Option<String>, amount: u64, out: &mut Vec<OutputLock>| {
++            let outpoint = format!("{}:{}", txo.txid, txo.vout);
++            if !seen.insert((outpoint.clone(), b.idx, kind.to_string())) {
++                return;
++            }
++            out.push(OutputLock { outpoint, batch_transfer_idx: b.idx, txid: b.txid.clone(), status: b.status, kind: kind.to_string(), asset_id, amount, created_at: b.created_at, expiration: b.expiration });
++        };
++        for c in self.database.iter_colorings()? {
++            let (Some(txo), Some(at)) = (txos.get(&c.txo_idx), asset_transfers.get(&c.asset_transfer_idx)) else { continue };
++            let Some(b) = batches.get(&at.batch_transfer_idx) else { continue };
++            if !open(b) {
++                continue;
++            }
++            let kind = if c.r#type == ColoringType::Input { "spends" } else { "receives" };
++            let amount = match c.assignment { Assignment::Fungible(v) => v, _ => 0 };
++            push(txo, b, kind, at.asset_id.clone(), amount, &mut out);
++        }
++        for t in self.database.iter_transfers()? {
++            let Some(RecipientTypeFull::Blind { unblinded_utxo }) = &t.recipient_type else { continue };
++            if !t.incoming {
++                continue;
++            }
++            let Some(txo) = txos.values().find(|x| x.txid == unblinded_utxo.txid && x.vout == unblinded_utxo.vout) else { continue };
++            let Some(at) = asset_transfers.get(&t.asset_transfer_idx) else { continue };
++            let Some(b) = batches.get(&at.batch_transfer_idx) else { continue };
++            if !open(b) {
++                continue;
++            }
++            let amount = match &t.requested_assignment { Some(Assignment::Fungible(v)) => *v, _ => 0 };
++            push(txo, b, "invoice", at.asset_id.clone(), amount, &mut out);
++        }
++        out.sort_by(|a, b| a.outpoint.cmp(&b.outpoint).then(a.batch_transfer_idx.cmp(&b.batch_transfer_idx)));
++        Ok(out)
++    }
++
++    /// MASKED: give up a transfer whose transaction never went out, so the outputs it holds are free again. The caller
++    /// checks first that no block server knows the transaction; this wallet refuses one it has seen itself. A transfer
++    /// with no transaction yet (an invoice nobody paid, a sale the buyer never signed) is failed the same way.
++    pub fn release_unbroadcast(&mut self, batch_transfer_idx: i32) -> Result<(), Error> {
++        let b = self
++            .database
++            .iter_batch_transfers()?
++            .into_iter()
++            .find(|b| b.idx == batch_transfer_idx)
++            .ok_or(Error::BatchTransferNotFound { idx: batch_transfer_idx })?;
++        if matches!(b.status, TransferStatus::Settled | TransferStatus::Failed) {
++            return Err(Error::Internal { details: s!("that transfer is already finished") });
++        }
++        if let Some(txid) = &b.txid {
++            if let Ok(id) = bdk_wallet::bitcoin::Txid::from_str(txid) {
++                if self.bdk_wallet.get_tx(id).is_some() {
++                    return Err(Error::Internal { details: s!("this wallet has seen that transfer's transaction: wait for it to confirm") });
++                }
++            }
++        }
++        self._fail_batch_transfer(&b)?;
++        if let Some(txid) = &b.txid {
++            self.transfer_artifacts.remove(txid);
++            if let Ok(id) = RgbTxid::from_str(txid) {
++                let _ = self.rgb_runtime().and_then(|mut r| r.upsert_witness(id, WitnessOrd::Archived).map_err(Error::from));
++            }
 +        }
 +        Ok(())
 +    }

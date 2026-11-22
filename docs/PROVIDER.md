@@ -292,6 +292,8 @@ The same seven steps as UniSat Wallet's pure P2P mode (`signBuySwapCommit`, UniS
 | Finish | seller | `p2pSaleFinish` (no screen) | | `{ txid }` once the buyer accepted and the swap went out |
 | Leave | either | `p2pCancel` (no screen) | | `{ cancelled }`, before the buyer accepts |
 
+**Leaving a trade** *(2.31.3+)*: when a trade is left or expires on the market, call `rgb.releaseTrade({ offerId, offer, network })` (no approval screen) for either side, in any flow (the 5-step one or this one). If the trade's transaction never went out, MASKED frees the tokens it held for it at once and returns `{ released }`; otherwise nothing changes. Without it, MASKED frees them by itself a day later, or the person can from What's in this RGB wallet.
+
 The commitment is UniSat's: an Ed25519 signature, with the key the token transfer was posted with (`senderPublicKey`), over the SHA-256 of `rgb-buy-swap/commit/v1:{proxyTransferId}:{txid}:{buyerSignedPsbtHash}`, where `buyerSignedPsbtHash` is the SHA-256 (hex) of the buyer-signed PSBT's bytes. A buyer's wallet holds the seller's token transfer, checked but not accepted, until that commitment checks out for the transaction it signed. The steps without a screen follow from one the person already approved: they open MASKED briefly and run by themselves. PSBTs go both ways as hex.
 
 ## Events

@@ -748,7 +748,88 @@ export class LiteWallet {
     const unpaid = new Set(this.unpaidReceives());
     for (const p of pendingReceives) p.unpaid = p.witness && unpaid.has(Number(p.batchTransferIdx));
     pendingReceives.sort((a, b) => b.at - a.at);
-    return { at: Date.now(), coins, rgb, tokens: byToken, activity: activity.slice(0, 40), pendingReceives: pendingReceives.slice(0, 100), unpaidReceives: unpaid.size, canFreeSpare: this.canFreeSpare, keepSpare: RGB_KEEP_SPARE };
+    const locks = await this.lockedOutputs().catch(() => []);
+    for (const l of locks) { const m = meta.get(l.assetId); l.ticker = m?.ticker || ''; l.precision = m?.precision ?? 0; }
+    return { at: Date.now(), coins, rgb, tokens: byToken, activity: activity.slice(0, 40), pendingReceives: pendingReceives.slice(0, 100), unpaidReceives: unpaid.size, canFreeSpare: this.canFreeSpare, keepSpare: RGB_KEEP_SPARE, locks };
+  }
+
+  // ---- outputs held by transfers that never went out (2.31.3) ----
+  // A sale prepared on a market that the buyer never finished, an invoice nobody paid, a purchase the seller never
+  // sent: the engine keeps the output they'd use (and every token on it) out of the spendable balance until they
+  // finish, which they never will. Their transaction is on no block server, so nothing happened on chain: giving them
+  // up frees the output. (Pepe: 104 SPPT held "waiting for a block" for days, their output unspent.)
+  get canReleaseLocks() { return typeof this.wallet?.outputLocks === 'function' && typeof this.wallet?.releaseUnbroadcast === 'function'; }
+  /** Whether a block server this wallet uses has `txid` (the first two of its list). Unsure counts as yes. */
+  async txOnChain(txid) {
+    const bases = [...new Set([this.indexer, ...this.indexers()].filter(Boolean))].slice(0, 2);
+    for (const base of bases) {
+      try {
+        const r = await fetch(`${base}/tx/${txid}/status`, { signal: AbortSignal.timeout(10_000) });
+        if (r.ok) return true;
+        if (r.status !== 404 && r.status !== 400) return true; // a server problem: not a "no"
+      } catch { return true; }
+    }
+    return false;
+  }
+  /**
+   * The outputs held by transfers not finished: [{ outpoint, idx, kind, assetId, amount, txid, status, since,
+   * onChain, releasable }]. Releasable: an hour old, and no block server has its transaction (or it has none). Outputs
+   * of live Instant listings are left out (their signed listing holds them on purpose).
+   */
+  async lockedOutputs() {
+    if (!this.canReleaseLocks) return [];
+    let list = [];
+    try { list = plain(this.wallet.outputLocks()) || []; } catch { return []; }
+    const known = new Map(), now = Date.now(), out = [];
+    for (const l of list) {
+      const op = String(l.outpoint).toLowerCase();
+      if (this.reserved.has(op)) continue;
+      const txid = l.txid ? String(l.txid) : '';
+      if (txid && !known.has(txid)) known.set(txid, await this.txOnChain(txid));
+      const since = Number(l.createdAt || 0) * (Number(l.createdAt) < 1e12 ? 1000 : 1);
+      const onChain = txid ? known.get(txid) : false;
+      out.push({ outpoint: op, idx: Number(l.batchTransferIdx), kind: String(l.kind), assetId: String(l.assetId || ''), amount: String(l.amount ?? 0), txid, status: String(l.status), since, onChain, releasable: !onChain && now - since > 3600_000 });
+    }
+    return out;
+  }
+  /** Give up one transfer that never went out (checked again here), freeing the outputs it held. */
+  async releaseLock({ idx }) {
+    const all = (await this.lockedOutputs()).filter((l) => l.idx === Number(idx));
+    if (!all.length) throw new Error('That transfer doesn\'t hold anything any more.');
+    if (all.some((l) => l.onChain)) throw new Error('Its transaction is on the network: it finishes by itself after its block. Nothing to release.');
+    if (all.some((l) => !l.releasable)) throw new Error('This transfer was made less than an hour ago: give the other side a little time first.');
+    this.wallet.releaseUnbroadcast(Number(idx));
+    await this.save();
+    return { released: all.length, outpoints: [...new Set(all.map((l) => l.outpoint))] };
+  }
+  /**
+   * A market says a trade was left or expired (`rgb.releaseTrade`): give up this wallet's part of it straight away (no
+   * hour to wait), if its transaction never went out. `stores`: the swap stores the trade may be in.
+   */
+  async releaseTrade({ offerId }, stores) {
+    const id = String(offerId);
+    const entries = stores.map((st) => st.get(id)).filter(Boolean);
+    if (!entries.length) return { released: 0 };
+    const p2p = entries.find((e) => e.role === 'seller' || e.role === 'buyer');
+    if (p2p && stores[0].get(id) === p2p && !p2p.accepted && !p2p.sent && !p2p.done) { await this.p2pCancel({ tradeId: id }, stores[0]); return { released: 1 }; }
+    const txids = new Set(entries.flatMap((e) => [e.txid, e.sent]).filter(Boolean).map(String));
+    let n = 0;
+    for (const l of await this.lockedOutputs()) {
+      if (!txids.has(l.txid) || l.onChain) continue;
+      try { this.wallet.releaseUnbroadcast(l.idx); n++; txids.delete(l.txid); } catch { /* already finished */ }
+    }
+    if (n) await this.save();
+    return { released: n };
+  }
+  /** Release what never went out after a day, by itself (on open): a stalled trade holds nothing for good. */
+  async autoReleaseLocks() {
+    let n = 0;
+    for (const l of await this.lockedOutputs().catch(() => [])) {
+      if (!l.releasable || Date.now() - l.since < 24 * 3600_000) continue;
+      try { this.wallet.releaseUnbroadcast(l.idx); n++; } catch { /* the next open */ }
+    }
+    if (n) { await this.save(); console.info('[MASKED] released', n, 'RGB transfers that never went out (a day old, no transaction on chain)'); }
+    return n;
   }
 
   /** This wallet's plain bitcoin coins: confirmed, and all (with its own unconfirmed change). */

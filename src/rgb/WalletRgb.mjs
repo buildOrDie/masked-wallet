@@ -1243,6 +1243,14 @@ export class WalletRgb {
       // What's in this wallet: every output and coin, what it's doing
       case 'outputs': return this.run(async () => { this.outputs = this.withoutDropped(await this.service.outputsReport()); }, { quiet: true });
       case 'outputsClose': this.outputs = null; return app.render();
+      // a transfer that never went out (a market trade left halfway, an invoice nobody paid): give it up, freeing its outputs
+      case 'releaseLock': return this.run(async () => {
+        const res = await this.service.releaseLock({ idx: Number(arg) });
+        await this.refresh().catch(() => {});
+        this.outputs = this.withoutDropped(await this.service.outputsReport());
+        if (this.cloudOn) await this.cloudSave().catch(() => false);
+        app.toast(`Released: ${res.outpoints.length === 1 ? 'that output is' : `${res.outpoints.length} outputs are`} free again. Nothing was sent.`, 6000);
+      });
       // Settings → RGB → Instant listings: cancel one here, also one the market doesn't show (asks once first)
       case 'listings': this.cancelAsk = null; state.view = 'rgblist'; return app.render();
       case 'listTab': state.f.listTab = arg === 'done' ? 'done' : 'open'; this.cancelAsk = null; return app.render();

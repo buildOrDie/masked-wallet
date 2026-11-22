@@ -259,6 +259,7 @@ export class RgbTokenView extends View {
             : open ? `are locked by ${open === 1 ? 'an open Private invoice' : `${open} open Private invoices`}: a Private invoice reserves the RGB output these tokens sit on until it's paid or expires.`
               : 'are held by a transfer waiting for a block. They are freed once it confirms.';
           return `<p class="info warn small">${r.amount(a, s - sp)} ${esc(a.ticker)} ${why}</p>
+            ${r.outputs ? RgbSettings.outputs(r, this.app) : `<button class="btn ghost wide" data-rgb="outputs" ${r.busy ? 'disabled' : ''}>See what holds them</button>`}
             ${unsent > stuck ? `<button class="btn ghost wide" data-rgb="cancelSend" ${r.busy ? 'disabled' : ''}>Cancel unsent transfer${unsent === 1 ? '' : 's'}</button>` : ''}
             ${open ? `<button class="btn ghost wide" data-rgb="cancelInv" ${r.busy ? 'disabled' : ''}>Cancel open invoices</button>` : ''}`;
         })() : ''}
@@ -565,6 +566,14 @@ export class RgbSettings {
       <div class="cloud-h"><b>What's in this RGB wallet</b><span><button class="btn ghost sm" data-rgb="outputs" ${r.busy ? 'disabled' : ''}>Refresh</button> <button class="btn ghost sm" data-rgb="outputsClose">Close</button></span></div>
       ${tokens ? `<div class="rgo-sec"><h4>Tokens</h4>${tokens}</div>` : ''}
       <div class="rgo-sec"><h4>RGB outputs <span class="muted small">${(rep.rgb || []).length}</span></h4>${rgbList || '<p class="muted small">None.</p>'}</div>
+      ${(rep.locks || []).length ? `<div class="rgo-sec rgo-locks"><h4>Held by unfinished transfers <span class="muted small">${new Set(rep.locks.map((l) => l.idx)).size}</span></h4>
+        <p class="muted small">These outputs can't be listed or sent until the transfer holding them finishes. One whose transaction never went out (a trade the other side left, an invoice nobody paid) never will: release it and the output is free again. Nothing is sent.</p>
+        <ul class="rgo-list">${[...new Map(rep.locks.map((l) => [l.idx, l])).values()].map((l) => {
+          const ops = rep.locks.filter((x) => x.idx === l.idx);
+          const what = { spends: 'A sale or send of yours', receives: 'Tokens coming to you', invoice: 'An invoice of yours' }[l.kind] || 'A transfer';
+          const state = l.onChain ? 'its transaction is on the network: it finishes after its block' : l.releasable ? (l.txid ? 'its transaction never went out' : 'nothing was ever paid or sent') : 'made less than an hour ago';
+          return `<li><span><b>${what}</b>${N(l.amount) ? ` · ${amt(l)} ${tick(l)}` : ''}<br><small class="muted">${state}${l.txid ? ` · ${esc(short(l.txid, 6))}` : ''}</small></span><span class="rgo-op">${ops.map((x) => link(x.outpoint)).join(' ')}${l.releasable ? `<button class="btn ghost sm" data-rgb="releaseLock" data-rgb-arg="${l.idx}" ${r.busy ? 'disabled' : ''}>Release</button>` : ''}</span></li>`;
+        }).join('')}</ul></div>` : ''}
       <div class="rgo-sec"><h4>Bitcoin for fees and buys <span class="muted small">${coins.length} coin${coins.length === 1 ? '' : 's'} · ${fmtBtc(coinSats)} ${unit}</span></h4>${coinList}
         <p class="muted small">Each buy or move spends a coin of its own: a few coins let several go one after another without waiting.</p></div>
       ${rep.canFreeSpare && (spareN > (rep.keepSpare ?? 6) || rep.unpaidReceives) ? `<div class="rgo-sec"><p class="muted small">${spareN} spare RGB outputs hold ${fmtBtc(spareSats)} ${unit}. Keep ${rep.keepSpare ?? 6} for receiving tokens and turn the rest, with your bitcoin here, into 4 coins for buys (one transaction, a small network fee; outputs holding tokens never move).</p>

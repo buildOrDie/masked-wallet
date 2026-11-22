@@ -337,7 +337,7 @@ export function makeHandler({ getPublic, getTrade, getSites, setSites, openAppro
         return openApproval(origin, method, swapParams(method, params));
       }
       // wallet-to-wallet swaps in UniSat's P2P flow: trades with UniSat wallets on P2P markets (2.31)
-      case 'rgbP2pList': case 'rgbP2pBuyPrepare': case 'rgbP2pSaleSign': case 'rgbP2pBuySign': case 'rgbP2pSaleCommit': case 'rgbP2pBuyAccept': case 'rgbP2pSaleFinish': case 'rgbP2pCancel': {
+      case 'rgbP2pList': case 'rgbP2pBuyPrepare': case 'rgbP2pSaleSign': case 'rgbP2pBuySign': case 'rgbP2pSaleCommit': case 'rgbP2pBuyAccept': case 'rgbP2pSaleFinish': case 'rgbP2pCancel': case 'rgbReleaseTrade': {
         needConnected();
         return openApproval(origin, method, swapParams(method, params));
       }

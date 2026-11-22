@@ -130,6 +130,9 @@
       p2pSaleFinish: (o = {}) => request('rgbP2pSaleFinish', o),
       /** either side, before the buyer accepts (no approval screen): {} → { cancelled } */
       p2pCancel: (o = {}) => request('rgbP2pCancel', o),
+      /** any trade (the 5-step or the P2P flow), when it was left or expired on the market (no approval screen):
+       *  { offerId, offer, network } → { released } — frees what this wallet held for it, if nothing went out (2.31.3) */
+      releaseTrade: (o = {}) => request('rgbReleaseTrade', o),
     }),
     // events: accountsChanged, networkChanged, chainChanged, tradeAccountChanged
     on: (event, fn) => { if (!listeners.has(event)) listeners.set(event, new Set()); listeners.get(event).add(fn); },

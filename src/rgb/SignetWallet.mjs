@@ -74,6 +74,8 @@ export class SignetWallet {
         if (!wallet.isOnline()) await wallet.goOnline();
         if (backup) this.storage.setItem(this.vaultKey, JSON.stringify(await encryptRgb({ mnemonic: payload.mnemonic }, password, net)));
         this.mnemonic = payload.mnemonic; this.password = password;
+        // transfers that never went out a day ago (a market trade left halfway): their outputs freed, after the open
+        setTimeout(() => { this.autoReleaseLocks?.().catch(() => {}); }, 8000);
       } catch (e) { await this.close(); throw e; }
     });
   }
@@ -189,6 +191,10 @@ export class SignetWallet {
   freeSpare({ keep = undefined, parts = undefined, fee = undefined } = {}) { return this.mutate((w) => w.freeSpare({ keep, parts, feeRate: testFee(fee) })); }
   /** Everything this RGB wallet holds, output by output (see LiteWallet.outputsReport). */
   outputsReport() { return this.exclusive(() => this.requireWallet().outputsReport(this.instantStore())); }
+  /** Give up a transfer that never went out, freeing the outputs it held (see LiteWallet.releaseLock). */
+  releaseLock(p) { return this.mutate((w) => w.releaseLock(p)); }
+  releaseTrade(p) { return this.mutate((w) => w.releaseTrade(p, [this.swapStore('p2p'), this.swapStore('sold'), this.swapStore('bought')])); }
+  autoReleaseLocks() { return this.mutate((w) => (w.autoReleaseLocks ? w.autoReleaseLocks() : 0)); }
   /** Outputs this wallet counts that the chain shows spent; `fix` marks them spent (see LiteWallet.repairFromChain). */
   repairFromChain(o = {}) { return this.mutate((w) => w.repairFromChain(o)); }
   /** Bitcoin from the RGB balance to an address; tokens stay (see LiteWallet.sendBtcOut). */

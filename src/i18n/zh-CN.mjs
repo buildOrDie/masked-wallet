@@ -1455,4 +1455,8 @@ export const ZH_CN = {
   "Your wallet was behind the chain: catching up, then trying again…": "你的钱包落后于区块链：正在同步，然后自动重试…",
   "Checking your RGB outputs against the chain…": "正在对照区块链检查你的 RGB 输出…",
   "Refresh and check again": "刷新后重新检查",
+  "Held by unfinished transfers": "被未完成的转账占用",
+  "These outputs can't be listed or sent until the transfer holding them finishes. One whose transaction never went out (a trade the other side left, an invoice nobody paid) never will: release it and the output is free again. Nothing is sent.": "在占用它们的转账完成之前，这些输出无法挂单或发送。交易从未发出的转账（对方中途离开的交易、无人支付的发票）永远不会完成：释放它，输出即可重新使用。不会发送任何内容。",
+  "Release": "释放",
+  "See what holds them": "查看占用原因",
 };
