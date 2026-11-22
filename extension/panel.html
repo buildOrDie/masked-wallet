@@ -403,7 +403,11 @@ select#obBday { width: 100%; }
 .ap-site small { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ap-ic { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--card-2); font-weight: 900; color: var(--btc); flex: none; }
 .ap-title { margin: 4px 0 0; font-size: 20px; font-weight: 800; text-align: center; }
-.ap-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; position: sticky; bottom: 0; padding: 10px 0 4px; background: var(--bg); }
+.ap-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 10px 0 4px; }
+.ap-foot { position: sticky; bottom: 0; background: var(--bg); z-index: 2; }
+.ap-note { margin-top: 8px; padding: 10px 12px; border-radius: 12px; background: var(--card, rgba(255,255,255,.04)); box-shadow: inset 0 0 0 1px rgba(255,255,255,.08); max-height: 38vh; overflow-y: auto; }
+.ap-note .msg { font-size: 13px; line-height: 1.4; }
+.ap-fixes { display: grid; gap: 8px; margin-top: 10px; }
 .perm { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; font-size: 13px; }
 .perm li { display: flex; gap: 8px; align-items: center; }
 .perm svg { width: 16px; height: 16px; color: var(--ok); }
