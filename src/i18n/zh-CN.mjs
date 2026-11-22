@@ -1450,4 +1450,8 @@ export const ZH_CN = {
   "Follow the dev": "关注开发者",
   "Follow the dev on X": "在 X 上关注开发者",
   "Source code": "源代码",
+  "Refresh and try again": "刷新后重试",
+  "Fix it from the chain and try again": "按区块链修复后重试",
+  "Your wallet was behind the chain: catching up, then trying again…": "你的钱包落后于区块链：正在同步，然后自动重试…",
+  "Checking your RGB outputs against the chain…": "正在对照区块链检查你的 RGB 输出…",
 };

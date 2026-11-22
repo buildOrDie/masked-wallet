@@ -23,7 +23,7 @@ export class ApproveView extends View {
     <div class="ap-site"><span class="ap-ic">${esc(host.slice(0, 1).toUpperCase())}</span><span><b>${esc(host)}</b><small>${esc(a.origin)}</small></span></div>
     <h1 class="ap-title">${TITLES[a.method] || a.method}</h1>
     ${this.account.isTest ? this.netBanner() : ''}
-    <section class="card">${this.body(a)}${this.statusLine('approve')}</section>
+    <section class="card">${this.body(a)}${this.statusLine('approve')}${!busy && a.fixes?.length ? `<div class="ap-fixes">${a.fixes.map((x) => `<button class="btn ghost wide" data-ap-fix="${esc(x.id)}">${esc(x.label)}</button>`).join('')}</div>` : ''}</section>
     <div class="ap-actions"><button class="btn ghost" data-reject>Reject</button><button class="btn primary" data-approve ${blocked || busy ? 'disabled' : ''}>${busy ? 'Working…' : VERBS[a.method] || 'Sign'}</button></div>`;
   }
 

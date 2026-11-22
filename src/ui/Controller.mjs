@@ -188,6 +188,7 @@ export class Controller {
     if (d.replace) { state.obReturn = 'open'; state.lockState = 'onboard-cancel'; f.obMode = d.replace; state.status.onboard = null; this.render(); return true; }
     if (t.hasAttribute('data-approve')) { app.approvals.approve(); return true; }
     if (t.hasAttribute('data-ap-topup')) { await app.approvals.topUp(); return true; }
+    if (t.hasAttribute('data-ap-fix')) { await app.approvals.fix(t.getAttribute('data-ap-fix')); return true; }
     if (t.hasAttribute('data-reject')) { app.approvals.reject(); return true; }
     if (d.unsite) { await app.sites.disconnect(d.unsite); this.render(); return true; }
     if (t.hasAttribute('data-dropback')) { state.drop = { stage: 'form' }; this.render(); return true; }

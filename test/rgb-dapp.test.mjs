@@ -105,3 +105,11 @@ test('RGB off or not set up: a clear message instead of an approve button', asyn
   assert.match(req.prepErr, /turn on RGB/i);
   assert.match(a.ui.views.approve.render(), /data-approve disabled/);
 });
+
+test('a failed RGB request offers what to do next, right under the error', async () => {
+  const { fixesFor } = await import('../src/dapp/ApprovalController.mjs');
+  assert.deepEqual(fixesFor('rgbInstantList', 'Your tokens are still settling from your last move… (swap PSBT: none of its inputs is an RGB output of this wallet)').map((x) => x.id), ['refresh']);
+  assert.deepEqual(fixesFor('rgbInstantList', 'This RGB wallet is behind the chain for this token: it still counts an output…').map((x) => x.id), ['repair']);
+  assert.deepEqual(fixesFor('rgbInstantBuy', 'The Signet block server is busy or down right now.').map((x) => x.id), ['retry']);
+  assert.deepEqual(fixesFor('signPsbt', 'anything').map((x) => x.id), ['retry']);
+});

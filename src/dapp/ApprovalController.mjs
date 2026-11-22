@@ -40,6 +40,17 @@ export function shortfallOf(text) {
   return m ? Number(m[1].replace(/,/g, '')) : 0;
 }
 const hostOf = (u) => { try { return new URL(proxyUrl(u)).host; } catch { return String(u); } };
+/** Errors that mean this wallet's view was behind the chain (nothing was sent): a catch-up and a second try fix them. */
+const STALE_RGB = /none of its inputs is an RGB output|isn't a settled RGB output|that output can't be listed|unsafe ?history|still settling|already spent by another of your transactions|missing-?inputs|missingorspent|bad-txns-inputs-missingorspent/i;
+/** What the person can do about a failed request, as buttons under the error (no trip to Settings). */
+export function fixesFor(method, text) {
+  if (!/^rgb/.test(method)) return [{ id: 'retry', label: 'Try again' }];
+  const t = String(text);
+  if (/behind the chain|already spent there|Check RGB against the chain/i.test(t)) return [{ id: 'repair', label: 'Fix it from the chain and try again' }];
+  if (STALE_RGB.test(t) || /wait for (one|its) block|Tap Refresh/i.test(t)) return [{ id: 'refresh', label: 'Refresh and try again' }];
+  if (/busy or down|Can't reach|did not answer|try again/i.test(t)) return [{ id: 'retry', label: 'Try again' }];
+  return [{ id: 'refresh', label: 'Refresh and try again' }];
+}
 
 export class ApprovalController {
   /** @param {import('../app/MaskedApp.mjs').MaskedApp} app */
@@ -414,9 +425,18 @@ export class ApprovalController {
 
   async approve() {
     const app = this.app, state = this.state, a = this.active;
-    state.busy = true; app.render();
+    state.busy = true; a.fixes = null; app.render();
     try {
-      this.finish({ result: await this.run(a) });
+      try { this.finish({ result: await this.run(a) }); } catch (e) {
+        // the wallet's view was behind (a move or purchase that confirmed since, a coin another transaction of yours
+        // spent): nothing was sent. Catch up once and try again by itself, instead of sending the person to Settings
+        const raw = String(e?.message || e || '');
+        if (!/^rgb/.test(a.method) || a.retried || !STALE_RGB.test(raw) || !app.rgb?.refresh) throw e;
+        a.retried = true;
+        state.status.approve = ['Your wallet was behind the chain: catching up, then trying again…', '']; app.render();
+        await this.rgbBusy(() => app.rgb.refresh());
+        this.finish({ result: await this.run(a) });
+      }
     } catch (e) {
       // the RGB engine throws plain strings, not Error objects: show them too, never an empty line
       let text = /^rgb/.test(a.method) ? rgbError(e, app.rgb?.profile) : String(e?.message || e || '');
@@ -432,7 +452,33 @@ export class ApprovalController {
       }
       console.error('[MASKED] approval failed', a.method, e);
       state.status.approve = [friendly(text) || 'Something went wrong. Try again.', 'err'];
+      a.fixes = fixesFor(a.method, String(e?.message || e || '') + ' ' + text);
     } finally { state.busy = false; app.render(); }
+  }
+
+  /** A button under an error: do what it says, then try the request again. */
+  async fix(id) {
+    const app = this.app, state = this.state, a = this.active, r = app.rgb;
+    if (!a || state.busy) return;
+    state.busy = true; a.fixes = null;
+    try {
+      if (id === 'refresh') { state.status.approve = ['Catching up with the chain…', '']; app.render(); await this.rgbBusy(() => r.refresh()); }
+      if (id === 'repair') {
+        state.status.approve = ['Checking your RGB outputs against the chain…', '']; app.render();
+        const gone = await this.rgbBusy(() => r.service.repairFromChain({ fix: true }));
+        await this.rgbBusy(() => r.refresh()).catch(() => {});
+        if (r.cloudOn) await r.cloudSave({ replace: true }).catch(() => false);
+        state.status.approve = [gone?.length ? `Fixed: ${gone.length} output${gone.length > 1 ? 's' : ''} already spent on chain no longer counted. Trying again…` : 'Nothing to fix on chain. Trying again…', '']; app.render();
+      }
+    } catch (e) {
+      state.busy = false;
+      state.status.approve = [friendly(rgbError(e, r?.profile)) || 'That didn\'t work. Try again.', 'err'];
+      a.fixes = [{ id: 'retry', label: 'Try again' }];
+      return app.render();
+    }
+    state.busy = false;
+    a.retried = true; // just caught up: no second automatic catch-up
+    return this.approve();
   }
 
   /** Carry out an approved request; returns what the dApp gets back. */

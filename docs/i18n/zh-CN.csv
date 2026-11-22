@@ -1395,3 +1395,7 @@ screen,English,中文,reviewed,note
 "RGB: Your listings, what's in this RGB wallet, freeing spare outputs","Follow the dev","关注开发者","no",""
 "RGB: Your listings, what's in this RGB wallet, freeing spare outputs","Follow the dev on X","在 X 上关注开发者","no",""
 "RGB: Your listings, what's in this RGB wallet, freeing spare outputs","Source code","源代码","no",""
+"RGB: Your listings, what's in this RGB wallet, freeing spare outputs","Refresh and try again","刷新后重试","no",""
+"RGB: Your listings, what's in this RGB wallet, freeing spare outputs","Fix it from the chain and try again","按区块链修复后重试","no",""
+"RGB: Your listings, what's in this RGB wallet, freeing spare outputs","Your wallet was behind the chain: catching up, then trying again…","你的钱包落后于区块链：正在同步，然后自动重试…","no",""
+"RGB: Your listings, what's in this RGB wallet, freeing spare outputs","Checking your RGB outputs against the chain…","正在对照区块链检查你的 RGB 输出…","no",""
