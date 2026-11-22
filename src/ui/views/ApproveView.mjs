@@ -23,8 +23,8 @@ export class ApproveView extends View {
     <div class="ap-site"><span class="ap-ic">${esc(host.slice(0, 1).toUpperCase())}</span><span><b>${esc(host)}</b><small>${esc(a.origin)}</small></span></div>
     <h1 class="ap-title">${TITLES[a.method] || a.method}</h1>
     ${this.account.isTest ? this.netBanner() : ''}
-    <section class="card">${this.body(a)}${this.statusLine('approve')}${!busy && a.fixes?.length ? `<div class="ap-fixes">${a.fixes.map((x) => `<button class="btn ghost wide" data-ap-fix="${esc(x.id)}">${esc(x.label)}</button>`).join('')}</div>` : ''}</section>
-    <div class="ap-actions"><button class="btn ghost" data-reject>Reject</button><button class="btn primary" data-approve ${blocked || busy ? 'disabled' : ''}>${busy ? 'Working…' : VERBS[a.method] || 'Sign'}</button></div>`;
+    <section class="card">${this.body(a)}</section>
+    <div class="ap-foot">${this.footNote(a, busy)}<div class="ap-actions"><button class="btn ghost" data-reject>Reject</button><button class="btn primary" data-approve ${blocked || busy ? 'disabled' : ''}>${busy ? 'Working…' : VERBS[a.method] || 'Sign'}</button></div></div>`;
   }
 
   /** "Network fee" and "Total" once prepared, "calculating…" before, "—" after an error. */
@@ -34,11 +34,17 @@ export class ApproveView extends View {
     return rowKV('Network fee', a.prepErr ? '—' : 'calculating…');
   }
 
-  error(a) {
-    if (!a.prepErr) return '';
-    // an RGB screen that couldn't be prepared: catch up and look again, from here (not Settings)
-    const again = /^rgb/.test(a.method) && !this.state.busy ? '<div class="ap-fixes"><button class="btn ghost wide" data-ap-fix="reprep">Refresh and check again</button></div>' : '';
-    return `<p class="msg err">${esc(a.prepErr)}</p>${again}`;
+  // errors and progress are shown in the footer, next to the buttons, never at the bottom of a long screen (2.31.2)
+  error(_a) { return ''; }
+
+  /** What's happening, or what went wrong and what to do about it: always on screen, above Reject / Approve. */
+  footNote(a, busy) {
+    const st = this.state.status.approve;
+    const fixes = !busy && a.fixes?.length ? a.fixes
+      : !busy && a.prepErr && /^rgb/.test(a.method) ? [{ id: 'reprep', label: 'Refresh and check again' }] : [];
+    const text = st ? `<p class="msg ${st[1]}" role="status">${esc(st[0])}</p>` : a.prepErr ? `<p class="msg err" role="alert">${esc(a.prepErr)}</p>` : '';
+    if (!text && !fixes.length) return '';
+    return `<div class="ap-note">${text}${fixes.length ? `<div class="ap-fixes">${fixes.map((x) => `<button class="btn ghost wide" data-ap-fix="${esc(x.id)}">${esc(x.label)}</button>`).join('')}</div>` : ''}</div>`;
   }
 
   tokenAmount(P) { return `<p class="hero-bal center">${esc(Number(P.amount).toLocaleString())} <small>${esc(String(P.ticker).toUpperCase())}</small></p>`; }
