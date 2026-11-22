@@ -40,6 +40,11 @@ export function shortfallOf(text) {
   return m ? Number(m[1].replace(/,/g, '')) : 0;
 }
 const hostOf = (u) => { try { return new URL(proxyUrl(u)).host; } catch { return String(u); } };
+/**
+ * How much of a token can be listed or sold: the engine's spendable balance, or what this wallet holds free on settled
+ * outputs when that is more (the engine's balance can lag after a move confirmed; the wallet's own checks still run).
+ */
+const sellable = (r, asset) => Math.max(Number(r.bal(asset).spendable) || 0, Number(r.service?.freeToList?.(asset.assetId)) || 0);
 /** Errors that mean this wallet's view was behind the chain (nothing was sent): a catch-up and a second try fix them. */
 const STALE_RGB = /none of its inputs is an RGB output|isn't a settled RGB output|that output can't be listed|unsafe ?history|still settling|already spent by another of your transactions|missing-?inputs|missingorspent|bad-txns-inputs-missingorspent/i;
 /** What the person can do about a failed request, as buttons under the error (no trip to Settings). */
@@ -276,7 +281,7 @@ export class ApprovalController {
         const lots = P.lots || [];
         const total = lots.reduce((t, x) => t + Number(x.amount), 0);
         const price = lots.reduce((t, x) => t + Number(x.priceSats), 0);
-        if (total > r.bal(asset).spendable) throw new Error(`You can list up to ${r.amount(asset, r.bal(asset).spendable)} ${asset.ticker}.`);
+        if (total > sellable(r, asset)) throw new Error(`You can list up to ${r.amount(asset, sellable(r, asset))} ${asset.ticker}.`);
         let host = ''; try { host = new URL(P.market).host; } catch { throw new Error('The market address is not valid.'); }
         const rate = P.feeRate || Number(r.fee());
         // one move per lot: a token output and a bitcoin coin in; the commitment, the lot, the rest of the tokens and the
@@ -336,7 +341,7 @@ export class ApprovalController {
             let host = ''; try { host = new URL(P.market).host; } catch { throw new Error('The market address is not valid.'); }
             return { ...base, fee: 0, rate, vb, market: host, finishing: true };
           }
-          if (Number(o.amount) > r.bal(asset).spendable) throw new Error(`You can sell up to ${r.amount(asset, r.bal(asset).spendable)} ${asset.ticker}.`);
+          if (Number(o.amount) > sellable(r, asset)) throw new Error(`You can sell up to ${r.amount(asset, sellable(r, asset))} ${asset.ticker}.`);
           let host = ''; try { host = new URL(P.market).host; } catch { throw new Error('The market address is not valid.'); }
           return { ...base, fee, rate, vb, market: host };
         }
@@ -350,7 +355,7 @@ export class ApprovalController {
         if (!r.service.canP2p) throw new Error('This MASKED version can\'t trade with other wallets yet. Update MASKED.');
         if (m === 'rgbP2pList' || m === 'rgbP2pSaleSign') {
           if (!asset) throw new Error('You don\'t hold this token in RGB.');
-          if (Number(o.amount) > r.bal(asset).spendable) throw new Error(`You can sell up to ${r.amount(asset, r.bal(asset).spendable)} ${asset.ticker}.`);
+          if (Number(o.amount) > sellable(r, asset)) throw new Error(`You can sell up to ${r.amount(asset, sellable(r, asset))} ${asset.ticker}.`);
           return { ...base, p2p: true };
         }
         if (m === 'rgbP2pBuyPrepare') {
@@ -364,7 +369,7 @@ export class ApprovalController {
       }
       if (m === 'rgbSalePrepare') {
         if (!asset) throw new Error('You don\'t hold this token in RGB.');
-        if (Number(o.amount) > r.bal(asset).spendable) throw new Error(`You can sell up to ${r.amount(asset, r.bal(asset).spendable)} ${asset.ticker}.`);
+        if (Number(o.amount) > sellable(r, asset)) throw new Error(`You can sell up to ${r.amount(asset, sellable(r, asset))} ${asset.ticker}.`);
         return base;
       }
       const stored = r.service.swapStore(m === 'rgbBuySign' ? 'bought' : 'sold').get(P.offerId);
@@ -461,6 +466,14 @@ export class ApprovalController {
     const app = this.app, state = this.state, a = this.active, r = app.rgb;
     if (!a || state.busy) return;
     state.busy = true; a.fixes = null;
+    if (id === 'reprep') {
+      // the screen itself couldn't be prepared: catch up, then prepare it again
+      state.busy = true; state.status.approve = ['Catching up with the chain…', '']; app.render();
+      try { await this.rgbBusy(() => r.refresh()); } catch { /* the step says what's wrong */ }
+      state.busy = false; state.status.approve = null;
+      a.prep = null; a.prepErr = null; a.errGen = undefined;
+      return this.prepare();
+    }
     try {
       if (id === 'refresh') { state.status.approve = ['Catching up with the chain…', '']; app.render(); await this.rgbBusy(() => r.refresh()); }
       if (id === 'repair') {

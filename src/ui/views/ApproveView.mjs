@@ -34,7 +34,12 @@ export class ApproveView extends View {
     return rowKV('Network fee', a.prepErr ? '—' : 'calculating…');
   }
 
-  error(a) { return a.prepErr ? `<p class="msg err">${esc(a.prepErr)}</p>` : ''; }
+  error(a) {
+    if (!a.prepErr) return '';
+    // an RGB screen that couldn't be prepared: catch up and look again, from here (not Settings)
+    const again = /^rgb/.test(a.method) && !this.state.busy ? '<div class="ap-fixes"><button class="btn ghost wide" data-ap-fix="reprep">Refresh and check again</button></div>' : '';
+    return `<p class="msg err">${esc(a.prepErr)}</p>${again}`;
+  }
 
   tokenAmount(P) { return `<p class="hero-bal center">${esc(Number(P.amount).toLocaleString())} <small>${esc(String(P.ticker).toUpperCase())}</small></p>`; }
 

@@ -1454,4 +1454,5 @@ export const ZH_CN = {
   "Fix it from the chain and try again": "按区块链修复后重试",
   "Your wallet was behind the chain: catching up, then trying again…": "你的钱包落后于区块链：正在同步，然后自动重试…",
   "Checking your RGB outputs against the chain…": "正在对照区块链检查你的 RGB 输出…",
+  "Refresh and check again": "刷新后重新检查",
 };

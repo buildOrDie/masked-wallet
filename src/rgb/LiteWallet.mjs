@@ -773,6 +773,14 @@ export class LiteWallet {
     for (const o of outpoints || []) if (o) m.set(String(o).toLowerCase(), Date.now());
   }
 
+  /**
+   * Base units of a token on this wallet's settled outputs, not promised to a listing: what "What's in this RGB
+   * wallet" shows as free. The engine's spendable balance can lag behind it (a move that confirmed, its transfer not
+   * marked settled yet), which blocked listings the wallet could make (2.31.2).
+   */
+  freeToList(assetId) {
+    try { return Number(heldBreakdown(plain(this.wallet.listUnspents(false)) || [], String(assetId), this.reserved).free); } catch { return 0; }
+  }
   /** How much of an asset this wallet can offer: { total, max } (one swap uses one RGB output). */
   async offerableAmount({ assetId }) {
     try { await this.wallet.sync(this.requireOnline()); } catch { /* last known figures */ }

@@ -349,6 +349,8 @@ export class SignetWallet {
   completeSale(p) { return this.mutate((w) => w.completeSale(p, this.swapStore('sold'))); }
   // wallet-to-wallet swaps in UniSat's P2P flow (2.31)
   get canP2p() { return !!this.wallet?.canP2p; }
+  /** Tokens free to list or sell on settled outputs (see LiteWallet.freeToList). */
+  freeToList(assetId) { return this.wallet?.freeToList ? this.wallet.freeToList(assetId) : 0; }
   p2pListable(p) { return this.exclusive(() => this.requireWallet().p2pListable(p)); }
   p2pBuyPrepare(p) { return this.mutate((w) => w.p2pBuyPrepare(p, this.swapStore('p2p'))); }
   p2pSaleSign(p) { return this.mutate((w) => w.p2pSaleSign(p, this.swapStore('p2p'))); }

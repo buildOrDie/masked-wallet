@@ -113,3 +113,14 @@ test('a failed RGB request offers what to do next, right under the error', async
   assert.deepEqual(fixesFor('rgbInstantBuy', 'The Signet block server is busy or down right now.').map((x) => x.id), ['retry']);
   assert.deepEqual(fixesFor('signPsbt', 'anything').map((x) => x.id), ['retry']);
 });
+
+test('listing: the tokens free on settled outputs count, even when the engine balance lags', async () => {
+  const { LiteWallet } = await import('../src/rgb/LiteWallet.mjs');
+  const A = 'rgb:lagTokenAssetId1234567890';
+  const w = new LiteWallet({ WasmWallet: {} }, { network: 'signet', indexerUrl: 'https://e.test', transportEndpoint: 'https://p.test/json-rpc', mnemonic: 'x', dataDir: 'lag' });
+  const out = (txid, vout, amt, settled = true) => ({ utxo: { colorable: true, outpoint: { txid, vout }, btcAmount: 1000 }, rgbAllocations: [{ assetId: A, settled, assignment: { Fungible: amt } }] });
+  w.w = { listUnspents: () => [out('a'.repeat(64), 1, 104), out('b'.repeat(64), 2, 45), out('c'.repeat(64), 2, 10, false)] };
+  assert.equal(w.freeToList(A), 149, 'the 104 on a confirmed output count; the 10 still waiting do not');
+  w.reserve([`${'b'.repeat(64)}:2`]);
+  assert.equal(w.freeToList(A), 104, 'tokens already listed do not');
+});
