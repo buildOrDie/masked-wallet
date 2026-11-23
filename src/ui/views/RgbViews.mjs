@@ -236,7 +236,7 @@ export function nftGrid(r) {
       const incoming = c.list.filter((a) => { const { settled: s, future: f } = r.bal(a); return f > s; }).length;
       return `<button class="tok-line coll-line" data-rgb="coll" data-rgb-arg="${esc(c.key)}">
         <span class="coll-pics" aria-hidden="true">${c.list.slice(0, 3).map((a) => nftPic(r, a)).join('')}</span>
-        <span class="bal-txt"><b class="tk" translate="no">${esc(c.name)}</b><span>RGB NFTs${incoming ? ` · <span class="pend-t">${incoming} incoming</span>` : ''}</span></span>
+        <span class="bal-txt"><b class="tk" translate="no">${esc(c.name)}</b><span>${c.verified ? '<span class="ok-t">Verified</span>' : '<span class="warn">Unverified</span>'}${incoming ? ` · <span class="pend-t">${incoming} incoming</span>` : ''}</span></span>
         <span class="bal-amt"><b>${c.list.length}</b><span>NFT${c.list.length === 1 ? '' : 's'}</span></span><span class="chev">›</span></button>`;
     }).join('')}</div>`;
 }
@@ -250,13 +250,14 @@ export class RgbCollectionView extends View {
     <div class="tok-page">
       <div class="view-head"><button class="icon-btn" data-go="home" aria-label="Back">${I.back}</button><span class="head-sp"></span></div>
       <div class="coll-hero"><p class="tok-name" translate="no">${esc(c.name)} ${rgbBadge}</p>
+        <p class="small ${c.verified ? 'ok-t' : 'warn'}">${c.verified ? 'Verified collection: every NFT here is on MASKED\'s whitelist' : 'Unverified: not on MASKED\'s whitelist'}</p>
         <p class="muted small">${c.list.length} NFT${c.list.length === 1 ? '' : 's'} in this wallet</p></div>
       <div class="nft-grid">${c.list.map((a) => {
         const { settled: s, future: fut } = r.bal(a);
         return `<button class="nft-tile" data-rgb="token" data-rgb-arg="${esc(a.assetId)}">${nftPic(r, a)}
           <span class="nft-name">${esc(a.name)}</span>${fut > s ? '<span class="pend-t small">incoming</span>' : ''}</button>`;
       }).join('')}</div>
-      <p class="info small">Anyone can make an NFT with any name. NFTs are grouped by their collection name, so check the asset ID on an NFT's page before trusting it.</p>
+      ${c.verified ? '' : '<p class="info warn small">Anyone can make an NFT with any name. These NFTs only share a name: MASKED can\'t tell who made them. Check each asset ID before trusting one.</p>'}
     </div>`;
   }
 }
@@ -308,7 +309,7 @@ export class RgbTokenView extends View {
     const r = this.app.rgb, { settled: s, future: fut, spendable: sp } = r.bal(a);
     return `
     <div class="tok-page">
-      <div class="view-head"><button class="icon-btn" data-rgb="coll" data-rgb-arg="${esc(a.ticker)}" aria-label="Back">${I.back}</button><span class="head-sp"></span></div>
+      <div class="view-head"><button class="icon-btn" data-rgb="coll" data-rgb-arg="${esc(r.collectionOf(a).key)}" aria-label="Back">${I.back}</button><span class="head-sp"></span></div>
       <div class="tok-hero nft-hero">${nftPic(r, a, true)}<p class="tok-name">${esc(a.name)} ${rgbBadge}</p>
         ${fut > s ? '<p class="pend-t small">On its way · waiting for a block</p>' : ''}</div>
       <section class="card tok-box">
@@ -323,7 +324,7 @@ export class RgbTokenView extends View {
       </section>
       ${nftTraitsCard(r.nftMeta?.(a))}
       <section class="card"><div class="kv">
-        ${rowKV('Collection', `<button class="link" data-rgb="coll" data-rgb-arg="${esc(a.ticker)}" translate="no">${esc(a.ticker)}</button>`)}
+        ${rowKV('Collection', `<button class="link" data-rgb="coll" data-rgb-arg="${esc(r.collectionOf(a).key)}" translate="no">${esc(r.collectionOf(a).name)}</button> ${r.collectionOf(a).verified ? '<span class="ok-t small">Verified</span>' : '<span class="warn small">Unverified</span>'}`)}
         ${a.details ? rowKV('Details', esc(a.details)) : ''}
         ${rowKV('Kind', 'NFT (RGB21), one of one')}
         ${rowKV('Network', r.isMain ? 'Bitcoin mainnet · beta' : `${esc(r.profile.label)} · test`)}

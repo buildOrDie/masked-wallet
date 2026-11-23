@@ -8,8 +8,19 @@ const nft = (id, ticker, name, settled, future) => ({ assetId: id, ticker, name,
 test('NFTs are grouped by collection, each sorted by number, the biggest collection first', () => {
   const me = { data: { groups: { uda: [nft('a', 'RATS', 'RATS #10', 1, 1), nft('b', 'FROG', 'FROG #1', 1, 1), nft('c', 'RATS', 'RATS #2', 1, 1), nft('d', 'RATS', 'RATS #5', 0, 1), nft('e', 'RATS', 'RATS #7', 0, 0)] } } };
   me.nfts = P.nfts.bind(me);
+  me.nftTrust = () => new Map();
   const cols = P.collections.call(me);
-  assert.deepEqual(cols.map((c) => [c.key, c.list.map((a) => a.name)]), [['RATS', ['RATS #2', 'RATS #5', 'RATS #10']], ['FROG', ['FROG #1']]]);
+  assert.deepEqual(cols.map((c) => [c.key, c.verified, c.list.map((a) => a.name)]), [['u:RATS', false, ['RATS #2', 'RATS #5', 'RATS #10']], ['u:FROG', false, ['FROG #1']]]);
+});
+
+test('a whitelisted collection groups exactly its asset IDs, first; a copy with the same ticker stays apart, unverified', async () => {
+  const { trustMap } = await import('../src/rgb/WalletRgb.mjs');
+  const me = { data: { groups: { uda: [nft('a', 'RATS', 'RATS #10', 1, 1), nft('fake', 'RATS', 'RATS #1', 1, 1), nft('c', 'RATS', 'RATS #2', 1, 1)] } } };
+  me.nfts = P.nfts.bind(me);
+  me.nftTrust = () => trustMap([{ slug: 'rats2', name: 'RATS', ticker: 'RATS', assetIds: ['a', 'c'].map((x) => `rgb:${x}`) }, { slug: 'BAD SLUG', name: 'X', assetIds: ['rgb:fake'] }]);
+  me.data.groups.uda = me.data.groups.uda.map((x) => ({ ...x, assetId: `rgb:${x.assetId}` }));
+  const cols = P.collections.call(me);
+  assert.deepEqual(cols.map((c) => [c.key, c.name, c.verified, c.list.map((a) => a.name)]), [['v:rats2', 'RATS', true, ['RATS #2', 'RATS #10']], ['u:RATS', 'RATS', false, ['RATS #1']]]);
 });
 
 test('an incoming NFT counts as incoming (its assignment is NonFungible, not an amount)', () => {

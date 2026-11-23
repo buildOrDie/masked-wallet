@@ -114,11 +114,23 @@ export const OPEN_FRESH_MS = 60_000;
 /** With nothing under way, the open popup refreshes RGB this often. */
 export const IDLE_REFRESH_MS = 5 * 60_000;
 
+/** The verified list (escrow /api/nft-verified) as Map asset ID → { slug, name }. */
+export function trustMap(list) {
+  const m = new Map();
+  for (const c of Array.isArray(list) ? list : []) {
+    const slug = String(c?.slug || ''), name = String(c?.name || c?.ticker || '').slice(0, 40);
+    if (!/^[a-z0-9-]{2,31}$/.test(slug) || !name) continue;
+    for (const id of Array.isArray(c.assetIds) ? c.assetIds : []) if (typeof id === 'string' && id.startsWith('rgb:')) m.set(id, { slug, name });
+  }
+  return m;
+}
+
 export class WalletRgb {
   constructor(app) {
     this.app = app;
     this.service = null;
     /** @type {Map<string, string>} NFT images by digest: data: URL, '' while loading */
+    /** @type {Map<string, string | { loading?: boolean, failedAt?: number }>} picture digest → data URL, or its state */
     this.imgs = new Map();
     /** @type {Map<string, any>} */ this.metas = new Map();
     this.data = null;
@@ -356,13 +368,28 @@ export class WalletRgb {
       ? `${a.name} is coming back from a cancelled listing. It can be sent after that cancel's block (about 10 minutes).`
       : `${a.name} is in Your listings (${e.stage === 'ready' ? 'on sale' : e.stage === 'moving' ? 'going live' : 'can\'t sell'}). Its output is promised to that listing, so it can't be sent. Cancel the listing first: Home → Your listings.`;
   }
-  /** NFTs by collection (their ticker), each sorted by number: [{ key, name, list }], the biggest collection first. */
+  /**
+   * NFTs by collection: [{ key, name, verified, list }]. A whitelisted collection (the verified list names each of its
+   * asset IDs) comes first and groups exactly its NFTs; any other NFT is grouped by its ticker, as unverified, since
+   * anyone can mint an NFT with any name.
+   */
   collections() {
     const num = (a) => Number((String(a.name).match(/#\s*(\d+)/) || [])[1] ?? Infinity);
+    const trust = this.nftTrust();
     const m = new Map();
-    for (const a of this.nfts()) { const k = String(a.ticker || '?'); if (!m.has(k)) m.set(k, []); m.get(k).push(a); }
-    return [...m].map(([key, list]) => ({ key, name: key, list: list.sort((x, y) => num(x) - num(y) || String(x.name).localeCompare(String(y.name))) }))
-      .sort((x, y) => y.list.length - x.list.length || x.key.localeCompare(y.key));
+    for (const a of this.nfts()) {
+      const v = trust.get(a.assetId);
+      const key = v ? `v:${v.slug}` : `u:${String(a.ticker || '?')}`;
+      if (!m.has(key)) m.set(key, { key, name: v ? v.name : String(a.ticker || '?'), verified: !!v, list: [] });
+      m.get(key).list.push(a);
+    }
+    return [...m.values()].map((c) => ({ ...c, list: c.list.sort((x, y) => num(x) - num(y) || String(x.name).localeCompare(String(y.name))) }))
+      .sort((x, y) => Number(y.verified) - Number(x.verified) || y.list.length - x.list.length || x.key.localeCompare(y.key));
+  }
+  /** The collection an NFT is listed under (its key, for the collection page). */
+  collectionOf(a) {
+    const v = this.nftTrust().get(a?.assetId);
+    return v ? { key: `v:${v.slug}`, name: v.name, verified: true } : { key: `u:${String(a?.ticker || '?')}`, name: String(a?.ticker || '?'), verified: false };
   }
   find(id) { return this.assets().find((a) => a.assetId === id) || this.nfts().find((a) => a.assetId === id) || null; }
   /**
@@ -372,10 +399,45 @@ export class WalletRgb {
   nftImg(a) {
     const d = a?.media?.digest;
     if (!d) return '';
-    if (this.imgs.has(d)) return this.imgs.get(d) || '';
-    this.imgs.set(d, '');
-    Promise.resolve(this.service?.nftImage?.(a.media)).then((url) => { if (url) { this.imgs.set(d, url); this.app.render?.(); } else this.imgs.delete(d); }, () => this.imgs.delete(d));
+    const hit = this.imgs.get(d);
+    if (typeof hit === 'string') return hit;
+    // loading, or not found lately: no new try on every redraw (each one asked every transfer server again)
+    if (hit && (hit.loading || Date.now() - Number(hit.failedAt || 0) < 60_000)) return '';
+    this.imgs.set(d, { loading: true });
+    const failed = () => this.imgs.set(d, { failedAt: Date.now() });
+    Promise.resolve(this.service?.nftImage?.(a.media)).then((url) => { if (url) { this.imgs.set(d, url); this.redrawSoon(); } else failed(); }, failed);
     return '';
+  }
+  /** One redraw for pictures that arrive together, not one per picture. */
+  redrawSoon() {
+    if (this.redrawTimer) return;
+    this.redrawTimer = setTimeout(() => { this.redrawTimer = null; this.app.render?.(); }, 60);
+  }
+  /**
+   * The whitelisted NFT collections (MASKED's launchpad's verified list): Map asset ID → { slug, name }. Loaded in the
+   * background (kept 10 minutes, and the last list across openings); empty while loading or without one.
+   */
+  nftTrust() {
+    const url = this.profile?.nftVerified;
+    if (!url) return new Map();
+    const KEY = 'masked.rgb.nftVerified';
+    if (!this.trust) {
+      this.trust = { map: new Map(), at: 0, loading: false };
+      try { const c = JSON.parse(localStorage.getItem(KEY) || 'null'); if (c?.url === url && Array.isArray(c.list)) this.trust.map = trustMap(c.list); } catch { /* none */ }
+    }
+    const t = this.trust;
+    if (!t.loading && Date.now() - t.at > 600_000) {
+      t.loading = true;
+      const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+      const timer = setTimeout(() => ctl?.abort(), 8000);
+      fetch(url, { signal: ctl?.signal, cache: 'no-store' }).then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status))))).then((list) => {
+        if (!Array.isArray(list)) return;
+        t.map = trustMap(list); t.at = Date.now();
+        try { localStorage.setItem(KEY, JSON.stringify({ url, list })); } catch { /* memory only */ }
+        this.redrawSoon();
+      }).catch(() => { t.at = Date.now() - 540_000; /* again in a minute */ }).finally(() => { clearTimeout(timer); t.loading = false; });
+    }
+    return t.map;
   }
   /** An NFT's traits once read from its metadata.json (nftTraits), null while loading or without one. */
   nftMeta(a) {
