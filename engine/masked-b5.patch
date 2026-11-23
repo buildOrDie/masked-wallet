@@ -2329,7 +2329,7 @@ index a3a9f46..fcac33d 100644
      }
  
 diff --git a/src/wallet/online.rs b/src/wallet/online.rs
-index ca96b4a..1c91780 100644
+index ca96b4a..ad907ee 100644
 --- a/src/wallet/online.rs
 +++ b/src/wallet/online.rs
 @@ -4,6 +4,12 @@
@@ -3738,7 +3738,7 @@ index ca96b4a..1c91780 100644
                  TransferStatus::Initiated,
                  1,
                  None,
-@@ -12074,3 +12900,1364 @@ mod bfa_tests {
+@@ -12074,3 +12900,1370 @@ mod bfa_tests {
          assert!(options(&format!(r#","evm_chains":{{"mainnet":{chain}}}"#)).is_err());
      }
  }
@@ -3844,9 +3844,15 @@ index ca96b4a..1c91780 100644
 +        let (_fee_rate, unspents, _input_unspents, mut runtime) = self._get_transfer_begin_data(online, 1)?;
 +        let asset = self.database.check_asset_exists(asset_id.clone())?;
 +        self.check_schema_support(&asset.schema)?;
-+        if !matches!(asset.schema, AssetSchema::Nia | AssetSchema::Ifa) {
++        // MASKED: an NFT (UDA) moves whole (a listing's cancel, a move to its own output), in one piece, no lots
++        let nft = asset.schema == AssetSchema::Uda;
++        if !matches!(asset.schema, AssetSchema::Nia | AssetSchema::Ifa | AssetSchema::Uda) {
 +            return Err(Error::InvalidAssignment);
 +        }
++        if nft && (amount != 1 || !lots_asked.is_empty()) {
++            return Err(Error::Internal { details: s!("an NFT moves whole: amount 1, no lots") });
++        }
++        let assignment = if nft { Assignment::NonFungible } else { Assignment::Fungible(amount) };
 +        let chainnet: ChainNet = self.bitcoin_network().into();
 +        let operation_sk = crate::encryption::gen_ed25519();
 +
@@ -3863,7 +3869,7 @@ index ca96b4a..1c91780 100644
 +                let r = Recipient {
 +                    recipient_id: d.recipient_id.clone(),
 +                    witness_data: Some(WitnessData { amount_sat: seal_amount_sat, blinding: None }),
-+                    assignment: Assignment::Fungible(amount),
++                    assignment: assignment.clone(),
 +                    transport_endpoints: d.transport_endpoints.clone(),
 +                    public_key: d.public_key.clone(),
 +                    encryption: d.encryption,
@@ -3883,7 +3889,7 @@ index ca96b4a..1c91780 100644
 +                LocalRecipient {
 +                    recipient_id,
 +                    local_recipient_data: LocalRecipientData::Witness(LocalWitnessData { amount_sat: seal_amount_sat, blinding, vout: seal_vout }),
-+                    assignment: Assignment::Fungible(amount),
++                    assignment: assignment.clone(),
 +                    transport_endpoints: vec![],
 +                    public_key: vec![],
 +                    encryption: Encryption::Unsupported,
