@@ -1,7 +1,7 @@
 import { esc, fmtBtc, short, sumSats } from '../../core/format.mjs';
 import { NETWORKS } from '../../bitcoin/networks.mjs';
 import { TRADE_PADDING } from '../../trade/trade-core.mjs';
-import { NEEDS_PREP } from '../../dapp/ApprovalController.mjs';
+import { NEEDS_PREP, CONFLICT_RGB, fixesFor } from '../../dapp/ApprovalController.mjs';
 import { View } from '../View.mjs';
 import { I, btcLogo, rowKV } from '../html.mjs';
 
@@ -41,7 +41,7 @@ export class ApproveView extends View {
   footNote(a, busy) {
     const st = this.state.status.approve;
     const fixes = !busy && a.fixes?.length ? a.fixes
-      : !busy && a.prepErr && /^rgb/.test(a.method) ? [{ id: 'reprep', label: 'Refresh and check again' }] : [];
+      : !busy && a.prepErr && /^rgb/.test(a.method) ? (CONFLICT_RGB.test(a.prepErr) ? fixesFor(a.method, a.prepErr) : [{ id: 'reprep', label: 'Refresh and check again' }]) : [];
     const text = st ? `<p class="msg ${st[1]}" role="status">${esc(st[0])}</p>` : a.prepErr ? `<p class="msg err" role="alert">${esc(a.prepErr)}</p>` : '';
     if (!text && !fixes.length) return '';
     return `<div class="ap-note">${text}${fixes.length ? `<div class="ap-fixes">${fixes.map((x) => `<button class="btn ghost wide" data-ap-fix="${esc(x.id)}">${esc(x.label)}</button>`).join('')}</div>` : ''}</div>`;
