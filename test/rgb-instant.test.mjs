@@ -32,7 +32,11 @@ function fakeLib(net) {
     presignedListingInfo: (p) => { if (String(p).startsWith('signed:')) return {}; if (String(p).startsWith('old:')) throw new Error('old layout'); const j = JSON.parse(p); if (!j.sig) throw new Error('the seller\'s signature is not valid'); return j.info; },
     presignedBuyPsbt: (tpl, ins, seal, change, sellerTx) => JSON.stringify({ tpl: JSON.parse(tpl), ins, seal, change, sellerTx }),
     checkPresignedFinal: (tpl, hexTx, seal) => { const j = JSON.parse(hexTx); if (j.seal !== seal) throw new Error('the seal does not pay the buyer'); return T('f'); },
-    completePresignedConsignment: (bytes, tt, hexTx) => enc({ ...JSON.parse(new TextDecoder().decode(bytes)), final: true }),
+    completePresignedConsignment: (bytes, tt, hexTx) => enc({ ...JSON.parse(new TextDecoder().decode(bytes)), final: true, tx: String(hexTx).slice(0, 40) }),
+    // co-signed claims: the template comes without the seller's signature, the claimer's transaction too
+    cosignedListingInfo: (p) => { const j = JSON.parse(p); if (j.sig) throw new Error('a co-signed claim comes without the seller\'s signature'); return j.info; },
+    psbtExtractHexCosigned: (p) => JSON.stringify({ seal: JSON.parse(p).seal, partial: true }),
+    checkCosignedPartial: (tpl, hexTx, seal) => { const j = JSON.parse(hexTx); if (!j.partial || j.seal !== seal) throw new Error('the seal does not pay the buyer'); return T('f'); },
   };
   class WasmInvoice { constructor(i) { this.i = i; } invoiceData() { return { recipientId: 'rid', network: 'signet', transportEndpoints: [] }; } free() {} }
   return { WasmWallet, WasmInvoice, inspectSwapConsignment: (bytes, txid, network, vout) => ({ ...JSON.parse(new TextDecoder().decode(bytes)), vout, txid }), net };
@@ -177,6 +181,52 @@ test('buyer: checks price, signature, output, tokens; pays, broadcasts, hands th
   chain.spends[seller] = { spent: true, txid: T('e') };
   const y = mk();
   await assert.rejects(y.w.instantBuy({ offerId: offer.offerId, network: 'Signet', offer, listing, feeRate: 2 }, y.store), /just bought/);
+});
+
+test('co-signed claim: signed without the seller, nothing broadcast; once the launchpad sent it, the transfer is handed over', async () => {
+  const chain = fakeChain();
+  const seller = `${T('a')}:0`, coin = `${T('d')}:1`;
+  chain.outs[seller] = { sats: 1000, script: '5120sell' };
+  chain.outs[coin] = { sats: 30000, script: '5120buy', tx: 'dd' };
+  const info = { sellerOutpoint: seller, sellerSats: 1000, sellerScript: '5120sell', payoutSats: 21000, opretScript: '6a20', templateTxid: T('6') };
+  const listing = { psbt: JSON.stringify({ sig: false, info }), consignment: b64(enc({ valid: true, contractId: ASSET, sealAmount: 1 })), templateTxid: T('6'), cosign: true };
+  const offer = { offerId: 'c0123456789ab', assetId: ASSET, amount: '1', priceSats: '20000', state: 'OPEN' };
+  const b = wallet({ name: 'claimer', lib: fakeLib(), chain, coins: [{ outpoint: coin, txout: { value: 30000 }, is_spent: false }] });
+  const r = await b.w.instantBuy({ offerId: offer.offerId, network: 'Signet', offer, listing, feeRate: 2 }, b.store);
+  assert.equal(r.txid, T('f'));
+  assert.equal(JSON.parse(r.cosign.tx).partial, true, 'the claimer\'s part, for the launchpad');
+  assert.equal(chain.posted.length, 0, 'the claimer never broadcasts it: only the launchpad can complete it');
+  assert.equal(b.mem[offer.offerId].cosign, true);
+  // a second tap: the same signed claim, nothing new
+  assert.equal((await b.w.instantBuy({ offerId: offer.offerId, network: 'Signet', offer, listing }, b.store)).cosign.tx, r.cosign.tx);
+  // not sent yet: nothing handed over
+  assert.equal(await b.w.instantPost(offer.offerId, b.store), false);
+  assert.equal(b.log.filter((x) => x[0] === 'post').length, 0);
+  // the launchpad co-signed and sent it: the transfer goes with the whole transaction, from the block server
+  chain.posted.push('the launchpad\'s broadcast');
+  assert.equal(await b.w.instantPost(offer.offerId, b.store), true);
+  const post = b.log.find((x) => x[0] === 'post');
+  assert.deepEqual(post.slice(0, 4), ['post', 'rid1', T('f'), 2]);
+  assert.equal(b.mem[offer.offerId].posted, true);
+  // a plain market listing can't come unsigned, and a claim's template can't come signed
+  const x = wallet({ name: 'x', lib: fakeLib(), chain, coins: [{ outpoint: coin, txout: { value: 30000 }, is_spent: false }] });
+  await assert.rejects(x.w.instantBuy({ offerId: 'other', network: 'Signet', offer: { ...offer, offerId: 'other' }, listing: { ...listing, cosign: undefined }, feeRate: 2 }, x.store), /signature is not valid/);
+  await assert.rejects(x.w.instantBuy({ offerId: 'other2', network: 'Signet', offer: { ...offer, offerId: 'other2' }, listing: { ...listing, psbt: JSON.stringify({ sig: true, info }) }, feeRate: 2 }, x.store), /without the seller/);
+});
+
+test('co-signed claim never sent by the launchpad: given up after 30 minutes, nothing paid', async () => {
+  const chain = fakeChain();
+  const seller = `${T('a')}:0`, coin = `${T('d')}:1`;
+  chain.outs[seller] = { sats: 1000, script: '5120sell' };
+  chain.outs[coin] = { sats: 30000, script: '5120buy', tx: 'dd' };
+  const info = { sellerOutpoint: seller, sellerSats: 1000, sellerScript: '5120sell', payoutSats: 21000, opretScript: '6a20', templateTxid: T('6') };
+  const listing = { psbt: JSON.stringify({ sig: false, info }), consignment: b64(enc({ valid: true, contractId: ASSET, sealAmount: 1 })), templateTxid: T('6'), cosign: true };
+  const offer = { offerId: 'c0123456789ac', assetId: ASSET, amount: '1', priceSats: '20000', state: 'OPEN' };
+  const b = wallet({ name: 'claimer', lib: fakeLib(), chain, coins: [{ outpoint: coin, txout: { value: 30000 }, is_spent: false }] });
+  await b.w.instantBuy({ offerId: offer.offerId, network: 'Signet', offer, listing, feeRate: 2 }, b.store);
+  b.mem[offer.offerId].at -= 31 * 60_000;
+  assert.equal(await b.w.instantPost(offer.offerId, b.store), false);
+  assert.match(b.mem[offer.offerId].failed, /never completed this claim: nothing was paid/);
 });
 
 test('without the listing engine, Instant calls say MASKED needs an update', async () => {

@@ -103,6 +103,8 @@ function swapParams(method, p) {
     const l = p.listing;
     if (!l || typeof l !== 'object') throw err(4000, 'listing (the signed listing from the market) is required.');
     out.listing = { psbt: str(l.psbt, 20_000, 'listing.psbt'), consignment: str(l.consignment, 4_000_000, 'listing.consignment'), templateTxid: str(l.templateTxid, 64, 'listing.templateTxid') };
+    // a co-signed claim (a launchpad): the seller's signature comes last, from the launchpad, while the claim holds
+    if (l.cosign === true) out.listing.cosign = true;
     // an NFT listing's files (picture, metadata.json): the wallet checks each against the NFT
     if (Array.isArray(l.media)) {
       if (l.media.length > 21) throw err(4000, 'listing.media: too many files.');

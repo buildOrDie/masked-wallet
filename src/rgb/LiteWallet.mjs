@@ -2316,7 +2316,9 @@ export class LiteWallet {
   async instantListingFetch(o, listing) {
     const l = listing || {};
     let info;
-    try { info = plain(this.lib.WasmWallet.presignedListingInfo(String(l.psbt || ''))); } catch (e) { throw new Error(`The listing does not check out: ${e?.message || e}`); }
+    // a co-signed claim comes without the seller's signature (the launchpad adds it while the claim holds)
+    if (l.cosign && !this.canCosign) throw new Error('This MASKED build can\'t complete launchpad claims yet. Update MASKED, then try again.');
+    try { info = plain(l.cosign ? this.lib.WasmWallet.cosignedListingInfo(String(l.psbt || '')) : this.lib.WasmWallet.presignedListingInfo(String(l.psbt || ''))); } catch (e) { throw new Error(`The listing does not check out: ${e?.message || e}`); }
     if (String(info.templateTxid) !== String(l.templateTxid)) throw new Error('The listing does not match its transfer.');
     if (BigInt(String(info.payoutSats)) - BigInt(String(info.sellerSats)) !== o.priceSats) throw new Error('The signed price is not the offer\'s price.');
     // the seller's output is still there, and is what the signature says (both asked at once)
@@ -2356,7 +2358,12 @@ export class LiteWallet {
     // bought before from this wallet: the same purchase, if the network has it (or takes it again); otherwise it never
     // went through, and this is a new purchase
     const done = store.get(o.offerId);
-    if (done?.txid && !done.failed) {
+    if (done?.txid && !done.failed && done.cosign) {
+      // a co-signed claim signed a moment ago: the same signed transaction for the launchpad (a second tap, a reload)
+      if (await this.knowsTx(done.txid)) return { txid: done.txid };
+      if (done.partialHex && Date.now() - Number(done.at || 0) < 10 * 60_000) return { txid: done.txid, cosign: { tx: done.partialHex } };
+      store.del?.(o.offerId);
+    } else if (done?.txid && !done.failed) {
       if (await this.knowsTx(done.txid)) return { txid: done.txid };
       if (done.txHex) {
         try { await this.broadcastAll(done.txHex, done.txid); return { txid: done.txid }; } catch { /* refused now: buy anew */ }
@@ -2413,11 +2420,23 @@ export class LiteWallet {
     const inputs = pay.coins.map((c, k) => ({ outpoint: c.outpoint, sats: bis[k].sats, script: bis[k].script, tx: bis[k].tx }));
     // the seller's transaction too: the engine signs only with the previous transaction of every input in hand
     const unsigned = this.lib.WasmWallet.presignedBuyPsbt(String(l.psbt), inputs, seal, change > 0n ? { script: await this.ownScript(), sats: Number(change) } : null, si.tx || null);
-    const txHex = this.extractHex(this.sign(unsigned));
-    const txid = this.lib.WasmWallet.checkPresignedFinal(String(l.psbt), txHex, seal);
+    const signed = this.sign(unsigned);
+    const txHex = l.cosign ? this.lib.WasmWallet.psbtExtractHexCosigned(signed) : this.extractHex(signed);
+    const txid = l.cosign ? this.lib.WasmWallet.checkCosignedPartial(String(l.psbt), txHex, seal) : this.lib.WasmWallet.checkPresignedFinal(String(l.psbt), txHex, seal);
     const completed = this.lib.WasmWallet.completePresignedConsignment(consignment, info.templateTxid, txHex);
     check(completed, txid);
     lap('sign');
+    if (l.cosign) {
+      // the launchpad adds its signature and sends it while the claim holds: kept until a block server has it, then
+      // the NFT's transfer is handed to this wallet with the whole transaction (instantPost). Nothing goes out here
+      store.set(o.offerId, { role: 'buyer', cosign: true, assetId: o.assetId, amount: String(o.amount), priceSats: String(o.priceSats), recipientId: r.recipientId, invoice: r.invoice, txid, partialHex: txHex, consignment: b64(consignment), templateTxid: String(info.templateTxid), ...(nft ? { media: listingMedia(l) } : {}), posted: false, at: Date.now() });
+      this.expectPurchases([...this.purchases, r.recipientId]);
+      // its coins are taken: a second claim right after pays with others (the first goes out in a moment)
+      this.spentNow(pay.coins.map((c) => c.outpoint));
+      await this.save();
+      console.info('[MASKED] Co-signed claim signed', { totalMs: Date.now() - t0, ...ms });
+      return { txid, cosign: { tx: txHex } };
+    }
     // kept with the purchase: if a server drops it, a refresh sends it again; the wallet only expects the tokens
     // once a block server has the transaction
     store.set(o.offerId, { role: 'buyer', assetId: o.assetId, amount: String(o.amount), priceSats: String(o.priceSats), recipientId: r.recipientId, invoice: r.invoice, txid, txHex, completed: b64(completed), ...(nft ? { media: listingMedia(l) } : {}), posted: false, at: Date.now() });
@@ -2446,6 +2465,8 @@ export class LiteWallet {
     console.info('[MASKED] Instant buy', { totalMs: Date.now() - t0, ...ms });
     return { txid };
   }
+  /** Can this RGB engine complete co-signed launchpad claims (the seller signs last; 2.32)? */
+  get canCosign() { return this.canPresign && ['cosignedListingInfo', 'psbtExtractHexCosigned', 'checkCosignedPartial'].every((f) => typeof this.lib.WasmWallet?.[f] === 'function'); }
   /** Can this RGB engine buy several Instant listings in one transaction (2.30)? */
   get canCombine() { return this.canPresign && typeof this.lib.WasmWallet?.presignedCombinedBuy === 'function' && typeof this.lib.WasmWallet?.checkPresignedCombinedFinal === 'function'; }
   /**
@@ -2535,8 +2556,22 @@ export class LiteWallet {
   }
   /** Buyer: give this wallet the transfer (through the transfer server, like any incoming one). Retried on refresh. */
   async instantPost(offerId, store, { justSent = false } = {}) {
-    const e = store.get(String(offerId));
+    let e = store.get(String(offerId));
     if (!e || e.role !== 'buyer' || e.posted || e.failed) return false;
+    if (e.cosign && !e.completed) {
+      // a co-signed claim: once the launchpad sent it, the whole transaction (with its signature) goes in the transfer
+      if (!(await this.knowsTx(e.txid))) {
+        // never sent: the claim lapsed, nothing was paid
+        if (Date.now() - Number(e.at || 0) > 30 * 60_000) store.set(String(offerId), { ...e, failed: 'The launchpad never completed this claim: nothing was paid.', partialHex: undefined, consignment: undefined, at: Date.now() });
+        return false;
+      }
+      try {
+        const full = (await (await this.esplora(`/tx/${e.txid}/hex`)).text()).trim();
+        const completed = this.lib.WasmWallet.completePresignedConsignment(unb64(String(e.consignment)), String(e.templateTxid), full);
+        e = { ...e, completed: b64(completed), partialHex: undefined, consignment: undefined };
+        store.set(String(offerId), e);
+      } catch { return false; }
+    }
     // the tokens are only expected once a block server has the purchase: send it (again) first (not right after this
     // wallet sent it: a block server accepted it a moment ago, asking again only cost a second)
     if (e.txHex && !justSent && !(await this.knowsTx(e.txid))) {

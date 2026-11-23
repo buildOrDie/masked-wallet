@@ -7,7 +7,9 @@
 # tokens on its own change output), spare RGB outputs freed back to bitcoin (spareUtxos, freeSpareUtxosBegin),
 # transfers from RGB 0.11.1 wallets (old-format
 # consignments converted on arrival) and the upgrade of wallets saved by MASKED's previous engine
-# (migrateLegacyWallet), and NFTs (RGB21 / UDA: issueAssetUda, listed, received and sent with their picture). Output: vendor/rgb-lib-wasm/, which `npm run build` uses instead of the npm package.
+# (migrateLegacyWallet), NFTs (RGB21 / UDA: issueAssetUda, listed, received and sent with their picture), and
+# co-signed claims (the seller signs last: cosignedListingInfo, checkCosignedPartial, psbtExtractHexCosigned,
+# cosignPresigned, presignedStripSeller; coloredAddress). Output: vendor/rgb-lib-wasm/, which `npm run build` uses instead of the npm package.
 #
 # Needs: git, Rust (rustup) with the wasm32 target, wasm-pack 0.14, and a C compiler that targets WebAssembly
 # (on a Mac: `brew install llvm`; Apple's own clang can't). 10–20 minutes the first time.
@@ -44,7 +46,7 @@ cp "$work/bindings/wasm/pkg/"rgb_lib_wasm_bindings* "$out/"
 # the bindings import small JS helpers from snippets/ (beta.4: a no-store fetch)
 [[ -d "$work/bindings/wasm/pkg/snippets" ]] && cp -R "$work/bindings/wasm/pkg/snippets" "$out/"
 node -e "require('fs').writeFileSync('$out/package.json', JSON.stringify({name:'@utexo/rgb-lib-wasm',version:'1.0.0-beta.4+masked',type:'module',main:'rgb_lib_wasm_bindings.js',types:'rgb_lib_wasm_bindings.d.ts'},null,2))"
-for f in issueAssetUda mediaFile mediaDigests addMediaFile newSwapPsbt presignSale setSwapLots outputLocks releaseUnbroadcast colorP2pSwap publishP2pSwap p2pCommit setSwapHolds heldSwap releaseSwapHold p2pCompletePsbt p2pPsbtHash presignedCombinedBuy checkPresignedCombinedFinal migrateLegacyWallet setPresignedReceives setOwnUnconfirmed setSwapChangeVout spareUtxos emptyUtxos freeSpareUtxosBegin unpaidWitnessReceives ownMovesChain learnOwnOutputs setLightSync; do
+for f in cosignedListingInfo checkCosignedPartial psbtExtractHexCosigned cosignPresigned presignedStripSeller coloredAddress issueAssetUda mediaFile mediaDigests addMediaFile newSwapPsbt presignSale setSwapLots outputLocks releaseUnbroadcast colorP2pSwap publishP2pSwap p2pCommit setSwapHolds heldSwap releaseSwapHold p2pCompletePsbt p2pPsbtHash presignedCombinedBuy checkPresignedCombinedFinal migrateLegacyWallet setPresignedReceives setOwnUnconfirmed setSwapChangeVout spareUtxos emptyUtxos freeSpareUtxosBegin unpaidWitnessReceives ownMovesChain learnOwnOutputs setLightSync; do
   grep -q "$f" "$out/rgb_lib_wasm_bindings.d.ts" || { echo "The built engine has no $f. Stop."; exit 1; }
 done
 shasum -a 256 "$out/rgb_lib_wasm_bindings_bg.wasm"

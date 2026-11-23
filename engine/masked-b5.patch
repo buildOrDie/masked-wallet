@@ -11,7 +11,7 @@ index 884d686..e2896b5 100644
  rgb-strict-encoding = { version = "=1.0.5", default-features = false, features = [
      "bitcoin",
 diff --git a/bindings/wasm/src/lib.rs b/bindings/wasm/src/lib.rs
-index 51b6efd..e3e51ec 100644
+index 51b6efd..73c1194 100644
 --- a/bindings/wasm/src/lib.rs
 +++ b/bindings/wasm/src/lib.rs
 @@ -179,6 +179,81 @@ impl WasmWallet {
@@ -96,7 +96,23 @@ index 51b6efd..e3e51ec 100644
      /// Issue a new IFA (Inflatable Fungible Asset).
      ///
      /// `amounts_js` is a JS array of u64 values.
-@@ -635,6 +710,364 @@ impl WasmWallet {
+@@ -467,6 +542,15 @@ impl WasmWallet {
+     }
+ 
+     /// Return a new Bitcoin address from the vanilla wallet.
++    /// A new address of the RGB side: bitcoin paid to it becomes an empty RGB output.
++    #[wasm_bindgen(js_name = "coloredAddress")]
++    pub fn colored_address(&self) -> Result<String, JsValue> {
++        self.inner
++            .borrow_mut()
++            .get_colored_address()
++            .map_err(|e| JsValue::from_str(&e.to_string()))
++    }
++
+     #[wasm_bindgen(js_name = "getAddress")]
+     pub fn get_address(&self) -> Result<String, JsValue> {
+         self.inner
+@@ -635,6 +719,396 @@ impl WasmWallet {
          to_js(&result)
      }
  
@@ -406,6 +422,38 @@ index 51b6efd..e3e51ec 100644
 +    }
 +
 +    /// The buyer's last check of its signed transaction (hex) against the template. Returns its txid.
++    /// A co-signed claim's template (the seller's signature withheld): what it says, checked like a listing.
++    #[wasm_bindgen(js_name = "cosignedListingInfo")]
++    pub fn cosigned_listing_info(psbt: &str) -> Result<JsValue, JsValue> {
++        let info = rgb_lib_wasm::wallet::rust_only::cosigned_listing_info(psbt).map_err(|e| JsValue::from_str(&e.to_string()))?;
++        to_js(&info)
++    }
++
++    /// A signed template without the seller's signature (what a co-signed claim gives the claimer).
++    #[wasm_bindgen(js_name = "presignedStripSeller")]
++    pub fn presigned_strip_seller(psbt: &str) -> Result<String, JsValue> {
++        rgb_lib_wasm::wallet::rust_only::presigned_strip_seller(psbt).map_err(|e| JsValue::from_str(&e.to_string()))
++    }
++
++    /// The claimer's check of its co-signed claim (the seller's signature still missing). Returns the txid.
++    #[wasm_bindgen(js_name = "checkCosignedPartial")]
++    pub fn check_cosigned_partial(template: &str, partial_tx: &str, seal_script: &str) -> Result<String, JsValue> {
++        rgb_lib_wasm::wallet::rust_only::check_cosigned_partial(template, partial_tx, seal_script).map_err(|e| JsValue::from_str(&e.to_string()))
++    }
++
++    /// The claimer's transaction of a co-signed claim, hex: every input signed but the seller's.
++    #[wasm_bindgen(js_name = "psbtExtractHexCosigned")]
++    pub fn psbt_extract_hex_cosigned(psbt: &str) -> Result<String, JsValue> {
++        rgb_lib_wasm::wallet::rust_only::psbt_extract_hex_cosigned(psbt).map_err(|e| JsValue::from_str(&e.to_string()))
++    }
++
++    /// The seller adds its signature to a co-signed claim and checks it: `{ txid, tx }`.
++    #[wasm_bindgen(js_name = "cosignPresigned")]
++    pub fn cosign_presigned(template: &str, partial_tx: &str) -> Result<JsValue, JsValue> {
++        let r = rgb_lib_wasm::wallet::rust_only::cosign_presigned(template, partial_tx).map_err(|e| JsValue::from_str(&e.to_string()))?;
++        to_js(&r)
++    }
++
 +    #[wasm_bindgen(js_name = "checkPresignedFinal")]
 +    pub fn check_presigned_final(template: &str, final_tx: &str, seal_script: &str) -> Result<String, JsValue> {
 +        rgb_lib_wasm::wallet::rust_only::check_presigned_final(template, final_tx, seal_script).map_err(|e| JsValue::from_str(&e.to_string()))
@@ -461,7 +509,7 @@ index 51b6efd..e3e51ec 100644
      /// Send RGB assets (end): broadcast a signed PSBT. Returns an OperationResult JS object.
      #[wasm_bindgen(js_name = "sendEnd")]
      pub async fn send_end(
-@@ -763,6 +1196,56 @@ impl WasmWallet {
+@@ -763,6 +1237,56 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -518,7 +566,7 @@ index 51b6efd..e3e51ec 100644
      /// Drain all wallet funds (end): broadcast a signed PSBT. Returns the txid string.
      #[wasm_bindgen(js_name = "drainToEnd")]
      pub async fn drain_to_end(
-@@ -1074,6 +1557,22 @@ impl WasmWallet {
+@@ -1074,6 +1598,22 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -541,7 +589,7 @@ index 51b6efd..e3e51ec 100644
      /// Check if the wallet needs a backup. Returns true if modified since last backup.
      #[wasm_bindgen(js_name = "backupInfo")]
      pub fn backup_info(&self) -> Result<bool, JsValue> {
-@@ -1217,7 +1716,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
+@@ -1217,7 +1757,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
  /// Works before the witness transaction is broadcast. Takes the raw consignment
  /// bytes (strict-encoded, not base64), the witness transaction ID, and the Bitcoin network.
  ///
@@ -551,7 +599,7 @@ index 51b6efd..e3e51ec 100644
  #[wasm_bindgen(js_name = "validateConsignmentOffchain")]
  pub fn validate_consignment_offchain(
      consignment_bytes: &[u8],
-@@ -1235,3 +1735,43 @@ pub fn validate_consignment_offchain(
+@@ -1235,3 +1776,43 @@ pub fn validate_consignment_offchain(
      .map_err(|e| JsValue::from_str(&e.to_string()))?;
      to_js(&result)
  }
@@ -573,7 +621,7 @@ index 51b6efd..e3e51ec 100644
 +/// MASKED: the features of this engine build.
 +#[wasm_bindgen(js_name = "engineFeatures")]
 +pub fn engine_features() -> Vec<String> {
-+    vec!["swap".into(), "presign".into(), "proxy-v1".into(), "p2p-swap".into(), "output-locks".into(), "uda".into(), "legacy-migration".into(), "legacy-consignments".into(), "legacy-backup".into()]
++    vec!["swap".into(), "presign".into(), "proxy-v1".into(), "p2p-swap".into(), "output-locks".into(), "uda".into(), "cosign".into(), "legacy-migration".into(), "legacy-consignments".into(), "legacy-backup".into()]
 +}
 +
 +#[wasm_bindgen(js_name = "inspectSwapConsignment")]
@@ -1549,7 +1597,7 @@ index c5c45b2..d793073 100644
  pub(crate) mod offline;
  #[cfg(feature = "esplora")]
 diff --git a/src/wallet/offline.rs b/src/wallet/offline.rs
-index a3a9f46..db79284 100644
+index a3a9f46..fcac33d 100644
 --- a/src/wallet/offline.rs
 +++ b/src/wallet/offline.rs
 @@ -37,7 +37,13 @@ pub(crate) const CONFIRMATION_MARGIN_SECS: u32 = 86400;
@@ -2206,7 +2254,25 @@ index a3a9f46..db79284 100644
      }
  
      pub(crate) fn sync_if_requested(
-@@ -4019,6 +4542,7 @@ impl Wallet {
+@@ -3877,6 +4400,17 @@ impl Wallet {
+         Ok(address.to_string())
+     }
+ 
++    /// MASKED: a new address of the RGB side of the wallet. Bitcoin paid to it becomes an empty RGB output (a
++    /// launchpad's sales pay their price there, so each sale leaves an output the next NFT can be minted on).
++    pub fn get_colored_address(&mut self) -> Result<String, Error> {
++        let address = self.get_new_address()?;
++        if !self.wallet_data.reuse_addresses {
++            self.update_backup_info(false)?;
++        }
++        self.queue_save()?;
++        Ok(address.to_string())
++    }
++
+     /// Rotate the pinned address for the given keychain.
+     ///
+     /// Only meaningful when `reuse_addresses` is `true`. Increments the pinned derivation
+@@ -4019,6 +4553,7 @@ impl Wallet {
              bdk_changeset: self.bdk_database.get_data().clone(),
              transfer_artifacts: self.transfer_artifacts.clone(),
              received_consignments: self.received_consignments.clone(),
@@ -2214,7 +2280,7 @@ index a3a9f46..db79284 100644
              received_consignment_meta: self.received_consignment_meta.clone(),
              received_signed_txs: self.received_signed_txs.clone(),
              received_mints: self.received_mints.clone(),
-@@ -4116,6 +4640,7 @@ impl Wallet {
+@@ -4116,6 +4651,7 @@ impl Wallet {
  
          // Restore received consignments
          self.received_consignments = snapshot.received_consignments;
@@ -2222,7 +2288,7 @@ index a3a9f46..db79284 100644
          self.received_consignment_meta = snapshot.received_consignment_meta;
          self.received_signed_txs = snapshot.received_signed_txs;
          self.received_mints = snapshot.received_mints;
-@@ -4125,7 +4650,11 @@ impl Wallet {
+@@ -4125,7 +4661,11 @@ impl Wallet {
  
          *self.rgb_stock.borrow_mut() = Some(stock);
  
@@ -2235,7 +2301,7 @@ index a3a9f46..db79284 100644
      }
  }
  
-@@ -4203,6 +4732,7 @@ pub(crate) mod address_reuse_tests {
+@@ -4203,6 +4743,7 @@ pub(crate) mod address_reuse_tests {
              transfer_artifacts: HashMap::new(),
              #[cfg(feature = "esplora")]
              received_consignments: HashMap::new(),
@@ -2243,7 +2309,7 @@ index a3a9f46..db79284 100644
              #[cfg(feature = "esplora")]
              received_consignment_meta: HashMap::new(),
              #[cfg(feature = "esplora")]
-@@ -4215,6 +4745,18 @@ pub(crate) mod address_reuse_tests {
+@@ -4215,6 +4756,18 @@ pub(crate) mod address_reuse_tests {
              rgb_stock: std::rc::Rc::new(std::cell::RefCell::new(None)),
              vss_client: None,
              last_vss_backup_error: std::cell::RefCell::new(None),
@@ -5001,7 +5067,7 @@ index ca96b4a..ad9604a 100644
 +    }
 +}
 diff --git a/src/wallet/rust_only.rs b/src/wallet/rust_only.rs
-index 4e07a9c..fa5d0ae 100644
+index 4e07a9c..7ea59f1 100644
 --- a/src/wallet/rust_only.rs
 +++ b/src/wallet/rust_only.rs
 @@ -3,6 +3,7 @@
@@ -5251,7 +5317,7 @@ index 4e07a9c..fa5d0ae 100644
          };
          let json = serde_json::to_string(&result_invalid).unwrap();
          let deserialized: ValidateConsignmentResult = serde_json::from_str(&json).unwrap();
-@@ -719,3 +868,1060 @@ mod tests {
+@@ -719,3 +868,1196 @@ mod tests {
          assert_eq!(IndexerProtocol::Esplora.to_string(), "Esplora");
      }
  }
@@ -5457,6 +5523,27 @@ index 4e07a9c..fa5d0ae 100644
 +/// Read and check a pre-signed listing's template PSBT: a placeholder input 0 and the seller's input 1 (signed);
 +/// outputs 0 the commitment (OP_RETURN), 1 the payout, 2 the seal; and a valid seller signature.
 +pub fn presigned_listing_info(psbt: &str) -> Result<PresignedInfo, Error> {
++    listing_info(psbt, Some(true))
++}
++
++/// [`presigned_listing_info`] for a co-signed claim: the seller (a launchpad's escrow) withheld its signature, and
++/// adds it only when the claim is still valid ([`cosign_presigned`]), so a claim can't go through once it expired.
++/// Everything else is checked the same way.
++pub fn cosigned_listing_info(psbt: &str) -> Result<PresignedInfo, Error> {
++    listing_info(psbt, Some(false))
++}
++
++/// The seller's signature of a listing's template removed: what a co-signed claim gives the claimer.
++pub fn presigned_strip_seller(psbt: &str) -> Result<String, Error> {
++    presigned_listing_info(psbt)?;
++    let mut p = Psbt::from_str(psbt)?;
++    p.inputs[SELLER].final_script_witness = None;
++    Ok(p.to_string())
++}
++
++/// `signed`: Some(true) the seller's signature must be there (and valid), Some(false) it must be withheld, None either
++/// (checked when there).
++fn listing_info(psbt: &str, signed: Option<bool>) -> Result<PresignedInfo, Error> {
 +    let psbt = Psbt::from_str(psbt)?;
 +    let tx = &psbt.unsigned_tx;
 +    if tx.input.len() != 2 || psbt.inputs.len() != 2 {
@@ -5473,8 +5560,16 @@ index 4e07a9c..fa5d0ae 100644
 +        return Err(bad_listing("output 2 must be the 330-sat seal"));
 +    }
 +    let prev = psbt.inputs[SELLER].witness_utxo.clone().ok_or(bad_listing("the seller's input has no amount"))?;
-+    let witness = psbt.inputs[SELLER].final_script_witness.clone().ok_or(bad_listing("the seller's input is not signed"))?;
-+    check_seller_signature(tx, &prev, &witness)?;
++    match (psbt.inputs[SELLER].final_script_witness.clone(), signed) {
++        (Some(_), Some(false)) => return Err(bad_listing("a co-signed claim comes without the seller's signature")),
++        (None, Some(true)) => return Err(bad_listing("the seller's input is not signed")),
++        (Some(witness), _) => check_seller_signature(tx, &prev, &witness)?,
++        (None, _) => {
++            if !prev.script_pubkey.is_p2tr() {
++                return Err(bad_listing("the seller's output is not a taproot output"));
++            }
++        }
++    }
 +    if o[SELLER].value.to_sat() <= prev.value.to_sat() {
 +        return Err(bad_listing("the payout must be more than the seller's output"));
 +    }
@@ -5496,7 +5591,8 @@ index 4e07a9c..fa5d0ae 100644
 +/// previous transaction of every input it doesn't know itself (BDK), and the seller's is one of them.
 +pub fn presigned_buy_psbt(template: &str, buyer_inputs: Vec<SwapInput>, seal_script: String, change: Option<SwapOutput>, seller_tx: Option<String>) -> Result<String, Error> {
 +    use bdk_wallet::bitcoin::{Amount, Sequence, TxIn, Witness};
-+    presigned_listing_info(template)?;
++    // a co-signed claim's template comes without the seller's signature (it's added last)
++    listing_info(template, None)?;
 +    if buyer_inputs.is_empty() {
 +        return Err(bad_listing("the buyer pays with at least one input"));
 +    }
@@ -5560,6 +5656,51 @@ index 4e07a9c..fa5d0ae 100644
 +/// commitment (output 0) and payout (output 1), the seal at output 2 pays `seal_script`, nothing taproot or OP_RETURN
 +/// comes before the commitment, and the seller's signature is valid for it.
 +pub fn check_presigned_final(template: &str, final_tx: &str, seal_script: &str) -> Result<String, Error> {
++    check_final(template, final_tx, seal_script, true)
++}
++
++/// The claimer's check of its signed co-signed claim before handing it to the seller: [`check_presigned_final`]
++/// without the seller's signature, which must still be missing (the seller adds it).
++pub fn check_cosigned_partial(template: &str, partial_tx: &str, seal_script: &str) -> Result<String, Error> {
++    check_final(template, partial_tx, seal_script, false)
++}
++
++/// The seller's side of a co-signed claim: `template` is its own signed one, `partial_tx` the claimer's signed
++/// transaction without the seller's signature. Puts the signature in, checks the whole transaction like the buyer
++/// would (the seal is the claimer's output 2, whatever it pays) and returns it, hex, with its txid.
++pub fn cosign_presigned(template: &str, partial_tx: &str) -> Result<CosignedTx, Error> {
++    let t = Psbt::from_str(template)?;
++    let witness = t.inputs[SELLER].final_script_witness.clone().ok_or(bad_listing("this template is not signed"))?;
++    let bytes = <Vec<u8> as bdk_wallet::bitcoin::hex::FromHex>::from_hex(partial_tx.trim()).map_err(|_| bad_listing("bad transaction hex"))?;
++    let mut tx: BdkTransaction = bdk_wallet::bitcoin::consensus::deserialize(&bytes).map_err(|_| bad_listing("bad transaction"))?;
++    if tx.input.len() < 2 || tx.output.len() < 3 {
++        return Err(bad_listing("the transaction does not follow the template"));
++    }
++    if !tx.input[SELLER].witness.is_empty() {
++        return Err(bad_listing("the seller's input is already signed"));
++    }
++    // every other input signed by the claimer (an unsigned one would make the transaction invalid)
++    if tx.input.iter().enumerate().any(|(i, x)| i != SELLER && x.witness.is_empty() && x.script_sig.is_empty()) {
++        return Err(bad_listing("an input of the claimer is not signed"));
++    }
++    tx.input[SELLER].witness = witness;
++    let seal = tx.output[SEAL_VOUT].script_pubkey.to_hex_string();
++    let hex = bdk_wallet::bitcoin::consensus::encode::serialize_hex(&tx);
++    let txid = check_presigned_final(template, &hex, &seal)?;
++    Ok(CosignedTx { txid, tx: hex })
++}
++
++/// A co-signed claim's transaction, complete: its id and the signed transaction, hex.
++#[derive(Debug, Clone, Serialize, Deserialize)]
++#[cfg_attr(feature = "camel_case", serde(rename_all = "camelCase"))]
++pub struct CosignedTx {
++    /// txid
++    pub txid: String,
++    /// the signed transaction, hex
++    pub tx: String,
++}
++
++fn check_final(template: &str, final_tx: &str, seal_script: &str, seller_signed: bool) -> Result<String, Error> {
 +    let t = Psbt::from_str(template)?;
 +    let bytes = <Vec<u8> as bdk_wallet::bitcoin::hex::FromHex>::from_hex(final_tx.trim()).map_err(|_| bad_listing("bad transaction hex"))?;
 +    let tx: BdkTransaction = bdk_wallet::bitcoin::consensus::deserialize(&bytes).map_err(|_| bad_listing("bad transaction"))?;
@@ -5580,8 +5721,25 @@ index 4e07a9c..fa5d0ae 100644
 +        return Err(bad_listing("only one OP_RETURN"));
 +    }
 +    let prev = t.inputs[SELLER].witness_utxo.clone().ok_or(bad_listing("the seller's input has no amount"))?;
-+    check_seller_signature(&tx, &prev, &tx.input[SELLER].witness)?;
++    if seller_signed {
++        check_seller_signature(&tx, &prev, &tx.input[SELLER].witness)?;
++    } else if !tx.input[SELLER].witness.is_empty() {
++        return Err(bad_listing("the seller's input must be left for the seller to sign"));
++    }
 +    Ok(tx.compute_txid().to_string())
++}
++
++/// [`psbt_extract_hex`] for a co-signed claim: every input finalized but the seller's (input 1), left empty.
++pub fn psbt_extract_hex_cosigned(psbt: &str) -> Result<String, Error> {
++    let psbt = Psbt::from_str(psbt)?;
++    if psbt.inputs.len() < 2 || psbt.inputs[SELLER].final_script_witness.is_some() {
++        return Err(bad_listing("the seller's input must be left for the seller to sign"));
++    }
++    if psbt.inputs.iter().enumerate().any(|(i, x)| i != SELLER && x.final_script_witness.is_none() && x.final_script_sig.is_none()) {
++        return Err(bad_listing("an input is not signed"));
++    }
++    let tx = psbt.extract_tx_unchecked_fee_rate();
++    Ok(bdk_wallet::bitcoin::consensus::encode::serialize_hex(&tx))
 +}
 +
 +/// The signed transaction of a finalized PSBT, hex (every input must be finalized).
@@ -6010,6 +6168,50 @@ index 4e07a9c..fa5d0ae 100644
 +        // the seller's own output can't be the buyer's coin
 +        let own = vec![SwapInput { outpoint: format!("{}:1", "ab".repeat(32)), sats: 90000, script: buyer.clone(), tx: None }];
 +        assert!(presigned_buy_psbt(&t, own, seal, None, None).is_err());
++    }
++
++    #[test]
++    fn cosigned_claim_needs_the_seller_last() {
++        let (t, _) = template(TapSighashType::SinglePlusAnyoneCanPay);
++        // the escrow hands out the template without its signature
++        let stripped = presigned_strip_seller(&t).unwrap();
++        assert!(presigned_listing_info(&stripped).is_err(), "a market buyer never takes an unsigned listing");
++        assert!(cosigned_listing_info(&t).is_err(), "a claim's template comes without the signature");
++        let info = cosigned_listing_info(&stripped).unwrap();
++        assert_eq!(info.template_txid, presigned_listing_info(&t).unwrap().template_txid);
++
++        // the claimer builds and signs its part
++        let buyer = "5120".to_string() + &"22".repeat(32);
++        let seal = "5120".to_string() + &"33".repeat(32);
++        let inputs = vec![SwapInput { outpoint: format!("{}:0", "cd".repeat(32)), sats: 60000, script: buyer.clone(), tx: None }];
++        let p = presigned_buy_psbt(&stripped, inputs, seal.clone(), None, None).unwrap();
++        let mut fin = Psbt::from_str(&p).unwrap();
++        assert!(fin.inputs[1].final_script_witness.is_none());
++        assert!(psbt_extract_hex_cosigned(&fin.to_string()).is_err(), "the claimer's input isn't signed yet");
++        fin.inputs[0].final_script_witness = Some(Witness::from_slice(&[vec![1u8; 64]]));
++        let partial = psbt_extract_hex_cosigned(&fin.to_string()).unwrap();
++        assert!(psbt_extract_hex(&fin.to_string()).is_err(), "not a complete transaction yet");
++        let txid = check_cosigned_partial(&stripped, &partial, &seal).unwrap();
++        // without the seller's signature the transaction is invalid: the plain check refuses it
++        assert!(check_presigned_final(&t, &partial, &seal).is_err());
++
++        // the escrow adds its signature: the same transaction, now complete
++        let done = cosign_presigned(&t, &partial).unwrap();
++        assert_eq!(done.txid, txid, "the signature doesn't change the txid");
++        assert_eq!(check_presigned_final(&t, &done.tx, &seal).unwrap(), txid);
++        assert!(check_cosigned_partial(&stripped, &done.tx, &seal).is_err());
++        // not twice, nor from the stripped template, nor a transaction that changed the payout
++        assert!(cosign_presigned(&t, &done.tx).is_err());
++        assert!(cosign_presigned(&stripped, &partial).is_err());
++        let bytes = <Vec<u8> as bdk_wallet::bitcoin::hex::FromHex>::from_hex(&partial).unwrap();
++        let mut less: BdkTransaction = bdk_wallet::bitcoin::consensus::deserialize(&bytes).unwrap();
++        less.output[1].value = Amount::from_sat(1000);
++        assert!(cosign_presigned(&t, &bdk_wallet::bitcoin::consensus::encode::serialize_hex(&less)).is_err());
++        // the claimer's input must be signed
++        let mut unsigned = less.clone();
++        unsigned.output[1].value = Amount::from_sat(51000);
++        unsigned.input[0].witness = Witness::new();
++        assert!(cosign_presigned(&t, &bdk_wallet::bitcoin::consensus::encode::serialize_hex(&unsigned)).is_err());
 +    }
 +
 +    /// Real RGB listings for combined-buy tests: a token issued to `n` seller outputs, each listed like
