@@ -117,6 +117,7 @@ export class WalletRgb {
     this.service = null;
     /** @type {Map<string, string>} NFT images by digest: data: URL, '' while loading */
     this.imgs = new Map();
+    /** @type {Map<string, any>} */ this.metas = new Map();
     this.data = null;
     this.ready = false;
     this.busy = false;
@@ -350,6 +351,16 @@ export class WalletRgb {
     this.imgs.set(d, '');
     Promise.resolve(this.service?.nftImage?.(a.media)).then((url) => { if (url) { this.imgs.set(d, url); this.app.render?.(); } else this.imgs.delete(d); }, () => this.imgs.delete(d));
     return '';
+  }
+  /** An NFT's traits once read from its metadata.json (nftTraits), null while loading or without one. */
+  nftMeta(a) {
+    const key = (a?.files || []).map((f) => f.digest).join(',');
+    if (!key) return null;
+    this.metas ??= new Map();
+    if (this.metas.has(key)) return this.metas.get(key);
+    this.metas.set(key, null);
+    Promise.resolve(this.service?.nftMeta?.(a.files)).then((m) => { if (m) { this.metas.set(key, m); this.app.render?.(); } }, () => {});
+    return null;
   }
   /**
    * Tokens an earlier beta counted twice: two of our witness invoices shared one address, so one payment settled

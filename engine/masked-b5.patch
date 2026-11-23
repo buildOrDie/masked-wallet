@@ -11,10 +11,10 @@ index 884d686..e2896b5 100644
  rgb-strict-encoding = { version = "=1.0.5", default-features = false, features = [
      "bitcoin",
 diff --git a/bindings/wasm/src/lib.rs b/bindings/wasm/src/lib.rs
-index 51b6efd..e6c6e92 100644
+index 51b6efd..e3e51ec 100644
 --- a/bindings/wasm/src/lib.rs
 +++ b/bindings/wasm/src/lib.rs
-@@ -179,6 +179,41 @@ impl WasmWallet {
+@@ -179,6 +179,81 @@ impl WasmWallet {
          to_js(&asset)
      }
  
@@ -28,9 +28,11 @@ index 51b6efd..e6c6e92 100644
 +    /// Issue a new UDA (Unique Digital Asset, RGB21): an NFT, one token.
 +    ///
 +    /// `media` is the token's picture (its bytes) and `mime` its type (e.g. `image/png`), both
-+    /// or neither. The contract commits to the picture's SHA-256 digest; the wallet keeps the
-+    /// bytes and posts them, encrypted, with each transfer of the NFT.
++    /// or neither. `attachments_js` is an array of `{ bytes: Uint8Array, mime }`: the token's
++    /// other files (e.g. its `metadata.json`), 20 at most. The contract commits to each file's
++    /// SHA-256 digest; the wallet keeps the bytes and posts them, encrypted, with each transfer.
 +    #[wasm_bindgen(js_name = "issueAssetUda")]
++    #[allow(clippy::too_many_arguments)]
 +    pub fn issue_asset_uda(
 +        &self,
 +        ticker: &str,
@@ -39,24 +41,62 @@ index 51b6efd..e6c6e92 100644
 +        precision: u8,
 +        media: Option<Vec<u8>>,
 +        mime: Option<String>,
++        attachments_js: JsValue,
 +    ) -> Result<JsValue, JsValue> {
 +        let media = match (media, mime) {
 +            (Some(bytes), Some(mime)) => Some((bytes, mime)),
 +            (None, None) => None,
 +            _ => return Err(JsValue::from_str("Give the media and its mime type together.")),
 +        };
++        let mut attachments = vec![];
++        if !(attachments_js.is_undefined() || attachments_js.is_null()) {
++            let list = js_sys::Array::from(&attachments_js);
++            for f in list.iter() {
++                let bytes = js_sys::Reflect::get(&f, &"bytes".into())
++                    .ok()
++                    .filter(|b| b.is_instance_of::<js_sys::Uint8Array>())
++                    .map(|b| js_sys::Uint8Array::from(b).to_vec())
++                    .ok_or_else(|| JsValue::from_str("Invalid attachments: bytes must be a Uint8Array"))?;
++                let mime = js_sys::Reflect::get(&f, &"mime".into())
++                    .ok()
++                    .and_then(|m| m.as_string())
++                    .ok_or_else(|| JsValue::from_str("Invalid attachments: mime must be text"))?;
++                attachments.push((bytes, mime));
++            }
++        }
 +        let asset = self
 +            .inner
 +            .borrow_mut()
-+            .issue_asset_uda(ticker.to_string(), name.to_string(), details, precision, media)
++            .issue_asset_uda(
++                ticker.to_string(),
++                name.to_string(),
++                details,
++                precision,
++                media,
++                attachments,
++            )
 +            .map_err(|e| JsValue::from_str(&e.to_string()))?;
 +        to_js(&asset)
++    }
++
++    /// The digests (hex) of the media files this wallet holds (NFT pictures and attachments).
++    /// The wallet's saved state doesn't carry them: keep each one apart (it never changes) and
++    /// give it back with `addMediaFile` after opening the wallet.
++    #[wasm_bindgen(js_name = "mediaDigests")]
++    pub fn media_digests(&self) -> Vec<String> {
++        self.inner.borrow().media_digests()
++    }
++
++    /// Give the wallet a media file it holds (kept apart by the host); returns its digest (hex).
++    #[wasm_bindgen(js_name = "addMediaFile")]
++    pub fn add_media_file(&self, bytes: Vec<u8>) -> String {
++        self.inner.borrow_mut().add_media_file(bytes)
 +    }
 +
      /// Issue a new IFA (Inflatable Fungible Asset).
      ///
      /// `amounts_js` is a JS array of u64 values.
-@@ -635,6 +670,364 @@ impl WasmWallet {
+@@ -635,6 +710,364 @@ impl WasmWallet {
          to_js(&result)
      }
  
@@ -421,7 +461,7 @@ index 51b6efd..e6c6e92 100644
      /// Send RGB assets (end): broadcast a signed PSBT. Returns an OperationResult JS object.
      #[wasm_bindgen(js_name = "sendEnd")]
      pub async fn send_end(
-@@ -763,6 +1156,56 @@ impl WasmWallet {
+@@ -763,6 +1196,56 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -478,7 +518,7 @@ index 51b6efd..e6c6e92 100644
      /// Drain all wallet funds (end): broadcast a signed PSBT. Returns the txid string.
      #[wasm_bindgen(js_name = "drainToEnd")]
      pub async fn drain_to_end(
-@@ -1074,6 +1517,22 @@ impl WasmWallet {
+@@ -1074,6 +1557,22 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -501,7 +541,7 @@ index 51b6efd..e6c6e92 100644
      /// Check if the wallet needs a backup. Returns true if modified since last backup.
      #[wasm_bindgen(js_name = "backupInfo")]
      pub fn backup_info(&self) -> Result<bool, JsValue> {
-@@ -1217,7 +1676,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
+@@ -1217,7 +1716,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
  /// Works before the witness transaction is broadcast. Takes the raw consignment
  /// bytes (strict-encoded, not base64), the witness transaction ID, and the Bitcoin network.
  ///
@@ -511,7 +551,7 @@ index 51b6efd..e6c6e92 100644
  #[wasm_bindgen(js_name = "validateConsignmentOffchain")]
  pub fn validate_consignment_offchain(
      consignment_bytes: &[u8],
-@@ -1235,3 +1695,43 @@ pub fn validate_consignment_offchain(
+@@ -1235,3 +1735,43 @@ pub fn validate_consignment_offchain(
      .map_err(|e| JsValue::from_str(&e.to_string()))?;
      to_js(&result)
  }
@@ -696,20 +736,21 @@ index 0440f89..78ba361 100644
  #[cfg(feature = "esplora")]
  #[derive(Clone)]
 diff --git a/src/wallet/backup.rs b/src/wallet/backup.rs
-index 2300f6a..1952fcd 100644
+index 2300f6a..8629997 100644
 --- a/src/wallet/backup.rs
 +++ b/src/wallet/backup.rs
-@@ -36,6 +36,9 @@ pub(crate) struct WalletBackupPayload {
+@@ -36,6 +36,10 @@ pub(crate) struct WalletBackupPayload {
      pub(crate) transfer_artifacts:
          std::collections::HashMap<String, super::online::TransferArtifacts>,
      pub(crate) received_consignments: std::collections::HashMap<String, Vec<u8>>,
-+    /// Media files (an NFT's picture) keyed by their SHA-256 digest (hex).
-+    #[serde(default)]
++    /// Media files (an NFT's picture and attachments) keyed by their SHA-256 digest (hex),
++    /// base64-encoded (see `media_serde`).
++    #[serde(default, with = "super::media_serde")]
 +    pub(crate) media_files: std::collections::HashMap<String, Vec<u8>>,
      pub(crate) received_consignment_meta:
          std::collections::HashMap<String, super::ReceivedConsignmentMeta>,
      pub(crate) received_signed_txs: std::collections::HashMap<String, Vec<u8>>,
-@@ -160,6 +163,8 @@ impl super::Wallet {
+@@ -160,6 +164,8 @@ impl super::Wallet {
      /// The wallet must be created first via `Wallet::new()` with the same mnemonic/xpubs.
      /// The restored state persists only if this wallet may save: it was built with `Wallet::restore()`, or its data directory holds no snapshot.
      /// A restore that fails changes nothing. When only the save fails, the restored state stays in memory and the call returns a persistence error.
@@ -718,7 +759,7 @@ index 2300f6a..1952fcd 100644
      pub fn restore_backup(&mut self, backup_bytes: &[u8], password: &str) -> Result<(), Error> {
          let (pub_data, ciphertext) = decode_backup(backup_bytes)?;
          let payload_json = decrypt_payload(ciphertext, password, &pub_data)?;
-@@ -172,8 +177,77 @@ impl super::Wallet {
+@@ -172,8 +178,77 @@ impl super::Wallet {
          Ok(())
      }
  
@@ -796,7 +837,7 @@ index 2300f6a..1952fcd 100644
          let payload: WalletBackupPayload =
              serde_json::from_slice(payload_json).map_err(|_| Error::InvalidBackup)?;
          // Without a BDK changeset the restore skips the descriptor check.
-@@ -188,6 +262,7 @@ impl super::Wallet {
+@@ -188,6 +263,7 @@ impl super::Wallet {
              bdk_changeset: payload.bdk_changeset,
              transfer_artifacts: payload.transfer_artifacts,
              received_consignments: payload.received_consignments,
@@ -804,7 +845,7 @@ index 2300f6a..1952fcd 100644
              received_consignment_meta: payload.received_consignment_meta,
              received_signed_txs: payload.received_signed_txs,
              received_mints: payload.received_mints,
-@@ -323,6 +398,7 @@ impl super::Wallet {
+@@ -323,6 +399,7 @@ impl super::Wallet {
              reuse_address_index: self.reuse_address_index.clone(),
              transfer_artifacts: self.transfer_artifacts.clone(),
              received_consignments: self.received_consignments.clone(),
@@ -812,7 +853,7 @@ index 2300f6a..1952fcd 100644
              received_consignment_meta: self.received_consignment_meta.clone(),
              received_signed_txs: self.received_signed_txs.clone(),
              received_mints: self.received_mints.clone(),
-@@ -860,6 +936,54 @@ mod tests {
+@@ -860,6 +937,54 @@ mod tests {
          );
      }
  
@@ -868,20 +909,26 @@ index 2300f6a..1952fcd 100644
      #[cfg(not(target_arch = "wasm32"))]
      fn failed_restore_with_bad_rgb_store_keeps_wallet() {
 diff --git a/src/wallet/idb_store.rs b/src/wallet/idb_store.rs
-index 03ebcc5..390cccf 100644
+index 03ebcc5..63d9e64 100644
 --- a/src/wallet/idb_store.rs
 +++ b/src/wallet/idb_store.rs
-@@ -33,6 +33,9 @@ pub struct WalletSnapshot {
+@@ -33,6 +33,15 @@ pub struct WalletSnapshot {
      /// Received consignment bytes keyed by recipient_id.
      #[serde(default)]
      pub received_consignments: HashMap<String, Vec<u8>>,
-+    /// Media files (an NFT's picture) keyed by their SHA-256 digest (hex).
-+    #[serde(default)]
++    /// Media files (an NFT's picture) keyed by their SHA-256 digest (hex). Never written: the
++    /// host keeps them apart and adds them back when it opens the wallet (see `media_serde`);
++    /// read from snapshots written before.
++    #[serde(
++        default,
++        skip_serializing,
++        deserialize_with = "super::media_serde::deserialize"
++    )]
 +    pub media_files: HashMap<String, Vec<u8>>,
      /// Proxy data of each received consignment keyed by recipient_id.
      pub(crate) received_consignment_meta: HashMap<String, super::ReceivedConsignmentMeta>,
      /// Signed TXs released by the sender proxy keyed by recipient_id.
-@@ -212,6 +215,23 @@ pub(crate) fn deserialize_stock(store_b64: &str) -> Result<MemStock, String> {
+@@ -212,6 +221,23 @@ pub(crate) fn deserialize_stock(store_b64: &str) -> Result<MemStock, String> {
      Ok(Stock::with(MemRgbStore::from_bytes(&bytes)?))
  }
  
@@ -905,7 +952,7 @@ index 03ebcc5..390cccf 100644
  /// Load a wallet snapshot from IndexedDB for the given key.
  pub async fn load_snapshot(key: &str) -> Result<Option<WalletSnapshot>, String> {
      let db = open_db().await?;
-@@ -331,6 +351,7 @@ mod tests {
+@@ -331,6 +357,7 @@ mod tests {
              bdk_changeset: None,
              transfer_artifacts: HashMap::from([("funding-txid".to_owned(), transfer_artifact)]),
              received_consignments: HashMap::from([("rid".to_owned(), vec![5])]),
@@ -1396,24 +1443,116 @@ index 0000000..76ad7af
 @@ -0,0 +1 @@
 +rgb:oQiumQTF-ON9XQxR-4522elN-BxoL8Tf-36QX6kf-DZJwIoY
 \ No newline at end of file
+diff --git a/src/wallet/media_serde.rs b/src/wallet/media_serde.rs
+new file mode 100644
+index 0000000..72b10c9
+--- /dev/null
++++ b/src/wallet/media_serde.rs
+@@ -0,0 +1,85 @@
++//! How media files (an NFT's picture and attachments) are written in a wallet snapshot and in a
++//! backup. Media can be large, so a snapshot (rewritten after every operation) never carries them:
++//! the host keeps each one once, in its own file or store entry, and gives them back with
++//! `add_media_file` when it opens the wallet. A backup carries them, base64-encoded (a JSON array
++//! of numbers would take 3–4 bytes per byte). Both read the older form, a JSON array of numbers.
++
++use std::collections::HashMap;
++
++use base64::{Engine as _, engine::general_purpose};
++use serde::{Deserialize, Deserializer, Serializer, de};
++
++#[derive(Deserialize)]
++#[serde(untagged)]
++enum Bytes {
++    B64(String),
++    Raw(Vec<u8>),
++}
++
++/// Read media written either as base64 text or as an array of numbers.
++pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
++    d: D,
++) -> Result<HashMap<String, Vec<u8>>, D::Error> {
++    let raw: Option<HashMap<String, Bytes>> = Option::deserialize(d)?;
++    let mut out = HashMap::new();
++    for (digest, bytes) in raw.unwrap_or_default() {
++        let bytes = match bytes {
++            Bytes::Raw(b) => b,
++            Bytes::B64(s) => general_purpose::STANDARD
++                .decode(s.as_bytes())
++                .map_err(de::Error::custom)?,
++        };
++        out.insert(digest, bytes);
++    }
++    Ok(out)
++}
++
++/// Write media as base64 text (backups).
++pub(crate) fn serialize<S: Serializer>(
++    media: &HashMap<String, Vec<u8>>,
++    s: S,
++) -> Result<S::Ok, S::Error> {
++    use serde::ser::SerializeMap;
++    let mut keys: Vec<&String> = media.keys().collect();
++    keys.sort();
++    let mut map = s.serialize_map(Some(keys.len()))?;
++    for k in keys {
++        map.serialize_entry(k, &general_purpose::STANDARD.encode(&media[k]))?;
++    }
++    map.end()
++}
++
++#[cfg(test)]
++mod tests {
++    use serde::{Deserialize, Serialize};
++
++    use super::*;
++
++    #[derive(Serialize, Deserialize)]
++    struct Backup {
++        #[serde(default, with = "super")]
++        media: HashMap<String, Vec<u8>>,
++    }
++
++    #[derive(Serialize, Deserialize)]
++    struct Snapshot {
++        #[serde(default, skip_serializing, deserialize_with = "super::deserialize")]
++        media: HashMap<String, Vec<u8>>,
++    }
++
++    #[test]
++    fn media_is_base64_in_backups_absent_from_snapshots_and_old_form_reads() {
++        let media = HashMap::from([(String::from("aa"), vec![0u8, 1, 2, 255])]);
++        let json = serde_json::to_string(&Backup { media: media.clone() }).unwrap();
++        assert_eq!(json, r#"{"media":{"aa":"AAEC/w=="}}"#);
++        assert_eq!(serde_json::from_str::<Backup>(&json).unwrap().media, media);
++        // the older form: an array of numbers
++        let old = r#"{"media":{"aa":[0,1,2,255]}}"#;
++        assert_eq!(serde_json::from_str::<Backup>(old).unwrap().media, media);
++        assert_eq!(serde_json::from_str::<Snapshot>(old).unwrap().media, media);
++        // a snapshot never writes them, and reads none when there are none
++        assert_eq!(serde_json::to_string(&Snapshot { media }).unwrap(), "{}");
++        assert!(serde_json::from_str::<Snapshot>("{}").unwrap().media.is_empty());
++        assert!(serde_json::from_str::<Backup>(r#"{"media":null}"#).unwrap().media.is_empty());
++    }
++}
 diff --git a/src/wallet/mod.rs b/src/wallet/mod.rs
-index c5c45b2..46cf640 100644
+index c5c45b2..d793073 100644
 --- a/src/wallet/mod.rs
 +++ b/src/wallet/mod.rs
-@@ -4,6 +4,8 @@
+@@ -4,6 +4,9 @@
  
  pub(crate) mod backup;
  pub mod idb_store;
 +#[cfg(feature = "esplora")]
 +pub(crate) mod legacy_migration;
++pub(crate) mod media_serde;
  pub(crate) mod memory_store;
  pub(crate) mod offline;
  #[cfg(feature = "esplora")]
 diff --git a/src/wallet/offline.rs b/src/wallet/offline.rs
-index a3a9f46..c43f5b6 100644
+index a3a9f46..01ef90e 100644
 --- a/src/wallet/offline.rs
 +++ b/src/wallet/offline.rs
-@@ -37,7 +37,10 @@ pub(crate) const CONFIRMATION_MARGIN_SECS: u32 = 86400;
+@@ -37,7 +37,13 @@ pub(crate) const CONFIRMATION_MARGIN_SECS: u32 = 86400;
  #[cfg(feature = "esplora")]
  pub(crate) const MAX_POW_DIFFICULTY: u32 = 28;
  
@@ -1422,10 +1561,13 @@ index a3a9f46..c43f5b6 100644
 +
 +/// The one token a UDA contract holds.
 +pub(crate) const UDA_FIXED_INDEX: u32 = 0;
++
++/// The most files a UDA token can carry besides its picture.
++pub(crate) const MAX_ATTACHMENTS: usize = 20;
  
  pub(crate) const MAX_TRANSPORT_ENDPOINTS: usize = 3;
  
-@@ -64,6 +67,8 @@ pub(crate) const RGB_METADATA_ALLOWED_INFLATION: &str = "allowedInflation";
+@@ -64,6 +70,8 @@ pub(crate) const RGB_METADATA_ALLOWED_INFLATION: &str = "allowedInflation";
  
  pub(crate) const SCHEMA_ID_NIA: &str =
      "rgb:sch:RWhwUfTMpuP2Zfx1~j4nswCANGeJrYOqDcKelaMV4zU#remote-digital-pegasus";
@@ -1434,7 +1576,7 @@ index a3a9f46..c43f5b6 100644
  pub(crate) const SCHEMA_ID_IFA: &str =
      "rgb:sch:A2n9kPNWtXUqwQJyXfY8yGHKyEPZgvrNYYYPGhXawOk#graph-salute-retro";
  pub(crate) const SCHEMA_ID_BFA: &str =
-@@ -272,6 +277,75 @@ impl AssetNIA {
+@@ -272,6 +280,88 @@ impl AssetNIA {
      }
  }
  
@@ -1460,6 +1602,9 @@ index a3a9f46..c43f5b6 100644
 +    pub balance: Balance,
 +    /// The token's media (its picture): digest and mime type
 +    pub media: Option<Media>,
++    /// The token's other files (e.g. its `metadata.json`), by their index in the token: digest
++    /// and mime type
++    pub attachments: BTreeMap<u8, Media>,
 +}
 +
 +impl AssetUDA {
@@ -1493,6 +1638,15 @@ index a3a9f46..c43f5b6 100644
 +            colorings,
 +            txos,
 +        )?;
++        let attachments = wallet
++            .uda_token_data(&asset.id)?
++            .map(|t| {
++                t.attachments
++                    .iter()
++                    .map(|(i, a)| (*i, Media::from_attachment(a, wallet.get_media_dir())))
++                    .collect()
++            })
++            .unwrap_or_default();
 +        Ok(AssetUDA {
 +            asset_id: asset.id.clone(),
 +            ticker: asset.ticker.clone().unwrap_or_default(),
@@ -1503,6 +1657,7 @@ index a3a9f46..c43f5b6 100644
 +            added_at: asset.added_at,
 +            balance,
 +            media,
++            attachments,
 +        })
 +    }
 +}
@@ -1510,7 +1665,7 @@ index a3a9f46..c43f5b6 100644
  /// An Inflatable Fungible Asset.
  #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
  #[cfg_attr(feature = "camel_case", serde(rename_all = "camelCase"))]
-@@ -440,6 +514,8 @@ impl AssetBFA {
+@@ -440,6 +530,8 @@ impl AssetBFA {
  pub struct Assets {
      /// List of NIA assets
      pub nia: Option<Vec<AssetNIA>>,
@@ -1519,7 +1674,7 @@ index a3a9f46..c43f5b6 100644
      /// List of IFA assets
      pub ifa: Option<Vec<AssetIFA>>,
      /// List of BFA assets
-@@ -661,6 +737,18 @@ impl Invoice {
+@@ -661,6 +753,18 @@ impl Invoice {
                      }
                  }
              }
@@ -1538,7 +1693,7 @@ index a3a9f46..c43f5b6 100644
              Some(AssetSchema::Ifa) => {
                  match (decoded.assignment_state, assignment_name.as_deref()) {
                      (Some(InvoiceState::Amount(v)), Some(RGB_STATE_ASSET_OWNER)) => {
-@@ -1294,6 +1382,9 @@ pub struct Wallet {
+@@ -1294,6 +1398,9 @@ pub struct Wallet {
      /// Key: recipient_id
      #[cfg(feature = "esplora")]
      pub(crate) received_consignments: HashMap<String, Vec<u8>>,
@@ -1548,7 +1703,7 @@ index a3a9f46..c43f5b6 100644
      /// Proxy data of each received consignment. Key: recipient_id
      #[cfg(feature = "esplora")]
      pub(crate) received_consignment_meta: HashMap<String, ReceivedConsignmentMeta>,
-@@ -1312,9 +1403,69 @@ pub struct Wallet {
+@@ -1312,9 +1419,69 @@ pub struct Wallet {
      pub(crate) rgb_stock: std::rc::Rc<std::cell::RefCell<Option<crate::utils::MemStock>>>,
      pub(crate) vss_client: Option<super::vss::VssBackupClient>,
      pub(crate) last_vss_backup_error: std::cell::RefCell<Option<String>>,
@@ -1618,7 +1773,7 @@ index a3a9f46..c43f5b6 100644
      /// Create a wallet and restore its latest durable IndexedDB snapshot, if one exists.
      ///
      /// The returned wallet is ready for use only after the IndexedDB read and snapshot
-@@ -1325,6 +1476,31 @@ impl Wallet {
+@@ -1325,6 +1492,31 @@ impl Wallet {
          let snapshot = super::idb_store::load_snapshot(&wallet.idb_key())
              .await
              .map_err(|details| Error::Persistence { details })?;
@@ -1650,7 +1805,7 @@ index a3a9f46..c43f5b6 100644
          if let Some(snapshot) = snapshot {
              wallet.idb_loaded = Some((snapshot.writer, snapshot.sequence));
              wallet
-@@ -1460,6 +1636,7 @@ impl Wallet {
+@@ -1460,6 +1652,7 @@ impl Wallet {
              transfer_artifacts: HashMap::new(),
              #[cfg(feature = "esplora")]
              received_consignments: HashMap::new(),
@@ -1658,7 +1813,7 @@ index a3a9f46..c43f5b6 100644
              #[cfg(feature = "esplora")]
              received_consignment_meta: HashMap::new(),
              #[cfg(feature = "esplora")]
-@@ -1475,6 +1652,18 @@ impl Wallet {
+@@ -1475,6 +1668,18 @@ impl Wallet {
              },
              vss_client: None,
              last_vss_backup_error: std::cell::RefCell::new(None),
@@ -1677,7 +1832,7 @@ index a3a9f46..c43f5b6 100644
          })
      }
  
-@@ -1542,6 +1731,18 @@ impl Wallet {
+@@ -1542,6 +1747,18 @@ impl Wallet {
          self.wallet_data.supported_schemas.contains(asset_schema)
      }
  
@@ -1696,7 +1851,7 @@ index a3a9f46..c43f5b6 100644
      pub(crate) fn check_schema_support(&self, asset_schema: &AssetSchema) -> Result<(), Error> {
          if !self.supports_schema(asset_schema) {
              return Err(Error::UnsupportedSchema {
-@@ -1690,8 +1891,10 @@ impl Wallet {
+@@ -1690,8 +1907,10 @@ impl Wallet {
              None => rgb_allocations.as_deref().unwrap(),
          };
  
@@ -1708,13 +1863,51 @@ index a3a9f46..c43f5b6 100644
          allocatable.sort_by_key(|t| t.rgb_allocations.len() + t.pending_blinded as usize);
          match allocatable.first() {
              Some(mut selected) => {
-@@ -2597,6 +2800,200 @@ impl Wallet {
+@@ -2597,6 +2816,288 @@ impl Wallet {
          Ok(asset)
      }
  
 +    /// A media file this wallet holds (an NFT's picture), by its SHA-256 digest (hex).
 +    pub fn media_file(&self, digest: &str) -> Option<Vec<u8>> {
 +        self.media_files.get(&digest.to_ascii_lowercase()).cloned()
++    }
++
++    /// The digests (hex) of the media files this wallet holds. A snapshot doesn't carry them: the
++    /// host keeps each one apart (written once) and gives it back with
++    /// [`add_media_file`](Wallet::add_media_file) when it opens the wallet.
++    pub fn media_digests(&self) -> Vec<String> {
++        let mut d: Vec<String> = self.media_files.keys().cloned().collect();
++        d.sort();
++        d
++    }
++
++    /// Give the wallet a media file it holds (kept by the host): its SHA-256 digest (hex) is
++    /// returned, under which the wallet keeps it.
++    pub fn add_media_file(&mut self, bytes: Vec<u8>) -> String {
++        let digest = hex::encode(Sha256::digest(&bytes));
++        self.media_files.insert(digest.clone(), bytes);
++        digest
++    }
++
++    /// The token data of a UDA asset this wallet knows (its picture and attachments), `None` for
++    /// another kind of asset.
++    pub(crate) fn uda_token_data(&self, asset_id: &str) -> Result<Option<TokenData>, Error> {
++        let Ok(asset) = self.database.check_asset_exists(asset_id.to_string()) else {
++            return Ok(None);
++        };
++        if asset.schema != AssetSchema::Uda {
++            return Ok(None);
++        }
++        let contract_id =
++            ContractId::from_str(asset_id).map_err(|_| Error::InvalidContractId {
++                contract_id: asset_id.to_string(),
++            })?;
++        let runtime = self.rgb_runtime()?;
++        let token = runtime
++            .contract_wrapper::<UniqueDigitalAsset>(contract_id)
++            .map(|c| c.token_data());
++        drop(runtime);
++        Ok(Some(token?))
 +    }
 +
 +    /// Issue a new RGB UDA asset (an NFT, RGB21) with the provided `ticker`, `name`, optional
@@ -1730,6 +1923,7 @@ index a3a9f46..c43f5b6 100644
 +        details: Option<String>,
 +        precision: u8,
 +        media: Option<(Vec<u8>, String)>,
++        attachments: Vec<(Vec<u8>, String)>,
 +    ) -> Result<AssetUDA, Error> {
 +        info!(
 +            self.logger,
@@ -1740,6 +1934,42 @@ index a3a9f46..c43f5b6 100644
 +
 +        self.check_schema_support(asset_schema)?;
 +
++        if attachments.len() > MAX_ATTACHMENTS {
++            return Err(Error::InvalidAttachments {
++                details: format!("no more than {MAX_ATTACHMENTS} attachments are supported"),
++            });
++        }
++        let file_of = |bytes: Vec<u8>, mime: String| -> Result<(Attachment, String, Vec<u8>), Error> {
++            if bytes.is_empty() {
++                return Err(Error::EmptyFile {
++                    file_path: s!("media"),
++                });
++            }
++            let mime = mime.trim().to_ascii_lowercase();
++            let valid_mime = mime
++                .split_once('/')
++                .is_some_and(|(t, st)| !t.is_empty() && !st.is_empty() && !st.contains('/'));
++            if !valid_mime {
++                return Err(Error::InvalidAttachments {
++                    details: format!("invalid media type '{mime}'"),
++                });
++            }
++            let digest_bytes: [u8; 32] = Sha256::digest(&bytes).into();
++            // MediaType keeps a &'static str: one small leak per file of an issued NFT
++            let media_ty: &'static str = Box::leak(mime.into_boxed_str());
++            Ok((
++                Attachment {
++                    ty: MediaType::with(media_ty),
++                    digest: digest_bytes.into(),
++                },
++                hex::encode(digest_bytes),
++                bytes,
++            ))
++        };
++        let attachment_files = attachments
++            .into_iter()
++            .map(|(b, m)| file_of(b, m))
++            .collect::<Result<Vec<_>, Error>>()?;
 +        let media = match media {
 +            Some((bytes, mime)) => {
 +                if bytes.is_empty() {
@@ -1809,6 +2039,16 @@ index a3a9f46..c43f5b6 100644
 +        let token_data = TokenData {
 +            index,
 +            media: media.as_ref().map(|(a, _, _, _)| a.clone()),
++            attachments: Confined::try_from(
++                attachment_files
++                    .iter()
++                    .enumerate()
++                    .map(|(i, (a, _, _))| (i as u8, a.clone()))
++                    .collect::<BTreeMap<u8, Attachment>>(),
++            )
++            .map_err(|_| Error::InvalidAttachments {
++                details: format!("no more than {MAX_ATTACHMENTS} attachments are supported"),
++            })?,
 +            ..Default::default()
 +        };
 +        let allocation = Allocation::with(index, OwnedFraction::from(1u64));
@@ -1847,6 +2087,9 @@ index a3a9f46..c43f5b6 100644
 +        } else {
 +            None
 +        };
++        for (_, digest, bytes) in attachment_files {
++            self.media_files.insert(digest, bytes);
++        }
 +
 +        let asset_data = LocalAssetData {
 +            name,
@@ -1909,7 +2152,7 @@ index a3a9f46..c43f5b6 100644
      /// Finalize a PSBT, optionally providing BDK sign options to tweak the behavior of the
      /// finalizer.
      pub fn finalize_psbt(
-@@ -2618,7 +3015,7 @@ impl Wallet {
+@@ -2618,7 +3119,7 @@ impl Wallet {
          Ok(psbt.to_string())
      }
  
@@ -1918,7 +2161,7 @@ index a3a9f46..c43f5b6 100644
          let sign_options = sign_options.unwrap_or_default();
          let [colored, vanilla] = &self.signers;
          self.bdk_wallet
-@@ -2877,6 +3274,7 @@ impl Wallet {
+@@ -2877,6 +3378,7 @@ impl Wallet {
  
          let assets = self.database.iter_assets()?;
          let mut nia = None;
@@ -1926,7 +2169,7 @@ index a3a9f46..c43f5b6 100644
          let mut ifa = None;
          let mut bfa = None;
          for schema in filter_asset_schemas {
-@@ -2901,6 +3299,26 @@ impl Wallet {
+@@ -2901,6 +3403,26 @@ impl Wallet {
                              .collect::<Result<Vec<AssetNIA>, Error>>()?,
                      );
                  }
@@ -1953,7 +2196,7 @@ index a3a9f46..c43f5b6 100644
                  AssetSchema::Ifa => {
                      ifa = Some(
                          assets
-@@ -2945,7 +3363,7 @@ impl Wallet {
+@@ -2945,7 +3467,7 @@ impl Wallet {
          }
  
          info!(self.logger, "List assets completed");
@@ -1962,7 +2205,7 @@ index a3a9f46..c43f5b6 100644
      }
  
      pub(crate) fn sync_if_requested(
-@@ -4019,6 +4437,7 @@ impl Wallet {
+@@ -4019,6 +4541,7 @@ impl Wallet {
              bdk_changeset: self.bdk_database.get_data().clone(),
              transfer_artifacts: self.transfer_artifacts.clone(),
              received_consignments: self.received_consignments.clone(),
@@ -1970,7 +2213,7 @@ index a3a9f46..c43f5b6 100644
              received_consignment_meta: self.received_consignment_meta.clone(),
              received_signed_txs: self.received_signed_txs.clone(),
              received_mints: self.received_mints.clone(),
-@@ -4116,6 +4535,7 @@ impl Wallet {
+@@ -4116,6 +4639,7 @@ impl Wallet {
  
          // Restore received consignments
          self.received_consignments = snapshot.received_consignments;
@@ -1978,7 +2221,7 @@ index a3a9f46..c43f5b6 100644
          self.received_consignment_meta = snapshot.received_consignment_meta;
          self.received_signed_txs = snapshot.received_signed_txs;
          self.received_mints = snapshot.received_mints;
-@@ -4125,7 +4545,11 @@ impl Wallet {
+@@ -4125,7 +4649,11 @@ impl Wallet {
  
          *self.rgb_stock.borrow_mut() = Some(stock);
  
@@ -1991,7 +2234,7 @@ index a3a9f46..c43f5b6 100644
      }
  }
  
-@@ -4203,6 +4627,7 @@ pub(crate) mod address_reuse_tests {
+@@ -4203,6 +4731,7 @@ pub(crate) mod address_reuse_tests {
              transfer_artifacts: HashMap::new(),
              #[cfg(feature = "esplora")]
              received_consignments: HashMap::new(),
@@ -1999,7 +2242,7 @@ index a3a9f46..c43f5b6 100644
              #[cfg(feature = "esplora")]
              received_consignment_meta: HashMap::new(),
              #[cfg(feature = "esplora")]
-@@ -4215,6 +4640,18 @@ pub(crate) mod address_reuse_tests {
+@@ -4215,6 +4744,18 @@ pub(crate) mod address_reuse_tests {
              rgb_stock: std::rc::Rc::new(std::cell::RefCell::new(None)),
              vss_client: None,
              last_vss_backup_error: std::cell::RefCell::new(None),
@@ -2019,7 +2262,7 @@ index a3a9f46..c43f5b6 100644
      }
  
 diff --git a/src/wallet/online.rs b/src/wallet/online.rs
-index ca96b4a..8e860ba 100644
+index ca96b4a..7c89f94 100644
 --- a/src/wallet/online.rs
 +++ b/src/wallet/online.rs
 @@ -4,6 +4,12 @@
@@ -2792,7 +3035,7 @@ index ca96b4a..8e860ba 100644
                  transport_endpoint.used = true;
                  found_valid = true;
                  break;
-@@ -7142,6 +7461,30 @@ impl Wallet {
+@@ -7142,6 +7461,41 @@ impl Wallet {
          Ok(())
      }
  
@@ -2803,27 +3046,38 @@ index ca96b4a..8e860ba 100644
 +        let Ok(asset) = self.database.check_asset_exists(asset_id.to_string()) else {
 +            return Ok(vec![]);
 +        };
-+        let Some(media_idx) = asset.media_idx else {
-+            return Ok(vec![]);
-+        };
-+        let Some(media) = self.database.get_media(media_idx)? else {
-+            return Ok(vec![]);
-+        };
-+        match self.media_files.get(&media.digest) {
-+            Some(bytes) => Ok(vec![(media.digest, bytes.clone())]),
-+            None => Err(Error::InvalidAttachments {
-+                details: format!(
-+                    "the media file {} of asset {asset_id} is not in this wallet",
-+                    media.digest
-+                ),
-+            }),
++        let mut digests = vec![];
++        if let Some(media_idx) = asset.media_idx
++            && let Some(media) = self.database.get_media(media_idx)?
++        {
++            digests.push(media.digest);
 +        }
++        // a UDA's other files (its metadata.json…) and its picture, from the contract
++        if let Some(token) = self.uda_token_data(asset_id)? {
++            for a in token.media.iter().chain(token.attachments.values()) {
++                let d = hex::encode(a.digest);
++                if !digests.contains(&d) {
++                    digests.push(d);
++                }
++            }
++        }
++        digests
++            .into_iter()
++            .map(|digest| match self.media_files.get(&digest) {
++                Some(bytes) => Ok((digest, bytes.clone())),
++                None => Err(Error::InvalidAttachments {
++                    details: format!(
++                        "the media file {digest} of asset {asset_id} is not in this wallet"
++                    ),
++                }),
++            })
++            .collect()
 +    }
 +
      /// Complete the send operation (wasm32 async).
      ///
      /// See native [`send_end`](Wallet::send_end) for full documentation.
-@@ -7321,6 +7664,7 @@ impl Wallet {
+@@ -7321,6 +7675,7 @@ impl Wallet {
              for (asset_id, info_contents_asset) in asset_infos.iter_mut() {
                  post_result = self
                      .post_transfer_data(
@@ -2831,10 +3085,12 @@ index ca96b4a..8e860ba 100644
                          &mut info_contents_asset.recipients,
                          &consignment_bytes[asset_id],
                          &sender_sk,
-@@ -7590,6 +7934,246 @@ impl Wallet {
+@@ -7590,35 +7945,275 @@ impl Wallet {
          Ok(tx.compute_txid().to_string())
      }
  
+-    /// Prepare the PSBT to inflate an IFA asset.
+-    pub async fn inflate_begin(
 +    /// Spare RGB outputs (MASKED): outputs of this wallet with no allocation at all, no blinded receive pending, not
 +    /// waiting for a witness transfer, not reserved (an Instant listing, a begun transfer or vanilla operation) and
 +    /// confirmed. Smallest first. These are the outputs `free_spare_utxos_begin` may spend.
@@ -2991,23 +3247,36 @@ index ca96b4a..8e860ba 100644
 +    /// size (several buys can then go one after another). Outputs holding tokens never move. Ended with
 +    /// `drain_to_end`. Returns the unsigned PSBT.
 +    pub async fn free_spare_utxos_begin(
-+        &mut self,
-+        online: Online,
+         &mut self,
+         online: Online,
+-        asset_id: String,
+-        inflation_amounts: Vec<u64>,
 +        keep: u8,
 +        parts: u8,
-+        fee_rate: u64,
-+    ) -> Result<String, Error> {
+         fee_rate: u64,
+-        min_confirmations: u8,
+     ) -> Result<String, Error> {
+-        info!(
+-            self.logger,
+-            "Inflating (begin) amounts: {:?}...", inflation_amounts
+-        );
 +        info!(self.logger, "Freeing spare UTXOs (begin), keeping {}...", keep);
 +        self.check_online(online)?;
 +        let fee_rate_checked = self._check_fee_rate(fee_rate)?;
 +        self.sync_and_save(false).await?;
-+
+ 
+-        let asset = self.database.check_asset_exists(asset_id.clone())?;
+-        let schema = asset.schema;
+-        self.check_schema_support(&schema)?;
+-        if !SCHEMAS_SUPPORTING_INFLATION.contains(&schema) {
+-            return Err(Error::UnsupportedInflation {
+-                asset_schema: schema,
 +        let spare = self.spare_utxos()?;
 +        if spare.len() <= keep as usize {
 +            return Err(Error::Internal {
 +                details: format!("only {} spare RGB outputs: nothing to free", spare.len()),
-+            });
-+        }
+             });
+         }
 +        let mut inputs: Vec<BdkOutPoint> = spare[keep as usize..]
 +            .iter()
 +            .map(|op| BdkOutPoint::from_str(&op.to_string()))
@@ -3026,7 +3295,13 @@ index ca96b4a..8e860ba 100644
 +        for i in &inputs {
 +            total += values.get(i).copied().unwrap_or(0);
 +        }
-+
+ 
+-        let known_circulating_supply = asset
+-            .known_circulating_supply
+-            .unwrap()
+-            .parse::<u64>()
+-            .unwrap();
+-        let inflation =
 +        // the fee of one output first, then each extra output's share
 +        let build = |wallet: &mut Self, shares: &[(ScriptBuf, u64)], change: ScriptBuf| -> Result<Psbt, Error> {
 +            let mut tx_builder = wallet.bdk_wallet.build_tx();
@@ -3075,10 +3350,39 @@ index ca96b4a..8e860ba 100644
 +        Ok(psbt.to_string())
 +    }
 +
-     /// Prepare the PSBT to inflate an IFA asset.
-     pub async fn inflate_begin(
-         &mut self,
-@@ -7782,6 +8366,7 @@ impl Wallet {
++    /// Prepare the PSBT to inflate an IFA asset.
++    pub async fn inflate_begin(
++        &mut self,
++        online: Online,
++        asset_id: String,
++        inflation_amounts: Vec<u64>,
++        fee_rate: u64,
++        min_confirmations: u8,
++    ) -> Result<String, Error> {
++        info!(
++            self.logger,
++            "Inflating (begin) amounts: {:?}...", inflation_amounts
++        );
++
++        let asset = self.database.check_asset_exists(asset_id.clone())?;
++        let schema = asset.schema;
++        self.check_schema_support(&schema)?;
++        if !SCHEMAS_SUPPORTING_INFLATION.contains(&schema) {
++            return Err(Error::UnsupportedInflation {
++                asset_schema: schema,
++            });
++        }
++
++        let known_circulating_supply = asset
++            .known_circulating_supply
++            .unwrap()
++            .parse::<u64>()
++            .unwrap();
++        let inflation =
+             self.get_total_inflation_amount(&inflation_amounts, known_circulating_supply)?;
+         if inflation == 0 {
+             return Err(Error::NoInflationAmounts);
+@@ -7782,6 +8377,7 @@ impl Wallet {
              info_contents.extra_allocations,
              info_contents.change_utxo_idx,
              info_contents.btc_change,
@@ -3086,7 +3390,7 @@ index ca96b4a..8e860ba 100644
              TransferStatus::WaitingConfirmations,
              info_contents.min_confirmations,
              info_contents.expiration_timestamp,
-@@ -8119,6 +8704,7 @@ impl Wallet {
+@@ -8119,6 +8715,7 @@ impl Wallet {
                  info_contents.extra_allocations,
                  info_contents.change_utxo_idx,
                  info_contents.btc_change,
@@ -3094,7 +3398,7 @@ index ca96b4a..8e860ba 100644
                  TransferStatus::WaitingConfirmations,
                  info_contents.min_confirmations,
                  None,
-@@ -8605,6 +9191,7 @@ impl Wallet {
+@@ -8605,6 +9202,7 @@ impl Wallet {
          // follows, as the TX is signed only after the lock
          let post_result = self
              .post_transfer_data(
@@ -3102,7 +3406,7 @@ index ca96b4a..8e860ba 100644
                  &mut asset_infos
                      .get_mut(&asset_id)
                      .expect("saved by _prepare_transfer_psbt_wasm")
-@@ -8838,7 +9425,7 @@ impl Wallet {
+@@ -8838,7 +9436,7 @@ impl Wallet {
          self.check_online(online)?;
  
          if !skip_sync {
@@ -3111,7 +3415,7 @@ index ca96b4a..8e860ba 100644
              self.flush().await?;
          }
  
-@@ -9321,6 +9908,7 @@ mod send_end_tests {
+@@ -9321,6 +9919,7 @@ mod send_end_tests {
              entropy: 0,
              operation_secret_key: Some(OPERATION_SEED.to_vec()),
              sender_transport_endpoint: None,
@@ -3119,7 +3423,7 @@ index ca96b4a..8e860ba 100644
          };
          let db = DbBatchTransfer {
              idx: 1,
-@@ -9427,6 +10015,7 @@ mod send_end_tests {
+@@ -9427,6 +10026,7 @@ mod send_end_tests {
              entropy: 0,
              operation_secret_key: Some(OPERATION_SEED.to_vec()),
              sender_transport_endpoint: Some(s!("rpc://127.0.0.1:1")),
@@ -3127,14 +3431,13 @@ index ca96b4a..8e860ba 100644
          }
      }
  
-@@ -10024,8 +10613,218 @@ mod send_end_tests {
+@@ -10024,6 +10624,229 @@ mod send_end_tests {
          assert!(kept.signed_psbt.is_none());
      }
  
 +    /// MASKED lots in one transaction: every lot output is recorded as this wallet's own (a new output of the
 +    /// transaction, holding exactly its lot), next to the change, with no receive needed.
-     #[test]
--    fn update_or_save_transfers_updates_outgoing_batch() {
++    #[test]
 +    fn save_transfers_records_lot_outputs() {
 +        let (wallet, _) = setup();
 +        let txid = s!("lots");
@@ -3191,47 +3494,60 @@ index ca96b4a..8e860ba 100644
 +        wallet.wallet_data.supported_schemas = vec![AssetSchema::Nia, AssetSchema::Uda];
 +        seed_txo(&wallet, &"ab".repeat(32), 0);
 +        let picture = vec![0x89, b'P', b'N', b'G', 1, 2, 3];
++        let meta = br#"{"traits":{"Eyes":"Laser"}}"#.to_vec();
 +        let digest = hex::encode(sha256_digest(&picture));
++        let meta_digest = hex::encode(sha256_digest(&meta));
 +        let asset = wallet
 +            .issue_asset_uda(
 +                s!("MASK"),
 +                s!("Mask #1"),
-+                Some(s!("first one")),
++                Some(s!("Eyes: Laser")),
 +                0,
 +                Some((picture.clone(), s!("image/png"))),
++                vec![(meta.clone(), s!("application/json"))],
 +            )
 +            .unwrap();
 +        assert!(asset.asset_id.starts_with("rgb:"));
 +        assert_eq!(asset.media.as_ref().map(|m| m.digest.clone()), Some(digest.clone()));
 +        assert_eq!(asset.media.as_ref().map(|m| m.mime.clone()), Some(s!("image/png")));
 +        assert_eq!(asset.balance.settled, 1);
++        assert_eq!(asset.attachments.len(), 1);
++        assert_eq!(asset.attachments[&0].digest, meta_digest);
++        assert_eq!(asset.attachments[&0].mime, "application/json");
 +        let listed = wallet.list_assets(vec![AssetSchema::Uda]).unwrap().uda.unwrap();
 +        assert_eq!(listed.len(), 1);
 +        assert_eq!(listed[0].name, "Mask #1");
-+        assert_eq!(listed[0].details.as_deref(), Some("first one"));
++        assert_eq!(listed[0].details.as_deref(), Some("Eyes: Laser"));
++        assert_eq!(listed[0].attachments[&0].digest, meta_digest);
 +        assert_eq!(wallet.media_file(&digest.to_uppercase()), Some(picture.clone()));
-+        assert_eq!(
-+            wallet.asset_media_files(&asset.asset_id).unwrap(),
-+            vec![(digest.clone(), picture.clone())]
-+        );
-+        // the contract's token commits to the picture
-+        let runtime = wallet.rgb_runtime().unwrap();
-+        let contract = runtime
-+            .contract_wrapper::<UniqueDigitalAsset>(ContractId::from_str(&asset.asset_id).unwrap())
-+            .unwrap();
-+        let token = contract.token_data();
-+        assert_eq!(token.media.map(|a| hex::encode(a.digest)), Some(digest.clone()));
-+        drop(runtime);
-+        // a picture the wallet lost: a transfer would be refused, so it fails before posting
++        assert_eq!(wallet.media_file(&meta_digest), Some(meta.clone()));
++        // a transfer posts the picture and the metadata
++        let mut posted = wallet.asset_media_files(&asset.asset_id).unwrap();
++        posted.sort();
++        let mut expected = vec![(digest.clone(), picture.clone()), (meta_digest.clone(), meta.clone())];
++        expected.sort();
++        assert_eq!(posted, expected);
++        // the host keeps the files: listed, given back after a reload, never in a snapshot
++        let mut digests = vec![digest.clone(), meta_digest.clone()];
++        digests.sort();
++        assert_eq!(wallet.media_digests(), digests);
 +        wallet.media_files.clear();
-+        assert!(wallet.asset_media_files(&asset.asset_id).is_err());
-+        // bad media
++        assert!(wallet.asset_media_files(&asset.asset_id).is_err(), "a lost file: no transfer");
++        assert_eq!(wallet.add_media_file(picture.clone()), digest);
++        assert_eq!(wallet.add_media_file(meta.clone()), meta_digest);
++        assert_eq!(wallet.asset_media_files(&asset.asset_id).unwrap().len(), 2);
++        // the contract's token commits to both files
++        let token = wallet.uda_token_data(&asset.asset_id).unwrap().unwrap();
++        assert_eq!(token.media.map(|a| hex::encode(a.digest)), Some(digest.clone()));
++        assert_eq!(token.attachments.get(&0).map(|a| hex::encode(a.digest)), Some(meta_digest));
++        // bad files
 +        seed_txo(&wallet, &"cd".repeat(32), 0);
-+        assert!(wallet.issue_asset_uda(s!("X"), s!("X"), None, 0, Some((vec![], s!("image/png")))).is_err());
-+        assert!(wallet.issue_asset_uda(s!("X"), s!("X"), None, 0, Some((vec![1], s!("png")))).is_err());
++        assert!(wallet.issue_asset_uda(s!("X"), s!("X"), None, 0, Some((vec![], s!("image/png"))), vec![]).is_err());
++        assert!(wallet.issue_asset_uda(s!("X"), s!("X"), None, 0, Some((vec![1], s!("png"))), vec![]).is_err());
++        assert!(wallet.issue_asset_uda(s!("X"), s!("X"), None, 0, None, vec![(vec![1], s!("text/plain")); 21]).is_err());
 +        // an NFT without picture
-+        let plain = wallet.issue_asset_uda(s!("NOPIC"), s!("No picture"), None, 0, None).unwrap();
-+        assert!(plain.media.is_none());
++        let plain = wallet.issue_asset_uda(s!("NOPIC"), s!("No picture"), None, 0, None, vec![]).unwrap();
++        assert!(plain.media.is_none() && plain.attachments.is_empty());
 +        assert!(wallet.asset_media_files(&plain.asset_id).unwrap().is_empty());
 +    }
 +
@@ -3342,12 +3658,10 @@ index ca96b4a..8e860ba 100644
 +        assert!(wallet.swap_releases.is_empty() && wallet.held_swaps.is_empty());
 +    }
 +
-+    #[test]
-+    fn update_or_save_transfers_updates_outgoing_batch() {
+     #[test]
+     fn update_or_save_transfers_updates_outgoing_batch() {
          let (wallet, _) = setup();
-         let txid = s!("t");
-         let input_idx = seed_txo(&wallet, "i", 0);
-@@ -10051,6 +10850,7 @@ mod send_end_tests {
+@@ -10051,6 +10874,7 @@ mod send_end_tests {
                  info.extra_allocations.clone(),
                  info.change_utxo_idx,
                  None,
@@ -3355,7 +3669,7 @@ index ca96b4a..8e860ba 100644
                  TransferStatus::Initiated,
                  1,
                  None,
-@@ -12074,3 +12874,1313 @@ mod bfa_tests {
+@@ -12074,3 +12898,1313 @@ mod bfa_tests {
          assert!(options(&format!(r#","evm_chains":{{"mainnet":{chain}}}"#)).is_err());
      }
  }

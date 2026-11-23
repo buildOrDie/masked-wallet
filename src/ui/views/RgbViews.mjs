@@ -219,6 +219,14 @@ export function nftPic(r, a, big = false) {
     : `<span class="nft-img ph${big ? ' big' : ''}">${esc((a.name.match(/#\s*\d+/) || [a.ticker])[0])}</span>`;
 }
 
+/** An NFT's traits from its metadata.json (checked against the NFT): a card, or nothing. */
+export function nftTraitsCard(m) {
+  if (!m) return '';
+  return `<section class="card nft-traits"><div class="list-h"><b>Traits</b>${m.rarity ? `<span class="muted small">${esc(m.rarity)}</span>` : ''}</div>
+    ${m.description ? `<p class="small muted">${esc(m.description)}</p>` : ''}
+    <div class="trait-grid">${m.traits.map(([k, v]) => `<div class="trait"><span class="muted small">${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}</div></section>`;
+}
+
 /** The NFTs (RGB21 / UDA) this wallet holds, as a grid on Home. */
 export function nftGrid(r) {
   const list = r.nfts?.() || [];
@@ -285,6 +293,7 @@ export class RgbTokenView extends View {
         ${s && !sp && fut <= s ? '<p class="info small">It\'s held by a transfer waiting for a block, and can be sent once it confirms.</p>' : ''}
         <div class="tok-acts"><button class="tact" data-rgb="send" data-rgb-arg="${esc(a.assetId)}" ${sp ? '' : 'disabled'}>${I.send}<span>Send</span></button></div>
       </section>
+      ${nftTraitsCard(r.nftMeta?.(a))}
       <section class="card"><div class="kv">
         ${rowKV('Collection', esc(a.ticker))}
         ${a.details ? rowKV('Details', esc(a.details)) : ''}

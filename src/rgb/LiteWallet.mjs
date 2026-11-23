@@ -9,6 +9,7 @@ import { isInvoiceV1, readInvoiceV1, invoiceIdOf, pickEndpoint, newSenderKey, sh
 import { SEAL_SATS, SEAL_OUTPUT, SWAP_SIZE_VB, b64, buyerOutputs, outpointOf, completionBlocker, readOffer, buyerCoinFor, offerable, heldBreakdown, payoutFor, changedTerms, unb64, exactCoinFor, freeSellerCoinFor, sendCoinsFor, instantAmounts, INSTANT_SEAL_OUTPUT, INSTANT_SEAL_SATS, payCoinsFor, txVbytes, OPRET_SCRIPT, P2TR_SCRIPT, BUY_FEE_MIN, COMBINED_MAX, payCoinsForCombined } from './swap.mjs';
 import { RGB_UTXO_SATS, RGB_KEEP_SPARE } from './config.mjs';
 import { keptFetch } from './rgbFetch.mjs';
+import { mediaStore } from './mediaStore.mjs';
 
 /** rgb-lib names for our network ids. Utexo's custom Signet uses Signet rules too. */
 const NETWORKS = { mainnet: 'Mainnet', signet: 'Signet', utexo: 'Signet', testnet: 'Testnet', testnet4: 'Testnet4', regtest: 'Regtest' };
@@ -46,7 +47,26 @@ const nft = (a) => ({
   assetId: String(a?.assetId ?? ''), ticker: String(a?.ticker ?? '').slice(0, 12), name: String(a?.name ?? a?.ticker ?? ''),
   details: a?.details ? String(a.details) : '', balance: balance(a?.balance),
   media: a?.media?.digest ? { digest: String(a.media.digest), mime: String(a.media.mime || '') } : null,
+  // the token's other files (its metadata.json…), each fixed by its digest in the NFT
+  files: Object.entries(a?.attachments || {}).sort(([x], [y]) => Number(x) - Number(y))
+    .filter(([, m]) => m?.digest).map(([, m]) => ({ digest: String(m.digest), mime: String(m.mime || '') })),
 });
+/** At most this much of an NFT's metadata.json is read. */
+const NFT_META_MAX = 64 * 1024;
+/**
+ * An NFT's traits from its metadata.json: { traits: [[name, value]…], rarity, description }, or null. Reads the
+ * common shapes: { traits: { Eyes: 'Laser' } }, { attributes: [{ trait_type: 'Eyes', value: 'Laser' }] }.
+ */
+export function nftTraits(json) {
+  if (!json || typeof json !== 'object' || Array.isArray(json)) return null;
+  const text = (v) => (v == null ? '' : String(typeof v === 'object' ? JSON.stringify(v) : v)).slice(0, 80);
+  let traits = [];
+  if (json.traits && typeof json.traits === 'object' && !Array.isArray(json.traits)) traits = Object.entries(json.traits).map(([k, v]) => [text(k), text(v)]);
+  else if (Array.isArray(json.attributes)) traits = json.attributes.filter((t) => t && typeof t === 'object').map((t) => [text(t.trait_type ?? t.name ?? ''), text(t.value)]);
+  traits = traits.filter(([k, v]) => k && v).slice(0, 40);
+  const out = { traits, rarity: text(json.rarity), description: text(json.description).slice(0, 80) };
+  return traits.length || out.rarity || out.description ? out : null;
+}
 const IMAGE_MIME = /^image\/(png|jpeg|gif|webp)$/;
 
 const hostOf = (u) => { try { return new URL(String(u)).host; } catch { return 'the block server'; } };
@@ -85,7 +105,7 @@ const LOTS_ONE_TX_MAX = 20;
 export class LiteWallet {
   /**
    * @param {object} lib  the loaded rgb-lib-wasm module ({ WasmWallet, WasmInvoice, restoreKeys })
-   * @param {{ network: string, indexerUrl: string, indexerUrls?: string[], transportEndpoint: string, transportFallbacks?: string[], transportEndpointV1?: string, transportFallbacksV1?: string[], mnemonic: string, dataDir: string }} params  indexerUrls: block servers to try in order; transportFallbacks: more transfer servers listed in invoices after the main one
+   * @param {{ network: string, indexerUrl: string, indexerUrls?: string[], transportEndpoint: string, transportFallbacks?: string[], transportEndpointV1?: string, transportFallbacksV1?: string[], mnemonic: string, dataDir: string, mediaStore?: any }} params  indexerUrls: block servers to try in order; transportFallbacks: more transfer servers listed in invoices after the main one
    */
   constructor(lib, params) {
     this.lib = lib;
@@ -100,6 +120,7 @@ export class LiteWallet {
     // invoices list every transfer server: a sender uses the first one that answers
     this.transports = [this.transport, ...more.map(rpcEndpoint).filter((e) => e !== this.transport)];
     /** @type {any} */ this.w = null;
+    this.media = params.mediaStore || mediaStore();
     this.online = null;
     this.lastBackupBytes = null;
   }
@@ -129,6 +150,30 @@ export class LiteWallet {
       this.migration = String(await this.lib.migrateLegacyWallet(JSON.stringify(data), this.indexers()[0] || null));
     }
     this.w = await this.lib.WasmWallet.create(JSON.stringify(data));
+    await this.loadMedia();
+  }
+  /** The NFT files (pictures, metadata) kept apart from the engine's saved state: given back to the engine. */
+  async loadMedia() {
+    if (typeof this.w?.addMediaFile !== 'function') return;
+    this.mediaKept = new Set();
+    try {
+      for (const d of await this.media.keys()) {
+        const bytes = await this.media.get(d);
+        if (bytes?.length && this.w.addMediaFile(bytes) === d) this.mediaKept.add(d);
+      }
+    } catch (e) { console.warn('[MASKED] NFT files not loaded', e); }
+  }
+  /** New NFT files the engine holds (an NFT received or made): stored once, before the engine's state is saved. */
+  async keepMedia() {
+    if (typeof this.w?.mediaDigests !== 'function') return;
+    this.mediaKept ??= new Set();
+    for (const d of [...this.w.mediaDigests()].map(String)) {
+      if (this.mediaKept.has(d)) continue;
+      const bytes = this.w.mediaFile(d);
+      if (!bytes?.length) continue;
+      await this.media.put(d, bytes);
+      this.mediaKept.add(d);
+    }
   }
   get wallet() { if (!this.w) throw new Error('RGB wallet is not open.'); return this.w; }
   requireOnline() { if (!this.online) throw new Error('RGB wallet is offline. Try Refresh.'); return this.online; }
@@ -198,7 +243,11 @@ export class LiteWallet {
     await this.goOnline(undefined, was);
     return this.indexer !== was;
   }
-  async save() { await this.wallet.flush(); this.keepLastFull(); }
+  async save() {
+    // the files first: a state that names an NFT is never saved without its picture kept
+    try { await this.keepMedia(); } catch (e) { console.warn('[MASKED] NFT files not kept', e); }
+    await this.wallet.flush(); this.keepLastFull();
+  }
   /** Where this browser keeps when the engine last ran a full sync (each MASKED window opens the wallet anew). */
   get lastFullKey() { return `masked.rgb.last-full.${this.params?.dataDir || ''}`; }
   keepLastFull() {
@@ -266,6 +315,16 @@ export class LiteWallet {
       } catch { /* next server */ }
     }
     return null;
+  }
+  /** An NFT's traits (nftTraits) from its metadata.json, checked against its digest in the NFT; null without one. */
+  async nftMeta(files) {
+    const f = (files || []).find((x) => /^application\/json$/i.test(x?.mime) && /^[0-9a-f]{64}$/.test(x?.digest));
+    if (!f || typeof this.wallet?.mediaFile !== 'function') return null;
+    const own = this.wallet.mediaFile(f.digest);
+    if (!own?.length || own.length > NFT_META_MAX) return null;
+    const bytes = own instanceof Uint8Array ? own : new Uint8Array(own);
+    if (hex.encode(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))) !== f.digest) return null;
+    try { return nftTraits(JSON.parse(new TextDecoder().decode(bytes))); } catch { return null; }
   }
   /** Transfers of one asset, or (null) the ones tied to no asset yet. */
   async listTransfers(assetId = null) { return plain(this.engineTransfers(assetId) || []); }

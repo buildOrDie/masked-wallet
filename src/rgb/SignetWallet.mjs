@@ -369,6 +369,8 @@ export class SignetWallet {
   checkProxy(url) { return this.exclusive(() => this.requireWallet().checkProxy(url)); }
   /** An NFT's image (data: URL) from the transfer servers, checked against its digest. Doesn't touch the wallet state. */
   nftImage(media) { return this.wallet?.nftImage ? this.wallet.nftImage(media) : null; }
+  /** An NFT's traits from its metadata.json (checked against the NFT). Doesn't touch the wallet state. */
+  nftMeta(files) { return this.wallet?.nftMeta ? this.wallet.nftMeta(files) : null; }
   /** What an invoice asks for (no change to the wallet). */
   decode(invoice) { return this.exclusive(() => this.requireWallet().decodeRGBInvoice({ invoice })); }
   send({ invoice, assetId, amount, fee, endpoint = '', nft = false }) {

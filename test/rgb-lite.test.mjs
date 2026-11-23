@@ -1,7 +1,9 @@
 // The on-chain RGB engine adapter (LiteWallet) against a fake rgb-lib-wasm: the exact calls and shapes it uses.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { LiteWallet, rgbNetwork, rpcEndpoint } from '../src/rgb/LiteWallet.mjs';
+import { createHash } from 'node:crypto';
+import { LiteWallet, rgbNetwork, rpcEndpoint, nftTraits } from '../src/rgb/LiteWallet.mjs';
+import { memoryMediaStore } from '../src/rgb/mediaStore.mjs';
 import { RGB_PROFILES, RGB_MAINNET } from '../src/rgb/config.mjs';
 
 const mnemonic = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
@@ -315,4 +317,46 @@ test('NFTs (RGB21 / UDA): only with an engine that has them; listed with their i
   // mainnet: no NFTs yet, even with the engine
   const m = new LiteWallet(f.lib, { ...RGB_MAINNET.sdk, mnemonic, password: '' });
   assert.equal(m.canNft, false);
+});
+
+test('NFT files (pictures, metadata.json): kept apart from the engine state, given back on open, traits read and checked', async () => {
+  const f = fakeLib();
+  const files = new Map();
+  const sha = async (b) => Buffer.from(await crypto.subtle.digest('SHA-256', b)).toString('hex');
+  const P = f.lib.WasmWallet.prototype;
+  P.mediaDigests = () => [...files.keys()];
+  P.mediaFile = (d) => files.get(d);
+  P.addMediaFile = function (b) { const d = createHash('sha256').update(b).digest('hex'); files.set(d, new Uint8Array(b)); return d; };
+  const meta = new TextEncoder().encode(JSON.stringify({ traits: { Eyes: 'Laser', Mask: 'Gold' }, rarity: 'Rare', description: 'test' }));
+  const png = new Uint8Array([137, 80, 78, 71, 9]);
+  const metaD = await sha(meta), pngD = await sha(png);
+  const store = memoryMediaStore();
+  const w = new LiteWallet(f.lib, { ...RGB_PROFILES.public.sdk, mnemonic, password: '', mediaStore: store });
+  await w.init();
+  // an NFT arrived (the engine holds its files): the next save stores them first, once
+  files.set(pngD, png); files.set(metaD, meta);
+  const order = [];
+  const put = store.put; store.put = async (d, b) => { order.push(['put', d]); return put(d, b); };
+  const flush = P.flush; P.flush = async function () { order.push(['flush']); return flush.call(this); };
+  await w.save();
+  assert.deepEqual(order.map((x) => x[0]), ['put', 'put', 'flush']);
+  await w.save();
+  assert.equal(order.filter((x) => x[0] === 'put').length, 2, 'stored once');
+  assert.deepEqual((await store.keys()).sort(), [metaD, pngD].sort());
+  // a new window: the engine starts without them, the store gives them back
+  files.clear();
+  const w2 = new LiteWallet(f.lib, { ...RGB_PROFILES.public.sdk, mnemonic, password: '', mediaStore: store });
+  await w2.init();
+  assert.deepEqual([...files.keys()].sort(), [metaD, pngD].sort());
+  // traits from metadata.json, only if the file matches the NFT
+  const m = await w2.nftMeta([{ digest: metaD, mime: 'application/json' }]);
+  assert.deepEqual(m, { traits: [['Eyes', 'Laser'], ['Mask', 'Gold']], rarity: 'Rare', description: 'test' });
+  files.set(metaD, new TextEncoder().encode('{"traits":{"Eyes":"Fake"}}'));
+  assert.equal(await w2.nftMeta([{ digest: metaD, mime: 'application/json' }]), null);
+  assert.equal(await w2.nftMeta([{ digest: pngD, mime: 'image/png' }]), null);
+  // the common shapes
+  assert.deepEqual(nftTraits({ attributes: [{ trait_type: 'Eyes', value: 'Laser' }, { value: 'no name' }] }).traits, [['Eyes', 'Laser']]);
+  assert.equal(nftTraits([1, 2]), null);
+  assert.equal(nftTraits({}), null);
+  P.flush = flush;
 });
