@@ -2369,6 +2369,8 @@ export class LiteWallet {
   }
   /** Buyer: check an Instant listing and buy it in one go: sign, broadcast, and hand the transfer to this wallet. */
   async instantBuy({ offerId, network, offer, listing, feeRate, quick = false, onStep = (_t) => {} }, store) {
+    // a launchpad claim this wallet mints itself (2.32.1)
+    if (listing?.mint) return this.mintClaim({ offerId, network, offer, listing, feeRate, onStep }, store);
     this.requirePresign(); this.checkNet(network);
     const t0 = Date.now(), ms = {}; let tl = t0;
     const lap = (k) => { const n = Date.now(); ms[k] = n - tl; tl = n; };
@@ -2484,6 +2486,83 @@ export class LiteWallet {
     console.info('[MASKED] Instant buy', { totalMs: Date.now() - t0, ...ms });
     return { txid };
   }
+  /** Can this RGB engine mint a launchpad NFT in its claim (2.32.1)? */
+  get canClaimMint() {
+    return this.canCosign && ['udaGenesisFor', 'adoptUdaGenesis', 'coloredAddress'].every((f) => typeof this.wallet?.[f] === 'function');
+  }
+  /**
+   * A launchpad claim minted by this wallet (2.32.1): the launchpad sends the NFT's recipe (its picture, attachments,
+   * name, traits) and the claim's outputs; MASKED builds the claim's transaction (its coins, the launchpad's claim
+   * coin, the price, the coin back, an output of its own for the NFT), mints the NFT onto that output, signs its part
+   * and hands both to the launchpad, which checks them and adds the last signature while the claim holds. Nothing goes
+   * out here. Once the transaction is out, instantPost takes the NFT in.
+   */
+  async mintClaim({ offerId, network, offer, listing, feeRate, onStep = (_t) => {} }, store) {
+    if (!this.canClaimMint) throw new Error('This MASKED build can\'t complete this claim yet. Update MASKED, then try again.');
+    this.checkNet(network);
+    const id = String(offerId);
+    const price = BigInt(String(offer?.priceSats ?? ''));
+    if (!(price > 0n)) throw new Error('The claim has no price.');
+    const done = store.get(id);
+    if (done?.mint && done.txid && !done.failed) {
+      if (await this.knowsTx(done.txid)) return { txid: done.txid };
+      if (done.partialHex && Date.now() - Number(done.at || 0) < 10 * 60_000) return { txid: done.txid, mint: { tx: done.partialHex, genesis: done.genesis } };
+      store.del?.(id);
+    }
+    const m = listing.mint;
+    const r = m.recipe || {};
+    if (!/^[A-Z0-9]{1,8}$/.test(String(r.ticker || '')) || !String(r.name || '') || String(r.name).length > 60) throw new Error('The claim\'s NFT has no valid name or ticker.');
+    if (!IMAGE_MIME.test(String(m.media?.mime || ''))) throw new Error('The claim\'s picture isn\'t an image.');
+    const media = unb64(String(m.media.data || ''));
+    if (!media.length || media.length > 2_000_000) throw new Error('The claim\'s picture is missing or too large.');
+    const atts = (m.attachments || []).map((a) => ({ bytes: unb64(String(a.data || '')), mime: String(a.mime || '') }));
+    if (atts.length > 20 || atts.some((a) => !a.bytes.length || a.bytes.length > 2_000_000 || !/^[a-z]+\/[a-z0-9.+-]+$/.test(a.mime))) throw new Error('The claim\'s files are not valid.');
+    if (Number(m.sealVout) !== 3 || !(Number(m.sealSats) >= 330)) throw new Error('The claim asks for an output MASKED doesn\'t make.');
+    if (BigInt(m.payout?.sats ?? -1) !== price) throw new Error('The claim pays another amount than its price.');
+    if (!/^[0-9a-f]{4,200}$/.test(String(m.payout?.script || '')) || !/^[0-9a-f]{4,200}$/.test(String(m.back?.script || ''))) throw new Error('The claim\'s outputs are not valid.');
+    onStep(`Checking the claim on ${hostOf(this.indexer)}…`);
+    // the launchpad's claim coin: it exists, with the amount the claim gives back
+    const ci = await this.outpointInfo(String(m.coin?.outpoint || ''));
+    if (BigInt(ci.sats) !== BigInt(m.back.sats) || ci.script !== String(m.coin.script)) throw new Error('The launchpad\'s claim coin doesn\'t match the claim.');
+    const online = this.requireOnline();
+    const seal = BigInt(m.sealSats);
+    const rate = Math.max(BUY_FEE_MIN, Number(feeRate) || 1);
+    const feeFor = (ins, change = true) => BigInt(Math.ceil(rate * txVbytes([...ins, ci.script], [OPRET_SCRIPT, m.payout.script, m.back.script, P2TR_SCRIPT, ...(change ? [P2TR_SCRIPT] : [])])));
+    const perInput = feeFor([P2TR_SCRIPT, P2TR_SCRIPT]) - feeFor([P2TR_SCRIPT]);
+    const base = price + seal;
+    let { all, confirmed } = await this.btcCoins({ skipSync: true });
+    let pay = payCoinsFor(confirmed, all, base + feeFor([P2TR_SCRIPT]), perInput);
+    const unspent = async (p) => !!p && (await Promise.all(p.coins.map((c) => { const [t, v] = String(c.outpoint).split(':'); return this.outspend(t, v).then((x) => !x?.spent).catch(() => false); }))).every(Boolean);
+    if (!(await unspent(pay))) {
+      await this.wallet.sync(online);
+      ({ all, confirmed } = await this.btcCoins({ skipSync: true }));
+      pay = payCoinsFor(confirmed, all, base + feeFor([P2TR_SCRIPT]), perInput);
+    }
+    if (!pay) throw new Error(`Your RGB wallet needs ${(base + feeFor([P2TR_SCRIPT])).toLocaleString('en-US')} sats in bitcoin for this. Tap Add from Bitcoin under RGB balance on Home.`);
+    const bis = await Promise.all(pay.coins.map((c) => this.outpointInfo(c.outpoint)));
+    const paid = bis.reduce((t, b) => t + BigInt(b.sats), 0n);
+    let change = paid - base - feeFor(bis.map((b) => b.script));
+    if (change < 546n) change = 0n;
+    if (paid - base - feeFor(bis.map((b) => b.script), change > 0n) < 0n) throw new Error('Not enough bitcoin for the price and the network fee.');
+    // the NFT's output: an address of this wallet's RGB side, so it's its own once the transaction is out
+    const net = this.net === 'Mainnet' ? btc.NETWORK : btc.TEST_NETWORK;
+    const sealScript = hex.encode(btc.OutScript.encode(btc.Address(net).decode(String(this.wallet.coloredAddress()))));
+    // inputs: one coin of this wallet, then the launchpad's claim coin (input 1, signed by the launchpad last), then the rest
+    const mine = pay.coins.map((c, k) => ({ outpoint: c.outpoint, sats: bis[k].sats, script: bis[k].script, tx: bis[k].tx }));
+    const inputs = [mine[0], { outpoint: String(m.coin.outpoint), sats: ci.sats, script: ci.script, tx: ci.tx }, ...mine.slice(1)];
+    const outs = [{ script: m.payout.script, sats: Number(price) }, { script: m.back.script, sats: Number(m.back.sats) }, { script: sealScript, sats: Number(seal) }, ...(change > 0n ? [{ script: await this.ownScript(), sats: Number(change) }] : [])];
+    const unsigned = this.lib.WasmWallet.newSwapPsbt(inputs, outs);
+    const txid = String(this.lib.WasmWallet.psbtTxid(unsigned));
+    onStep('Minting your NFT…');
+    const g = this.wallet.udaGenesisFor(String(r.ticker), String(r.name), r.details == null || r.details === '' ? undefined : String(r.details), Number(r.precision) || 0, media, String(m.media.mime), atts, txid, 3);
+    const partialHex = this.lib.WasmWallet.psbtExtractHexCosigned(this.sign(unsigned));
+    const genesis = b64(g.consignment);
+    store.set(id, { role: 'buyer', mint: true, assetId: String(g.assetId), amount: '1', priceSats: String(price), txid, partialHex, genesis, files: [b64(media), ...atts.map((a) => b64(a.bytes))], posted: false, at: Date.now() });
+    // its coins are taken: a second claim right after pays with others
+    this.spentNow(pay.coins.map((c) => c.outpoint));
+    await this.save();
+    return { txid, assetId: String(g.assetId), mint: { tx: partialHex, genesis } };
+  }
   /** Can this RGB engine complete co-signed launchpad claims (the seller signs last; 2.32)? */
   get canCosign() { return this.canPresign && ['cosignedListingInfo', 'psbtExtractHexCosigned', 'checkCosignedPartial'].every((f) => typeof this.lib.WasmWallet?.[f] === 'function'); }
   /** Can this RGB engine buy several Instant listings in one transaction (2.30)? */
@@ -2577,6 +2656,25 @@ export class LiteWallet {
   async instantPost(offerId, store, { justSent = false } = {}) {
     let e = store.get(String(offerId));
     if (!e || e.role !== 'buyer' || e.posted || e.failed) return false;
+    if (e.mint) {
+      // an NFT this wallet minted in a launchpad claim: once the launchpad sent the claim, it's taken in (its output
+      // must be known to the wallet: after the next sync)
+      if (!(await this.knowsTx(e.txid))) {
+        if (Date.now() - Number(e.at || 0) > 30 * 60_000) store.set(String(offerId), { ...e, failed: 'The launchpad never completed this claim: nothing was paid.', partialHex: undefined, genesis: undefined, files: undefined, at: Date.now() });
+        return false;
+      }
+      try {
+        try { await this.wallet.sync(this.requireOnline()); } catch { /* the adoption says if the output isn't known yet */ }
+        this.wallet.adoptUdaGenesis(unb64(String(e.genesis)), (e.files || []).map((f) => unb64(String(f))));
+      } catch (err) {
+        if (/isn't in this wallet yet/.test(String(err?.message || err))) return false;
+        throw err;
+      }
+      store.set(String(offerId), { ...e, posted: true, partialHex: undefined, genesis: undefined, files: undefined });
+      await this.keepMedia?.();
+      await this.save();
+      return true;
+    }
     if (e.cosign && !e.completed) {
       // a co-signed claim: once the launchpad sent it, the whole transaction (with its signature) goes in the transfer
       if (!(await this.knowsTx(e.txid))) {

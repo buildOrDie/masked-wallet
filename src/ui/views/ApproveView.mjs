@@ -166,7 +166,7 @@ export class ApproveView extends View {
   swapBody(a, P, b) {
     const sats = (n) => `${Number(n).toLocaleString('en-US')} sats`;
     const unitTxt = (n) => Number(Number(n).toPrecision(4)).toLocaleString('en-US');
-    const tok = b ? (b.asset ? `${esc(b.asset.ticker)} <span class="mono">${esc(short(b.assetId, 8))}</span>` : `<span class="mono">${esc(short(b.assetId || P.assetId || '', 8))}</span>`) : '…';
+    const tok = P.listing?.mint ? `${esc(String(P.listing.mint.recipe?.ticker || ''))} <span class="muted small">NFT, minted in this claim</span>` : b ? (b.asset ? `${esc(b.asset.ticker)} <span class="mono">${esc(short(b.assetId, 8))}</span>` : `<span class="mono">${esc(short(b.assetId || P.assetId || '', 8))}</span>`) : '…';
     if (a.method === 'rgbListAssets') {
       const list = b?.list || [];
       return `<div class="kv">${rowKV('Tokens', b ? (list.length ? list.map((x) => esc(x.ticker || short(x.assetId, 6))).join(', ') : 'none yet') : '…')}${rowKV('Network', esc(this.app.rgb.profile.label))}</div>
@@ -226,11 +226,14 @@ export class ApproveView extends View {
       rgbP2pBuySign: 'MASKED checked the seller\'s token transfer and every output of the transaction against the draft. Your bitcoin and the tokens move together in one transaction, or not at all.',
       rgbInstantBuy: 'An Instant listing: the seller signed it in advance. MASKED checks the seller\'s signature, the tokens and every output, then pays and broadcasts in one transaction. The tokens show after one confirmation. If someone else buys it first, nothing is paid.',
     }[m];
+    // a launchpad claim this wallet mints (2.32.1)
+    const minting = m === 'rgbInstantBuy' && !!P.listing?.mint;
+    const nextTxt = minting ? 'A launchpad claim: MASKED mints this NFT from the collection\'s files onto an output of yours in the payment transaction and signs its part. The launchpad checks the NFT and sends the transaction while your claim holds. The NFT shows after one confirmation. If the claim isn\'t completed in time, it never goes through: nothing is paid.' : next;
     const top = buying && b?.topUp ? `<div class="info warn"><b>Your RGB balance is too low for this.</b> Buying RGB tokens is paid from your RGB balance (${sats(b.topUp.have || 0)} there now, confirmed or not). Add ${sats(b.topUp.sats)} from your Bitcoin balance: one transaction, ready after one block (about 10 minutes). Then come back and buy.</div>
       <button class="btn ghost wide" data-ap-topup ${b.topUp.sent || this.state.busy ? 'disabled' : ''}>${b.topUp.sent ? 'Added. Ready after one block' : `Add ${sats(b.topUp.sats)} to RGB balance`}</button>` : '';
     return `${hero}<div class="kv">${rowKV('Token', tok)}${rows}${rowKV('Network', esc(this.app.rgb.profile.label))}</div>${top}
-    ${b?.newToken && buying ? '<p class="info">You don\'t hold this token yet. Check its asset ID with the issuer: anyone can give a token any name.</p>' : ''}
-    <p class="info">${next}</p>${this.rgbWait(a)}${this.error(a)}`;
+    ${b?.newToken && buying && !minting ? '<p class="info">You don\'t hold this token yet. Check its asset ID with the issuer: anyone can give a token any name.</p>' : ''}
+    <p class="info">${nextTxt}</p>${this.rgbWait(a)}${this.error(a)}`;
   }
 
   inscribeBody(a, P, b) {
