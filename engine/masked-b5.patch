@@ -2329,7 +2329,7 @@ index a3a9f46..fcac33d 100644
      }
  
 diff --git a/src/wallet/online.rs b/src/wallet/online.rs
-index ca96b4a..ad9604a 100644
+index ca96b4a..1c91780 100644
 --- a/src/wallet/online.rs
 +++ b/src/wallet/online.rs
 @@ -4,6 +4,12 @@
@@ -3738,7 +3738,7 @@ index ca96b4a..ad9604a 100644
                  TransferStatus::Initiated,
                  1,
                  None,
-@@ -12074,3 +12900,1327 @@ mod bfa_tests {
+@@ -12074,3 +12900,1364 @@ mod bfa_tests {
          assert!(options(&format!(r#","evm_chains":{{"mainnet":{chain}}}"#)).is_err());
      }
  }
@@ -5064,6 +5064,43 @@ index ca96b4a..ad9604a 100644
 +        // a seller transaction that isn't the signed output's is refused
 +        let other = bdk_wallet::bitcoin::consensus::encode::serialize_hex(&funding(seller_prev.output[1].script_pubkey.clone(), 999, 0xab));
 +        assert!(presigned_buy_psbt(&template, vec![input], seal, None, Some(other)).is_err());
++    }
++
++    /// A co-signed claim with real wallets: the claimer signs the template without the seller's signature (its wallet
++    /// leaves the seller's input alone), the seller adds its signature last, and the whole transaction checks out.
++    #[test]
++    fn claimer_signs_a_cosigned_claim_and_the_seller_completes_it() {
++        use crate::wallet::rust_only::{SwapInput, check_cosigned_partial, check_presigned_final, cosign_presigned, cosigned_listing_info, presigned_buy_psbt, presigned_strip_seller, psbt_extract_hex_cosigned};
++        let mut seller = make_test_wallet_with_keys(crate::keys::generate_keys(BitcoinNetwork::Regtest), false);
++        let seller_prev = funding(seller._get_new_address(KeychainKind::External).unwrap().script_pubkey(), 1_000, 0xab);
++        let mut t = template_from(&mut seller, &seller_prev);
++        seller.sign_presigned_template(&mut t, seller_prev.output[1].clone()).unwrap();
++        let template = t.to_string();
++        let stripped = presigned_strip_seller(&template).unwrap();
++        cosigned_listing_info(&stripped).unwrap();
++
++        let mut claimer = make_test_wallet_with_keys(crate::keys::generate_keys(BitcoinNetwork::Regtest), false);
++        let pay = funding(claimer._get_new_address(KeychainKind::Internal).unwrap().script_pubkey(), 30_000, 0xcd);
++        let seal = claimer._get_new_address(KeychainKind::External).unwrap().script_pubkey().to_hex_string();
++        let input = SwapInput {
++            outpoint: format!("{}:1", pay.compute_txid()),
++            sats: 30_000,
++            script: pay.output[1].script_pubkey.to_hex_string(),
++            tx: Some(bdk_wallet::bitcoin::consensus::encode::serialize_hex(&pay)),
++        };
++        let seller_hex = bdk_wallet::bitcoin::consensus::encode::serialize_hex(&seller_prev);
++        let p = presigned_buy_psbt(&stripped, vec![input], seal.clone(), None, Some(seller_hex)).unwrap();
++        let signed = claimer.sign_psbt(p, None).unwrap();
++        let psbt = Psbt::from_str(&signed).unwrap();
++        assert!(psbt.inputs[0].final_script_witness.is_some(), "the claimer's coin is signed");
++        assert!(psbt.inputs[1].final_script_witness.is_none(), "the seller's input is left for the seller");
++        let partial = psbt_extract_hex_cosigned(&signed).unwrap();
++        let txid = check_cosigned_partial(&stripped, &partial, &seal).unwrap();
++        assert!(check_presigned_final(&template, &partial, &seal).is_err(), "incomplete without the seller");
++
++        let done = cosign_presigned(&template, &partial).unwrap();
++        assert_eq!(done.txid, txid);
++        assert_eq!(check_presigned_final(&template, &done.tx, &seal).unwrap(), txid);
 +    }
 +}
 diff --git a/src/wallet/rust_only.rs b/src/wallet/rust_only.rs
