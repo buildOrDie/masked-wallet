@@ -256,6 +256,13 @@ The seller's wallet signs the sale once; anyone's MASKED can then buy it in one 
 | `buyInstantMany` *(2.29.22+)* | buyer | `{ items: [{ offerId, offer, listing }], network, feeRate? }`: 1 to 20 Instant listings of one token, cheapest first | `{ results: [{ offerId, txid } \| { offerId, error }] }`: one approval. From 2.30, up to 10 listings go in one transaction (listings of one purchase share its `txid`); when they can't be combined (the RGB balance has one bitcoin coin, a listing is gone, an older engine) they're bought one transaction each. A listing someone else bought first is skipped (nothing paid), and the rest stop if the RGB balance runs out. In a combined purchase, listing k's seller input and payout are at index 1 for the first and k+2 for the others (output 2 is the buyer's seal): a market that checks a sale should find the input spending the listed output and check the payout at the same index |
 | `cancelInstant` | seller | `{ offerId, offer, feeRate? }` | `{ stage, txid }` |
 
+**NFTs (RGB21 / UDA, next release, Signet):** an NFT is listed and bought with the same calls, whole: `offer.amount`
+is `"1"`. Add `nft: { name }` to show the NFT's name on the approval screen (display only: the wallet checks the NFT
+itself). The buyer's MASKED reads the listing's transfer, sees an NFT, and receives it on an invoice for any asset.
+`rgb.getAssets()` lists the NFTs held too, each with `nft: true`, `listed` (already in a listing of this wallet) and
+`alone` (on an output of its own: the listing is live at once, no move). NFTs can't be listed in lots or bought
+several at once (each one is its own asset).
+
 How it works:
 
 - The seller's tokens must sit alone on one output (exactly the listed amount, nothing else), because whoever

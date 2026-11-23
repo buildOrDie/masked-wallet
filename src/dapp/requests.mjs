@@ -59,6 +59,10 @@ function swapParams(method, p) {
   // an Instant buy works out its own fee (no RGB engine rounding), so it can use an economy rate below 1 sat/vB
   if (method === 'rgbInstantBuy' && p.feeRate != null) { const f = Number(p.feeRate); if (!(f >= BUY_FEE_MIN && f <= 500)) throw err(4000, `feeRate must be between ${BUY_FEE_MIN} and 500 sat/vB.`); out.feeRate = f; }
   if (['rgbInstantList', 'rgbInstantCancel'].includes(method) && p.feeRate != null) { const f = Number(p.feeRate); if (!(f >= 1 && f <= 500)) throw err(4000, 'feeRate must be between 1 and 500 sat/vB.'); out.feeRate = f; }
+  // an NFT's name, for the approval screen only (the wallet checks the NFT itself)
+  if (['rgbInstantList', 'rgbInstantBuy', 'rgbInstantCancel'].includes(method) && p.nft && typeof p.nft === 'object') {
+    out.nft = { name: String(p.nft.name || '').replace(/[<>]/g, '').slice(0, 60) };
+  }
   if (method === 'rgbInstantList') {
     // where the wallet sends the signed listing if it's signed later (after the tokens move): https only
     let u; try { u = new URL(String(p.market || '')); } catch { throw err(4000, 'market must be the market\'s address.'); }

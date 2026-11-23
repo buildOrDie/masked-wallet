@@ -262,9 +262,26 @@ test('buyer: pays with two coins when one is not enough', async () => {
 
 test('the consignment check is read whichever way the engine names its fields', async () => {
   const { inspected } = await import('../src/rgb/LiteWallet.mjs');
-  assert.deepEqual(inspected({ valid: true, contract_id: ASSET, seal_amount: 500 }), { contractId: ASSET, sealAmount: 500 });
-  assert.deepEqual(inspected({ valid: true, contractId: ASSET, sealAmount: 500 }), { contractId: ASSET, sealAmount: 500 });
-  assert.deepEqual(inspected({ valid: true }), { contractId: '', sealAmount: null });
+  assert.deepEqual(inspected({ valid: true, contract_id: ASSET, seal_amount: 500 }), { contractId: ASSET, sealAmount: 500, assetSchema: '' });
+  assert.deepEqual(inspected({ valid: true, contractId: ASSET, sealAmount: 500 }), { contractId: ASSET, sealAmount: 500, assetSchema: '' });
+  assert.deepEqual(inspected({ valid: true }), { contractId: '', sealAmount: null, assetSchema: '' });
+  // 2.32 engine: the asset's schema (an NFT is "Uda")
+  assert.equal(inspected({ valid: true, contractId: ASSET, sealAmount: 1, assetSchema: 'Uda' }).assetSchema, 'Uda');
+});
+
+test('NFTs in Instant listings: an output holding only the NFT is listed as 1, an NFT next to other assets needs a move', async () => {
+  const { unitsOf, exactCoinFor, freeSellerCoinFor, heldBreakdown } = await import('../src/rgb/swap.mjs');
+  assert.equal(unitsOf('NonFungible'), 1n); assert.equal(unitsOf({ NonFungible: null }), 1n);
+  assert.equal(unitsOf({ Fungible: 25 }), 25n); assert.equal(unitsOf('LinkRight'), null); assert.equal(unitsOf({ InflationRight: 3 }), null);
+  const NFT = 'rgb:NFTaaaaaaaaaaaaaaaaaaaa', OTHER = 'rgb:OTHERaaaaaaaaaaaaaaaaaa';
+  const out = (txid, allocs) => ({ utxo: { outpoint: { txid, vout: 0 }, btcAmount: 600, colorable: true, exists: true }, rgbAllocations: allocs });
+  const alone = out('aa'.repeat(32), [{ assetId: NFT, settled: true, assignment: 'NonFungible' }]);
+  const shared = out('bb'.repeat(32), [{ assetId: NFT, settled: true, assignment: 'NonFungible' }, { assetId: OTHER, settled: true, assignment: { Fungible: 10 } }]);
+  assert.equal(exactCoinFor([alone], NFT, 1).outpoint, `${'aa'.repeat(32)}:0`);
+  assert.equal(exactCoinFor([alone], NFT, 2), null);
+  assert.equal(exactCoinFor([shared], NFT, 1), null);
+  assert.equal(freeSellerCoinFor([shared], NFT, 1).outpoint, `${'bb'.repeat(32)}:0`);
+  assert.equal(heldBreakdown([alone, shared], NFT).free, '2');
 });
 
 test('transaction sizes: an Instant purchase with one coin is about 298 vB, not the 320 vB budget', async () => {

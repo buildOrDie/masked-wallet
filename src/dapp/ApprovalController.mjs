@@ -330,8 +330,9 @@ export class ApprovalController {
       const net = r.isMain ? 'mainnet' : 'signet';
       if (P.network && !String(P.network).toLowerCase().startsWith(net === 'mainnet' ? 'mainnet' : 'signet')) throw new Error(`The site is on ${P.network}, your RGB wallet is on ${r.profile.label}.`);
       const asset = r.find(o.assetId);
-      const shown = asset ? `${r.amount(asset, Number(o.amount))} ${asset.ticker}` : `${Number(o.amount).toLocaleString('en-US')} units`;
-      const base = { asset, assetId: o.assetId, shown, price: Number(o.priceSats), newToken: !asset };
+      // an NFT: its name (one of one), not an amount
+      const shown = asset?.nft ? asset.name : P.nft?.name ? `NFT · ${P.nft.name}` : asset ? `${r.amount(asset, Number(o.amount))} ${asset.ticker}` : `${Number(o.amount).toLocaleString('en-US')} units`;
+      const base = { asset, assetId: o.assetId, shown, price: Number(o.priceSats), newToken: !asset, nft: !!(asset?.nft || P.nft) };
       if (m === 'rgbBuyPrepare') {
         const rate = rgbRate(P, r);
         const fee = Math.ceil(rate * SWAP_SIZE_VB);

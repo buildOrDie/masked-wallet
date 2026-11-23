@@ -135,8 +135,11 @@ export function payCoinsFor(confirmed, all, need, perInput = 0n, max = 4) {
   return null;
 }
 
-const heldOn = (u, assetId) => (u.rgbAllocations || []).filter((a) => a.assetId === assetId && a.settled && a.assignment?.Fungible != null)
-  .reduce((s, a) => s + BigInt(String(a.assignment.Fungible)), 0n);
+/** The units an allocation holds: a token amount, or 1 for an NFT (RGB21, its one token); null for a right. */
+export const unitsOf = (assignment) => (assignment?.Fungible != null ? BigInt(String(assignment.Fungible))
+  : assignment === 'NonFungible' || assignment?.NonFungible !== undefined ? 1n : null);
+const heldOn = (u, assetId) => (u.rgbAllocations || []).filter((a) => a.assetId === assetId && a.settled && unitsOf(a.assignment) != null)
+  .reduce((s, a) => s + unitsOf(a.assignment), 0n);
 
 /** The seller's RGB output holding the least of the asset that still covers `amount` (settled only). */
 export function sellerCoinFor(unspents, assetId, amount) {
@@ -161,7 +164,7 @@ export function exactCoinFor(unspents, assetId, amount, skip = new Set()) {
     const o = u.utxo.outpoint, op = `${String(o.txid).toLowerCase()}:${o.vout}`;
     if (skip.has(op)) continue;
     const all = u.rgbAllocations || [];
-    if (!all.length || all.some((a) => a.assetId !== assetId || !a.settled || a.assignment?.Fungible == null)) continue;
+    if (!all.length || all.some((a) => a.assetId !== assetId || !a.settled || unitsOf(a.assignment) == null)) continue;
     if (heldOn(u, assetId) === want) return { outpoint: op, sats: String(u.utxo.btcAmount) };
   }
   return null;
@@ -178,7 +181,7 @@ export function instantAmounts(unspents, assetId, skip = new Set(), limit = 8) {
     const o = u.utxo.outpoint, op = `${String(o?.txid).toLowerCase()}:${o?.vout}`;
     if (skip.has(op)) continue;
     const all = u.rgbAllocations || [];
-    if (!all.length || all.some((a) => a.assetId !== assetId || !a.settled || a.assignment?.Fungible == null)) continue;
+    if (!all.length || all.some((a) => a.assetId !== assetId || !a.settled || unitsOf(a.assignment) == null)) continue;
     const h = heldOn(u, assetId);
     if (h > 0n) out.add(h);
   }
@@ -230,8 +233,8 @@ export function heldBreakdown(unspents, assetId, reserved = new Set()) {
     const o = u.utxo?.outpoint;
     const op = o ? `${String(o.txid).toLowerCase()}:${o.vout}` : '';
     for (const a of u.rgbAllocations || []) {
-      if (a.assetId !== assetId || a.assignment?.Fungible == null) continue;
-      const v = BigInt(String(a.assignment.Fungible));
+      if (a.assetId !== assetId || unitsOf(a.assignment) == null) continue;
+      const v = unitsOf(a.assignment);
       if (reserved.has(op)) r.listed += v;
       else if (!a.settled || u.utxo?.exists === false) r.waiting += v;
       else if (!u.utxo?.colorable) r.other += v;

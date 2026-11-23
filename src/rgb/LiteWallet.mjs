@@ -22,7 +22,7 @@ export const rpcEndpoint = (url) => String(url).replace(/^https:\/\//i, 'rpcs://
 
 const num = (x) => Number(x ?? 0);
 /** The token and amount from a consignment check (engines up to 2.26.3 named them contract_id / seal_amount). */
-export const inspected = (v) => ({ contractId: String(v?.contractId ?? v?.contract_id ?? ''), sealAmount: v?.sealAmount ?? v?.seal_amount ?? null });
+export const inspected = (v) => ({ contractId: String(v?.contractId ?? v?.contract_id ?? ''), sealAmount: v?.sealAmount ?? v?.seal_amount ?? null, assetSchema: String(v?.assetSchema ?? '') });
 const short = (s) => (String(s).length > 20 ? `${String(s).slice(0, 10)}…${String(s).slice(-6)}` : String(s));
 
 /**
@@ -315,6 +315,11 @@ export class LiteWallet {
       } catch { /* next server */ }
     }
     return null;
+  }
+  /** Whether this wallet knows `assetId` as an NFT (RGB21 / UDA). */
+  async isNftAsset(assetId) {
+    if (!this.canNft) return false;
+    try { return (await this.listAssets()).uda.some((a) => a.assetId === assetId); } catch { return false; }
   }
   /** An NFT's traits (nftTraits) from its metadata.json, checked against its digest in the NFT; null without one. */
   async nftMeta(files) {
@@ -727,8 +732,15 @@ export class LiteWallet {
     const { nia, ifa } = await this.listAssets();
     // instant: amounts that sit alone on an output, so an Instant listing of exactly that is live at once (no move);
     // held: where the balance is (free, in listings, waiting for a block, unusable)
-    return [...nia, ...ifa].map((a) => ({ assetId: a.assetId, ticker: a.ticker, name: a.name, precision: a.precision, spendable: String(a.balance.spendable), max: offerable(unspents, a.assetId).max, maxInstant: offerable(unspents, a.assetId).total, instant: instantAmounts(unspents, a.assetId), held: heldBreakdown(everything, a.assetId, this.reserved) }))
+    const tokens = [...nia, ...ifa].map((a) => ({ assetId: a.assetId, ticker: a.ticker, name: a.name, precision: a.precision, spendable: String(a.balance.spendable), max: offerable(unspents, a.assetId).max, maxInstant: offerable(unspents, a.assetId).total, instant: instantAmounts(unspents, a.assetId), held: heldBreakdown(everything, a.assetId, this.reserved) }))
       .filter((a) => BigInt(a.spendable) > 0n || BigInt(a.max) > 0n);
+    // NFTs (2.32): one of one, marked nft; listed: already promised to an Instant listing of this wallet; alone: on an
+    // output of its own (its listing is live at once, no move)
+    const nfts = this.canNft ? (await this.listAssets()).uda.filter((a) => a.balance.settled > 0 || a.balance.future > 0).map((a) => {
+      const held = heldBreakdown(everything, a.assetId, this.reserved);
+      return { assetId: a.assetId, ticker: a.ticker, name: a.name, precision: 0, nft: true, spendable: String(a.balance.spendable), max: offerable(unspents, a.assetId).max, listed: held.listed !== '0', alone: !!exactCoinFor(unspents, a.assetId, 1n), held };
+    }) : [];
+    return [...tokens, ...nfts];
   }
 
   /**
@@ -1482,7 +1494,8 @@ export class LiteWallet {
     if (!pay) throw new Error(`Your RGB wallet needs about ${need.toLocaleString('en-US')} sats in bitcoin for the network fee. Tap Add from Bitcoin under RGB balance on Home.`);
     const fis = await Promise.all(pay.coins.map((c) => this.outpointInfo(c.outpoint)));
     const infos = [...sis, ...fis];
-    const r = await this.onchainReceive({ assetId, amount: Number(amount), durationSeconds: 86400, witness: true });
+    // an NFT moves to an invoice for any amount (a token amount doesn't apply to it)
+    const r = await this.onchainReceive({ assetId, amount: (await this.isNftAsset(assetId)) ? 0 : Number(amount), durationSeconds: 86400, witness: true });
     // nothing went out: give the invoice up, so a retry doesn't leave one more waiting forever (96 of them on Signet)
     const dropInvoice = async () => {
       if (r?.batchTransferIdx == null) return;
@@ -2259,17 +2272,22 @@ export class LiteWallet {
       let v;
       try { v = plain(this.lib.inspectSwapConsignment(bytes, txid, this.net, INSTANT_SEAL_OUTPUT)); } catch (e) { throw new Error(`The seller's token transfer does not check out: ${e?.message || e}`); }
       if (!v?.valid) throw new Error(`The seller's token transfer does not check out: ${v?.details || v?.error || 'invalid'}`);
-      const { contractId, sealAmount } = inspected(v);
+      const { contractId, sealAmount, assetSchema } = inspected(v);
       if (contractId !== o.assetId) throw new Error('The transfer is for another token than the offer.');
       if (sealAmount == null || BigInt(String(sealAmount)) !== BigInt(amount)) throw new Error(`The transfer gives you ${sealAmount ?? 'nothing'}, the offer says ${amount}.`);
+      return assetSchema;
     };
     const consignment = unb64(String(l.consignment || ''));
     // checked once (it used to be checked twice: once only to tell an old-format listing)
-    try { check(consignment, info.templateTxid); } catch (e) {
+    let schema = '';
+    try { schema = check(consignment, info.templateTxid); } catch (e) {
       if (OLD_CONSIGNMENT.test(String(e?.message || e))) throw new Error('This listing was signed by a MASKED older than 2.29, in the old RGB format, and can\'t be bought any more. Nothing was paid. The seller cancels it on the market and lists it again.');
       throw e;
     }
-    return { info, si, consignment, check };
+    // an NFT (RGB21): sold whole, received on an invoice for any asset (a token amount doesn't apply)
+    const nft = schema === 'Uda';
+    if (nft && o.amount !== 1n) throw new Error('An NFT is sold whole: the offer must be for 1.');
+    return { info, si, consignment, check, nft };
   }
   /** Buyer: check an Instant listing and buy it in one go: sign, broadcast, and hand the transfer to this wallet. */
   async instantBuy({ offerId, network, offer, listing, feeRate, quick = false, onStep = (_t) => {} }, store) {
@@ -2295,7 +2313,8 @@ export class LiteWallet {
     // picks from what it already knows are checked unspent on the block server below; it syncs only when they aren't
     const pre = await this.instantListingFetch(o, l);
     lap('check');
-    const { info, si, consignment, check } = pre;
+    const { info, si, consignment, check, nft } = pre;
+    if (nft && !this.canNft) throw new Error('This MASKED build can\'t hold NFTs yet. Update MASKED, then try again.');
     if ((await this.ownOutpoints()).has(String(info.sellerOutpoint))) throw new Error('This is your own listing.');
     // pay: one confirmed coin covering the price, the seal and the fee
     // economy rates below 1 sat/vB are fine here: the fee is worked out below, not by the RGB engine (2.29.29)
@@ -2324,7 +2343,7 @@ export class LiteWallet {
       throw new Error(`Your RGB wallet needs ${(base + feeFor([P2TR_SCRIPT])).toLocaleString('en-US')} sats in bitcoin for this. Tap Add from Bitcoin under RGB balance on Home. (It sees ${seen.length ? `${seen.length} coin${seen.length === 1 ? '' : 's'}: ${seen.slice(0, 5).map((v) => v.toLocaleString('en-US')).join(', ')} sats` : 'no coin'}, ${confirmed.length} confirmed${held ? `; ${held} just spent by this wallet` : ''}.)`);
     }
     // the coins' transactions (block server) while the wallet makes the invoice for the tokens
-    const [bis, r] = await Promise.all([Promise.all(pay.coins.map((c) => this.outpointInfo(c.outpoint))), this.onchainReceive({ assetId: null, amount: Number(o.amount), durationSeconds: 86400, witness: true })]);
+    const [bis, r] = await Promise.all([Promise.all(pay.coins.map((c) => this.outpointInfo(c.outpoint))), this.onchainReceive({ assetId: null, amount: nft ? 0 : Number(o.amount), durationSeconds: 86400, witness: true })]);
     lap('invoice');
     const seal = this.lib.WasmWallet.witnessSealScript(r.invoice);
     const paid = bis.reduce((t, b) => t + BigInt(b.sats), 0n);
