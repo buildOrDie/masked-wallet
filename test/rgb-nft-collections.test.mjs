@@ -29,3 +29,20 @@ test('a listed NFT says so instead of failing to send', () => {
   me.service.instantListings = () => [{ assetId: 'd', stage: 'cancelled' }];
   assert.equal(P.listedWhy.call(me, a), '');
 });
+
+test('a send whose finish fails drops the begun transfer, so the next try can use its outputs', async () => {
+  const { LiteWallet } = await import('../src/rgb/LiteWallet.mjs');
+  const calls = [];
+  const me = {
+    sign: (p) => `signed:${p}`, save: async () => calls.push('save'),
+    lib: { WasmWallet: { psbtTxid: () => 'AB'.repeat(32) } },
+    wallet: { sendEnd: async () => { throw new Error('proxy refused'); }, outputLocks: () => [], abandonColoring: (t) => calls.push(`abandon:${t}`) },
+  };
+  await assert.rejects(LiteWallet.prototype.endOrForget.call(me, {}, 'p'), /proxy refused/);
+  assert.deepEqual(calls, [`abandon:${'AB'.repeat(32)}`, 'save']);
+  // one the wallet recorded as a transfer is left alone
+  calls.length = 0;
+  me.wallet.outputLocks = () => [{ txid: 'ab'.repeat(32) }];
+  await assert.rejects(LiteWallet.prototype.endOrForget.call(me, {}, 'p'), /proxy refused/);
+  assert.deepEqual(calls, []);
+});

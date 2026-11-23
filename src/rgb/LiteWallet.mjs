@@ -585,7 +585,7 @@ export class LiteWallet {
     };
     if (isNft && d.assetId && d.assetId !== assetId) throw new Error('This invoice is for another asset.');
     const psbt = await this.wallet.sendBegin(online, recipients, false, BigInt(Math.round(feeRate)), 1);
-    const r = plain(await this.wallet.sendEnd(online, this.sign(psbt), false));
+    const r = plain(await this.endOrForget(online, psbt));
     await this.save();
     return r;
   }
@@ -617,9 +617,27 @@ export class LiteWallet {
     };
     const begin = await this.wallet.sendBegin(online, recipients, false, BigInt(Math.round(feeRate)), 1, expires, this.transport, null, false);
     const psbt = typeof begin === 'string' ? begin : begin?.psbt;
-    const r = plain(await this.wallet.sendEnd(online, this.sign(psbt), false));
+    const r = plain(await this.endOrForget(online, psbt));
     await this.save();
     return r;
+  }
+
+  /**
+   * Finish a begun send. When finishing fails (the recipient's transfer server refused the transfer, say), nothing was
+   * broadcast: the begun transfer is dropped, so its outputs are free for the next try. Kept, it held them until the
+   * invoice's expiry, and every new send of that token failed with "Insufficient total assignments".
+   */
+  async endOrForget(online, psbt) {
+    const signed = this.sign(psbt);
+    try { return await this.wallet.sendEnd(online, signed, false); } catch (e) {
+      let txid = '';
+      try { txid = String(this.lib.WasmWallet.psbtTxid(signed)); } catch { /* none */ }
+      // only one this wallet never recorded as a transfer (a recorded one is cancelled from the token's page)
+      let recorded = true;
+      try { recorded = (plain(this.wallet.outputLocks?.()) || []).some((l) => String(l?.txid || '').toLowerCase() === txid.toLowerCase()); } catch { recorded = true; }
+      if (txid && !recorded) { try { this.wallet.abandonColoring?.(txid); await this.save(); } catch { /* kept until it expires */ } }
+      throw e;
+    }
   }
 
   /** This engine can pay invoices whose transfer server speaks RGB proxy protocol 1.0. */
