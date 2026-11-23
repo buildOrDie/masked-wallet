@@ -112,6 +112,13 @@ test('a failed RGB request offers what to do next, right under the error', async
   assert.deepEqual(fixesFor('rgbInstantList', 'This RGB wallet is behind the chain for this token: it still counts an output…').map((x) => x.id), ['repair']);
   assert.deepEqual(fixesFor('rgbInstantBuy', 'The Signet block server is busy or down right now.').map((x) => x.id), ['retry']);
   assert.deepEqual(fixesFor('signPsbt', 'anything').map((x) => x.id), ['retry']);
+  const { rgbRate } = await import('../src/dapp/ApprovalController.mjs');
+  assert.equal(rgbRate({ feeRate: 0.5 }, { fee: () => '1' }), 1);
+  assert.equal(rgbRate({ feeRate: 3 }, { fee: () => '1' }), 3);
+  assert.equal(rgbRate({}, { fee: () => '2' }), 2);
+  const { RGB_CONFLICT_MSG } = await import('../src/rgb/WalletRgb.mjs');
+  assert.deepEqual(fixesFor('rgbInstantBuy', RGB_CONFLICT_MSG).map((x) => x.id), ['cloudLoad']);
+  assert.deepEqual(fixesFor('rgbInstantList', 'A newer RGB cloud backup was saved from another browser. Use RGB in one browser at a time.').map((x) => x.id), ['cloudLoad']);
 });
 
 test('listing: the tokens free on settled outputs count, even when the engine balance lags', async () => {

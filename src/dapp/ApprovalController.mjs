@@ -48,9 +48,20 @@ const sellable = (r, asset) => Math.max(Number(r.bal(asset).spendable) || 0, Num
 /** Errors that mean this wallet's view was behind the chain (nothing was sent): a catch-up and a second try fix them. */
 const STALE_RGB = /none of its inputs is an RGB output|isn't a settled RGB output|that output can't be listed|unsafe ?history|still settling|already spent by another of your transactions|missing-?inputs|missingorspent|bad-txns-inputs-missingorspent/i;
 /** What the person can do about a failed request, as buttons under the error (no trip to Settings). */
+/**
+ * The fee rate for an RGB step: a site can ask for more than the wallet's rate, never less. A site that asked for
+ * 0.5 sat/vB left a trade unconfirmed (block servers and miners that keep a 1 sat/vB floor don't take it).
+ */
+export function rgbRate(P, r) { return Math.max(Number(P?.feeRate) || 0, Number(r.fee()) || 1); }
+
+export const CONFLICT_RGB = /also open in another copy of MASKED|newer RGB cloud backup was saved/i;
+
 export function fixesFor(method, text) {
   if (!/^rgb/.test(method)) return [{ id: 'retry', label: 'Try again' }];
   const t = String(text);
+  // another copy of this wallet (phone app, other profile) saved newer RGB: load it here (making this copy the backup
+  // instead is a choice with more at stake: Settings → RGB → cloud backup, as the message says)
+  if (CONFLICT_RGB.test(t)) return [{ id: 'cloudLoad', label: 'Load the latest RGB from the other copy and try again' }];
   if (/behind the chain|already spent there|Check RGB against the chain/i.test(t)) return [{ id: 'repair', label: 'Fix it from the chain and try again' }];
   if (STALE_RGB.test(t) || /wait for (one|its) block|Tap Refresh/i.test(t)) return [{ id: 'refresh', label: 'Refresh and try again' }];
   if (/busy or down|Can't reach|did not answer|try again/i.test(t)) return [{ id: 'retry', label: 'Try again' }];
@@ -222,7 +233,7 @@ export class ApprovalController {
         try { await r.service.checkProxy(proxyUrl(e)); endpoint = e; break; } catch (err) { why = String(err?.message || err); }
       }
       if (!endpoint) throw new Error(`The transfer server in this invoice is not answering. ${why}`.trim());
-      const fee = P.feeRate ? String(Math.round(P.feeRate)) : r.fee();
+      const fee = String(Math.ceil(rgbRate(P, r)));
       return { assetId, asset, ticker: asset.ticker, amount, shown: amount ? r.amount(asset, amount) : '', needAmount: !amount, witness: !!d.witness, endpoint, proxy: hostOf(endpoint), fee, spendable: r.amount(asset, r.bal(asset).spendable) };
     });
   }
@@ -262,7 +273,7 @@ export class ApprovalController {
         if (spare.length <= keep && !rep.unpaidReceives) throw new Error(`Only ${spare.length} spare RGB outputs: MASKED keeps ${keep} for receiving tokens, so there's nothing to free.`);
         const freed = spare.slice(keep);
         const coins = (rep.coins || []).filter((c) => !c.justSpent);
-        return { keep, freed: freed.length, sats: freed.reduce((n, o) => n + o.sats, 0), coinSats: coins.reduce((n, c) => n + c.sats, 0), unpaid: rep.unpaidReceives || 0, rate: P.feeRate || Number(r.fee()) };
+        return { keep, freed: freed.length, sats: freed.reduce((n, o) => n + o.sats, 0), coinSats: coins.reduce((n, c) => n + c.sats, 0), unpaid: rep.unpaidReceives || 0, rate: rgbRate(P, r) };
       }
       if (m === 'rgbOutputs') return { list: r.assets().map((x) => ({ ticker: x.ticker, assetId: x.assetId })) };
       if (m === 'rgbListAssets') { if (a.remember == null) a.remember = isMaskedSite(a.origin); return { list: r.assets().map((x) => ({ ticker: x.ticker, assetId: x.assetId })) }; }
@@ -283,7 +294,7 @@ export class ApprovalController {
         const price = lots.reduce((t, x) => t + Number(x.priceSats), 0);
         if (total > sellable(r, asset)) throw new Error(`You can list up to ${r.amount(asset, sellable(r, asset))} ${asset.ticker}.`);
         let host = ''; try { host = new URL(P.market).host; } catch { throw new Error('The market address is not valid.'); }
-        const rate = P.feeRate || Number(r.fee());
+        const rate = rgbRate(P, r);
         // one move per lot: a token output and a bitcoin coin in; the commitment, the lot, the rest of the tokens and the
         // bitcoin back out (MASKED with the newer engine: all of them now, every lot signed at once)
         const atOnce = !!r.service.wallet?.canChainLots;
@@ -305,7 +316,7 @@ export class ApprovalController {
         const total = items.reduce((t, x) => t + Number(x.offer.amount), 0);
         const price = items.reduce((t, x) => t + Number(x.offer.priceSats), 0);
         const units = items.map((x) => Number(x.offer.priceSats) / (Number(x.offer.amount) / 10 ** (asset?.precision || 0))); // sats per whole token
-        const rate = P.feeRate || Number(r.fee());
+        const rate = rgbRate(P, r);
         // combined (2.30): one transaction per COMBINED_MAX listings, one seal each; else one purchase per listing
         const combined = !!r.service.canCombine && items.length >= 2;
         const sizes = combined ? combinedChunks(items.length) : Array(items.length).fill(1);
@@ -319,16 +330,17 @@ export class ApprovalController {
       const net = r.isMain ? 'mainnet' : 'signet';
       if (P.network && !String(P.network).toLowerCase().startsWith(net === 'mainnet' ? 'mainnet' : 'signet')) throw new Error(`The site is on ${P.network}, your RGB wallet is on ${r.profile.label}.`);
       const asset = r.find(o.assetId);
-      const shown = asset ? `${r.amount(asset, Number(o.amount))} ${asset.ticker}` : `${Number(o.amount).toLocaleString('en-US')} units`;
-      const base = { asset, assetId: o.assetId, shown, price: Number(o.priceSats), newToken: !asset };
+      // an NFT: its name (one of one), not an amount
+      const shown = asset?.nft ? asset.name : P.nft?.name ? `NFT · ${P.nft.name}` : asset ? `${r.amount(asset, Number(o.amount))} ${asset.ticker}` : `${Number(o.amount).toLocaleString('en-US')} units`;
+      const base = { asset, assetId: o.assetId, shown, price: Number(o.priceSats), newToken: !asset, nft: !!(asset?.nft || P.nft) };
       if (m === 'rgbBuyPrepare') {
-        const rate = P.feeRate || Number(r.fee());
+        const rate = rgbRate(P, r);
         const fee = Math.ceil(rate * SWAP_SIZE_VB);
         return { ...base, fee, rate, topUp: topUpFor(r, base.price + fee) };
       }
       if (m === 'rgbInstantList' || m === 'rgbInstantBuy' || m === 'rgbInstantCancel') {
         if (!r.service.canPresign) throw new Error('This MASKED version can\'t do Instant listings yet. Update MASKED.');
-        const rate = P.feeRate || Number(r.fee());
+        const rate = rgbRate(P, r);
         // usual sizes (one coin of yours, taproot); the wallet works out the exact fee from the real coins
         const vb = m === 'rgbInstantBuy' ? instantBuyVbytes(1, true) : instantMoveVbytes(1);
         const fee = Math.ceil(rate * vb);
@@ -360,7 +372,7 @@ export class ApprovalController {
           return { ...base, p2p: true };
         }
         if (m === 'rgbP2pBuyPrepare') {
-          const rate = P.feeRate || Number(r.fee());
+          const rate = rgbRate(P, r);
           const fee = Math.max(500, Math.ceil(rate * txVbytes([P2TR_SCRIPT, P2TR_SCRIPT], [OPRET_SCRIPT, P2TR_SCRIPT, P2TR_SCRIPT])));
           return { ...base, fee, rate, p2p: true, topUp: topUpFor(r, base.price + fee) };
         }
@@ -476,6 +488,15 @@ export class ApprovalController {
       return this.prepare();
     }
     try {
+      if (id === 'cloudLoad') {
+        state.status.approve = ['Loading the latest RGB from the cloud backup…', '']; app.render();
+        // RGB's own step (it takes RGB's busy flag itself): wait for a refresh in progress first
+        for (const until = Date.now() + 90000; r.busy && Date.now() < until;) await new Promise((ok) => setTimeout(ok, 250));
+        await r.action('cloudLoad');
+        if (r.cloud?.conflict || !r.ready) throw new Error(r.message || 'The newer RGB backup couldn\'t be loaded. Open Settings → RGB → cloud backup.');
+        state.status.approve = ['Loaded. This copy is up to date. Trying again…', '']; app.render();
+        a.prep = null; a.prepErr = null; a.errGen = undefined;
+      }
       if (id === 'refresh') { state.status.approve = ['Catching up with the chain…', '']; app.render(); await this.rgbBusy(() => r.refresh()); }
       if (id === 'repair') {
         state.status.approve = ['Checking your RGB outputs against the chain…', '']; app.render();
@@ -612,9 +633,9 @@ export class ApprovalController {
         return { txid: String(res?.txid || ''), batchTransferIdx: res?.batchTransferIdx ?? null, amount: String(amount), status };
       });
       case 'rgbFreeSpare': return this.rgbBusy(async () => {
-        const b = prepared(''), r = app.rgb;
+        prepared(''); const r = app.rgb;
         await this.rgbBackedUp(r);
-        const out = await r.service.freeSpare({ fee: a.params.feeRate || b.rate });
+        const out = await r.service.freeSpare({ fee: rgbRate(a.params, r) });
         await r.refresh().catch(() => {});
         await this.rgbBackedUp(r).catch(() => {});
         return out;
@@ -651,7 +672,7 @@ export class ApprovalController {
       case 'rgbInstantList': step('Waiting for RGB…'); return this.rgbBusy(async () => {
         prepared(''); const r = app.rgb, P = a.params, o = P.offer;
         await this.rgbBackedUp(r);
-        const out = await r.service.instantList({ offerId: P.offerId, assetId: o.assetId, amount: o.amount, priceSats: o.priceSats, feeRate: P.feeRate || Number(r.fee()), market: P.market, token: P.token, onStep: step });
+        const out = await r.service.instantList({ offerId: P.offerId, assetId: o.assetId, amount: o.amount, priceSats: o.priceSats, feeRate: rgbRate(P, r), market: P.market, token: P.token, onStep: step });
         await this.rgbBackedUp(r).catch(() => {});
         later(r);
         return out;
@@ -659,20 +680,20 @@ export class ApprovalController {
       case 'rgbInstantListLots': step('Waiting for RGB…'); return this.rgbBusy(async () => {
         prepared(''); const r = app.rgb, P = a.params;
         await this.rgbBackedUp(r);
-        const out = await r.service.instantListLots({ assetId: P.assetId, lots: P.lots, feeRate: P.feeRate || Number(r.fee()), market: P.market, onStep: step });
+        const out = await r.service.instantListLots({ assetId: P.assetId, lots: P.lots, feeRate: rgbRate(P, r), market: P.market, onStep: step });
         await this.rgbBackedUp(r).catch(() => {});
         later(r);
         return out;
       });
       case 'rgbInstantBuy': step('Waiting for RGB…'); return this.rgbBusy(async () => {
         prepared(''); const r = app.rgb, P = a.params;
-        const out = await r.service.instantBuy({ ...P, feeRate: P.feeRate || Number(r.fee()), quick: true, onStep: step });
+        const out = await r.service.instantBuy({ ...P, feeRate: rgbRate(P, r), quick: true, onStep: step });
         later(r);
         return out;
       });
       case 'rgbInstantBuyMany': step('Waiting for RGB…'); return this.rgbBusy(async () => {
         prepared(''); const r = app.rgb, P = a.params, n = P.items.length;
-        const feeRate = P.feeRate || Number(r.fee());
+        const feeRate = rgbRate(P, r);
         const results = [];
         // 2.30: up to COMBINED_MAX listings in one transaction (about 100 vB per extra listing instead of a whole
         // purchase each); when they can't be combined (one coin only, a listing gone…), one after another
@@ -714,7 +735,7 @@ export class ApprovalController {
       });
       case 'rgbInstantCancel': return this.rgbBusy(async () => {
         prepared(''); const r = app.rgb, P = a.params;
-        const out = await r.service.instantCancel({ offerId: P.offerId, feeRate: P.feeRate || Number(r.fee()), sellerOutpoint: P.sellerOutpoint || '', offer: P.offer });
+        const out = await r.service.instantCancel({ offerId: P.offerId, feeRate: rgbRate(P, r), sellerOutpoint: P.sellerOutpoint || '', offer: P.offer });
         await r.refresh().catch(() => {});
         await this.rgbBackedUp(r).catch(() => {});
         return out;

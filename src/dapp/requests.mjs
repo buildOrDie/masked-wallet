@@ -59,6 +59,10 @@ function swapParams(method, p) {
   // an Instant buy works out its own fee (no RGB engine rounding), so it can use an economy rate below 1 sat/vB
   if (method === 'rgbInstantBuy' && p.feeRate != null) { const f = Number(p.feeRate); if (!(f >= BUY_FEE_MIN && f <= 500)) throw err(4000, `feeRate must be between ${BUY_FEE_MIN} and 500 sat/vB.`); out.feeRate = f; }
   if (['rgbInstantList', 'rgbInstantCancel'].includes(method) && p.feeRate != null) { const f = Number(p.feeRate); if (!(f >= 1 && f <= 500)) throw err(4000, 'feeRate must be between 1 and 500 sat/vB.'); out.feeRate = f; }
+  // an NFT's name, for the approval screen only (the wallet checks the NFT itself)
+  if (['rgbInstantList', 'rgbInstantBuy', 'rgbInstantCancel'].includes(method) && p.nft && typeof p.nft === 'object') {
+    out.nft = { name: String(p.nft.name || '').replace(/[<>]/g, '').slice(0, 60) };
+  }
   if (method === 'rgbInstantList') {
     // where the wallet sends the signed listing if it's signed later (after the tokens move): https only
     let u; try { u = new URL(String(p.market || '')); } catch { throw err(4000, 'market must be the market\'s address.'); }
@@ -99,6 +103,13 @@ function swapParams(method, p) {
     const l = p.listing;
     if (!l || typeof l !== 'object') throw err(4000, 'listing (the signed listing from the market) is required.');
     out.listing = { psbt: str(l.psbt, 20_000, 'listing.psbt'), consignment: str(l.consignment, 4_000_000, 'listing.consignment'), templateTxid: str(l.templateTxid, 64, 'listing.templateTxid') };
+    // a co-signed claim (a launchpad): the seller's signature comes last, from the launchpad, while the claim holds
+    if (l.cosign === true) out.listing.cosign = true;
+    // an NFT listing's files (picture, metadata.json): the wallet checks each against the NFT
+    if (Array.isArray(l.media)) {
+      if (l.media.length > 21) throw err(4000, 'listing.media: too many files.');
+      out.listing.media = l.media.map((m) => ({ digest: str(m?.digest, 64, 'listing.media.digest'), data: str(m?.data, 2_000_000, 'listing.media.data') }));
+    }
   }
   return out;
 }

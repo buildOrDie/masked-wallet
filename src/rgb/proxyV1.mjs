@@ -9,6 +9,7 @@
 import { ed25519, edwardsToMontgomeryPriv, edwardsToMontgomeryPub, x25519 } from '@noble/curves/ed25519';
 import { sha256 } from '@noble/hashes/sha256';
 import { extract, expand } from '@noble/hashes/hkdf';
+import { hmac } from '@noble/hashes/hmac';
 import { bytesToHex, hexToBytes, utf8ToBytes, randomBytes } from '@noble/hashes/utils';
 import { xchacha20poly1305 } from '@noble/ciphers/chacha';
 
@@ -17,6 +18,7 @@ export const ENC_VERSION = 0x01;
 export const CHUNK = 65536;
 const INFO_ENC = 'rgb-proxy-server/enc/v1';
 const INFO_BLINDING = 'rgb-proxy-server/enc/v1/seal-blinding';
+const INFO_MEDIA_ID = 'rgb-proxy-server/enc/v1/media-id';
 /** The most proof of work MASKED computes (the spec recommends servers stay at or under 24 bits). */
 export const MAX_POW_BITS = 24;
 
@@ -45,8 +47,12 @@ export function sharedKeys(mySeed, theirPk) {
   const b = expand(sha256, prk, utf8ToBytes(INFO_BLINDING), 8);
   let blinding = 0n;
   for (let i = 7; i >= 0; i--) blinding = (blinding << 8n) | BigInt(b[i]); // u64 little-endian
-  return { key, blinding };
+  // the key that names a transfer's media files on the server (see mediaIdOf)
+  const kmid = expand(sha256, prk, utf8ToBytes(INFO_MEDIA_ID), 32);
+  return { key, blinding, kmid };
 }
+/** A media file's id on the transfer server: HMAC-SHA-256 of its digest (hex) under the shared media key. */
+export const mediaIdOf = (kmid, digestHex) => bytesToHex(hmac(sha256, kmid, utf8ToBytes(String(digestHex))));
 
 /** The 24-byte nonce of chunk `counter`: last 19 bytes of the plaintext's SHA-256, u32 BE counter, final flag. */
 export function chunkNonce(plainHashHex, counter, last) {
@@ -137,6 +143,20 @@ export async function rpc(url, method, params = {}, fetchFn = fetch) {
 }
 
 /** consignment.post: the JSON-RPC fields as form fields, `params` JSON-encoded, then the file. */
+/** Upload one media file (an NFT's picture or metadata) of a transfer. */
+export async function postMedia(url, params, file, fetchFn = fetch) {
+  const form = new FormData();
+  form.append('jsonrpc', '2.0');
+  form.append('id', String(++rpcId));
+  form.append('method', 'media.post');
+  form.append('params', JSON.stringify(params));
+  form.append('file', new Blob([file], { type: 'application/octet-stream' }), 'media');
+  const r = await fetchFn(url, { method: 'POST', body: form, credentials: 'omit', cache: 'no-store' });
+  const j = await r.json().catch(() => null);
+  if (!j) throw new Error(`Transfer server: no answer to media.post (${r.status}).`);
+  return j;
+}
+
 export async function postConsignment(url, params, file, fetchFn = fetch) {
   const form = new FormData();
   form.append('jsonrpc', '2.0');
@@ -172,10 +192,10 @@ export async function pickEndpoint(endpoints, invoiceId, fetchFn = fetch) {
 
 /**
  * Upload a donation's consignment (which already contains the signed transaction) for the invoice.
- * @param {{ invoice: ReturnType<typeof readInvoiceV1>, picked: Awaited<ReturnType<typeof pickEndpoint>>, sender: ReturnType<typeof newSenderKey>, key: Uint8Array, consignment: Uint8Array }} p
+ * @param {{ invoice: ReturnType<typeof readInvoiceV1>, picked: Awaited<ReturnType<typeof pickEndpoint>>, sender: ReturnType<typeof newSenderKey>, key: Uint8Array, consignment: Uint8Array, kmid?: Uint8Array|null, medias?: { digest: string, bytes: Uint8Array }[] }} p  kmid, medias: an NFT's files, posted after the consignment
  * @returns {Promise<{ transferId: string, consignmentHash: string, created: boolean }>}
  */
-export async function deliverConsignment({ invoice, picked, sender, key, consignment }, fetchFn = fetch) {
+export async function deliverConsignment({ invoice, picked, sender, key, consignment, kmid = null, medias = [] }, fetchFn = fetch) {
   if (invoice.enc != null && !['0', '1'].includes(invoice.enc)) throw new Error('The invoice asks for an encryption mode MASKED doesn\'t know.');
   const invoiceId = invoiceIdOf(invoice.beneficiary, invoice.pk);
   const transferId = transferIdOf(invoiceId, sender.pk);
@@ -197,7 +217,19 @@ export async function deliverConsignment({ invoice, picked, sender, key, consign
       pow_timestamp: powTimestamp, pow_nonce: powNonce,
     };
     const r = await postConsignment(picked.url, params, file, fetchFn);
-    if (!r.error) return { transferId, consignmentHash, created: r.result !== false };
+    if (!r.error) {
+      // an NFT's files (picture, metadata.json): the recipient fetches and checks them before accepting the NFT
+      for (const m of medias || []) {
+        if (!kmid) throw new Error('No media key for this transfer.');
+        const plain = m.bytes, digest = String(m.digest);
+        if (sha256Hex(plain) !== digest) throw new Error('A file of this NFT does not match its fingerprint.');
+        const enc = invoice.enc === '0' ? plain : encryptBlob(key, plain, digest);
+        const mediaId = mediaIdOf(kmid, digest);
+        const mr = await postMedia(picked.url, { transfer_id: transferId, media_id: mediaId, file_size: String(enc.length), signature: signFields(sender.seed, transferId, mediaId, sha256Hex(enc), 'media') }, enc, fetchFn);
+        if (mr.error && !/already/i.test(String(mr.error.message || ''))) throw new Error(`Transfer server refused the NFT's file: ${mr.error.message || mr.error.code}`);
+      }
+      return { transferId, consignmentHash, created: r.result !== false };
+    }
     if (r.error.code === -502 && form === 0) { form = 1; continue; }
     // proof of work refused (difficulty rose, or the clock moved): retry with the difficulty it now asks for
     if (r.error.code === -114) { difficulty = Number(r.error.data?.difficulty ?? r.error.data?.pow_difficulty ?? difficulty + 1); picked = { ...picked, info: { ...picked.info, current_time: undefined } }; continue; }

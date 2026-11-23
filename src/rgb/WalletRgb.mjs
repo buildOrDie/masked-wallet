@@ -51,6 +51,9 @@ export function rgbError(error, profile = profileOf('utexo')) {
     if (/min relay fee|mempool min fee|fee not met/i.test(reason)) return `Not sent: the network fee was too low. Pick a higher fee and try again. (${reason})`;
     return `Not sent: the Bitcoin network refused the transaction${reason ? `: ${reason}` : ` (${text})`}`;
   }
+  if (/insufficient total assignments|InsufficientAssignments/i.test(text)) {
+    return `What you're sending isn't free to move yet: the output it sits on is still tied to something else (a transfer waiting for a block, a send the other wallet hasn't accepted, an open invoice or a listing). Tap Refresh, wait for the next block, then try again. Nothing was sent. (${text})`;
+  }
   if (/insufficient ?allocation|allocation ?slots|no (colorable|available) (utxo|output)s?/i.test(text)) {
     return `RGB is still setting up. Wait for one block (about 10 minutes), then try again. (${text})`;
   }
@@ -95,7 +98,7 @@ async function publishInstant(e, v) {
   const r = await fetch(`${e.market}/api/swap/offers/${encodeURIComponent(v.offerId)}/presigned`, {
     method: 'POST', credentials: 'omit', cache: 'no-store',
     headers: { 'content-type': 'application/json', 'x-swap-token': e.token },
-    body: JSON.stringify({ psbt: v.psbt, consignment: v.consignment, templateTxid: v.templateTxid, sellerOutpoint: v.sellerOutpoint }),
+    body: JSON.stringify({ psbt: v.psbt, consignment: v.consignment, templateTxid: v.templateTxid, sellerOutpoint: v.sellerOutpoint, ...(v.media?.length ? { media: v.media } : {}) }),
   });
   // a refusal (offer cancelled or closed on the market) is final too: don't send it again, but say so
   if (!r.ok && r.status >= 400 && r.status < 500) {
@@ -111,12 +114,30 @@ export const OPEN_FRESH_MS = 60_000;
 /** With nothing under way, the open popup refreshes RGB this often. */
 export const IDLE_REFRESH_MS = 5 * 60_000;
 
+/** The verified list (escrow /api/nft-verified) as Map asset ID → { slug, name }. */
+export function trustMap(list) {
+  const m = new Map();
+  for (const c of Array.isArray(list) ? list : []) {
+    const slug = String(c?.slug || ''), name = String(c?.name || c?.ticker || '').slice(0, 40);
+    if (!/^[a-z0-9-]{2,31}$/.test(slug) || !name) continue;
+    const ids = Array.isArray(c.assetIds) ? c.assetIds : [], ns = Array.isArray(c.ns) ? c.ns : [];
+    ids.forEach((id, k) => {
+      if (typeof id !== 'string' || !id.startsWith('rgb:')) return;
+      const n = Number(ns[k]);
+      m.set(id, { slug, name, ...(Number.isInteger(n) && n > 0 ? { n } : {}) });
+    });
+  }
+  return m;
+}
+
 export class WalletRgb {
   constructor(app) {
     this.app = app;
     this.service = null;
     /** @type {Map<string, string>} NFT images by digest: data: URL, '' while loading */
+    /** @type {Map<string, string | { loading?: boolean, failedAt?: number, data?: any }>} picture digest → data URL, or its state */
     this.imgs = new Map();
+    /** @type {Map<string, any>} */ this.metas = new Map();
     this.data = null;
     this.ready = false;
     this.busy = false;
@@ -338,6 +359,43 @@ export class WalletRgb {
   /** NFTs (RGB21 / UDA) held or on their way in. */
   nfts() { return (this.data?.groups?.uda || []).filter((a) => a?.assetId && (Number(a.balance?.future) > 0 || Number(a.balance?.settled) > 0)).map((a) => ({ ...a, nft: true, precision: 0 })); }
   isNft(a) { return !!a?.nft; }
+  /** This wallet's open Instant listing of an asset (on sale, going live, cancelling), or null. */
+  openListing(assetId) {
+    let list = [];
+    try { list = this.service?.instantListings?.() || []; } catch { list = []; }
+    return list.find((e) => e?.assetId === assetId && ['ready', 'moving', 'outdated', 'cancelling'].includes(String(e.stage))) || null;
+  }
+  /** Why an NFT can't be sent while it's listed, or ''. */
+  listedWhy(a) {
+    const e = this.isNft(a) ? this.openListing(a.assetId) : null;
+    if (!e) return '';
+    return e.stage === 'cancelling'
+      ? `${a.name} is coming back from a cancelled listing. It can be sent after that cancel's block (about 10 minutes).`
+      : `${a.name} is in Your listings (${e.stage === 'ready' ? 'on sale' : e.stage === 'moving' ? 'going live' : 'can\'t sell'}). Its output is promised to that listing, so it can't be sent. Cancel the listing first: Home → Your listings.`;
+  }
+  /**
+   * NFTs by collection: [{ key, name, verified, list }]. A whitelisted collection (the verified list names each of its
+   * asset IDs) comes first and groups exactly its NFTs; any other NFT is grouped by its ticker, as unverified, since
+   * anyone can mint an NFT with any name.
+   */
+  collections() {
+    const num = (a) => Number((String(a.name).match(/#\s*(\d+)/) || [])[1] ?? Infinity);
+    const trust = this.nftTrust();
+    const m = new Map();
+    for (const a of this.nfts()) {
+      const v = trust.get(a.assetId);
+      const key = v ? `v:${v.slug}` : `u:${String(a.ticker || '?')}`;
+      if (!m.has(key)) m.set(key, { key, name: v ? v.name : String(a.ticker || '?'), verified: !!v, list: [] });
+      m.get(key).list.push(a);
+    }
+    return [...m.values()].map((c) => ({ ...c, list: c.list.sort((x, y) => num(x) - num(y) || String(x.name).localeCompare(String(y.name))) }))
+      .sort((x, y) => Number(y.verified) - Number(x.verified) || y.list.length - x.list.length || x.key.localeCompare(y.key));
+  }
+  /** The collection an NFT is listed under (its key, for the collection page). */
+  collectionOf(a) {
+    const v = this.nftTrust().get(a?.assetId);
+    return v ? { key: `v:${v.slug}`, name: v.name, verified: true } : { key: `u:${String(a?.ticker || '?')}`, name: String(a?.ticker || '?'), verified: false };
+  }
   find(id) { return this.assets().find((a) => a.assetId === id) || this.nfts().find((a) => a.assetId === id) || null; }
   /**
    * An NFT's image as a data: URL once loaded (checked against the digest in the NFT), '' while loading or when no
@@ -346,10 +404,60 @@ export class WalletRgb {
   nftImg(a) {
     const d = a?.media?.digest;
     if (!d) return '';
-    if (this.imgs.has(d)) return this.imgs.get(d) || '';
-    this.imgs.set(d, '');
-    Promise.resolve(this.service?.nftImage?.(a.media)).then((url) => { if (url) { this.imgs.set(d, url); this.app.render?.(); } else this.imgs.delete(d); }, () => this.imgs.delete(d));
+    const hit = this.imgs.get(d);
+    if (typeof hit === 'string') return hit;
+    // loading, or not found lately: no new try on every redraw. Tried again after a refresh (the NFT's own copy comes
+    // with its transfer) or after 30 seconds
+    if (hit && (hit.loading || (hit.data === this.data && Date.now() - Number(hit.failedAt || 0) < 30_000))) return '';
+    this.imgs.set(d, { loading: true });
+    const failed = () => this.imgs.set(d, { failedAt: Date.now(), data: this.data });
+    // a verified collection's picture from MASKED's server when this wallet doesn't hold the NFT's copy yet (an NFT
+    // on its way): the wallet shows it only if it matches the NFT's fingerprint
+    const v = this.nftTrust().get(a.assetId), base = this.profile?.nftMedia;
+    const url = v?.n && base ? `${base}/${v.slug}/${v.n}` : '';
+    Promise.resolve(this.service?.nftImage?.(a.media, url ? { url } : undefined)).then((src) => { if (src) { this.imgs.set(d, src); this.redrawSoon(); } else failed(); }, failed);
     return '';
+  }
+  /** One redraw for pictures that arrive together, not one per picture. */
+  redrawSoon() {
+    if (this.redrawTimer) return;
+    this.redrawTimer = setTimeout(() => { this.redrawTimer = null; this.app.render?.(); }, 60);
+  }
+  /**
+   * The whitelisted NFT collections (MASKED's launchpad's verified list): Map asset ID → { slug, name }. Loaded in the
+   * background (kept 10 minutes, and the last list across openings); empty while loading or without one.
+   */
+  nftTrust() {
+    const url = this.profile?.nftVerified;
+    if (!url) return new Map();
+    const KEY = 'masked.rgb.nftVerified';
+    if (!this.trust) {
+      this.trust = { map: new Map(), at: 0, loading: false };
+      try { const c = JSON.parse(localStorage.getItem(KEY) || 'null'); if (c?.url === url && Array.isArray(c.list)) this.trust.map = trustMap(c.list); } catch { /* none */ }
+    }
+    const t = this.trust;
+    if (!t.loading && Date.now() - t.at > 600_000) {
+      t.loading = true;
+      const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+      const timer = setTimeout(() => ctl?.abort(), 8000);
+      fetch(url, { signal: ctl?.signal, cache: 'no-store' }).then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status))))).then((list) => {
+        if (!Array.isArray(list)) return;
+        t.map = trustMap(list); t.at = Date.now();
+        try { localStorage.setItem(KEY, JSON.stringify({ url, list })); } catch { /* memory only */ }
+        this.redrawSoon();
+      }).catch(() => { t.at = Date.now() - 540_000; /* again in a minute */ }).finally(() => { clearTimeout(timer); t.loading = false; });
+    }
+    return t.map;
+  }
+  /** An NFT's traits once read from its metadata.json (nftTraits), null while loading or without one. */
+  nftMeta(a) {
+    const key = (a?.files || []).map((f) => f.digest).join(',');
+    if (!key) return null;
+    this.metas ??= new Map();
+    if (this.metas.has(key)) return this.metas.get(key);
+    this.metas.set(key, null);
+    Promise.resolve(this.service?.nftMeta?.(a.files)).then((m) => { if (m) { this.metas.set(key, m); this.app.render?.(); } }, () => {});
+    return null;
   }
   /**
    * Tokens an earlier beta counted twice: two of our witness invoices shared one address, so one payment settled
@@ -380,10 +488,12 @@ export class WalletRgb {
     const free = all.filter((x) => !x.coin || !locked.has(x.coin)).reduce((n, x) => n + x.amount, 0);
     const cut = (n, by) => Math.max(0, Number(n || 0) - by);
     // incoming transfers the network dropped never arrive: not counted as incoming
+    // (an NFT's assignment is 'NonFungible': its one token)
+    const units = (x) => (x === 'NonFungible' || x?.NonFungible !== undefined ? 1 : Number(x?.Fungible ?? x?.amount ?? 0));
     const gone = (this.data?.transfers?.[a.assetId] || []).filter((t) => this.isDropped(t) && String(t.status) === 'WaitingConfirmations')
-      .reduce((n, t) => n + (t.assignments || []).reduce((m, x) => m + Number(x?.Fungible ?? x?.amount ?? 0), 0), 0);
+      .reduce((n, t) => n + (t.assignments || []).reduce((m, x) => m + units(x), 0), 0);
     // and never more incoming than the waiting receives listed: the engine can count one twice (a dropped one, say)
-    const sum = (t) => (t.assignments || []).reduce((m, x) => m + Number(x?.Fungible ?? x?.amount ?? 0), 0);
+    const sum = (t) => (t.assignments || []).reduce((m, x) => m + units(x), 0);
     const visible = (this.data?.transfers?.[a.assetId] || []).filter((t) => String(t?.kind || '').startsWith('Receive') && ['WaitingCounterparty', 'WaitingConfirmations'].includes(String(t.status)) && !this.isDropped(t))
       .reduce((n, t) => n + sum(t), 0);
     const settled = cut(b.settled, d);
@@ -973,6 +1083,7 @@ export class WalletRgb {
       }
       case 'mint': f.mintMode = 'rgb'; state.view = 'mint'; this.issued = null; return app.render();
       case 'token': this.asset = arg; state.view = 'rgbtok'; return app.render();
+      case 'coll': this.coll = arg; state.view = 'rgbcoll'; return app.render();
       case 'receive': f.recvKind = 'rgb'; this.fields.recvAsset = arg || ''; this.invoice = ''; state.view = 'receive'; return app.render();
       case 'send':
         this.asset = arg; this.pending = null; this.sent = null; this.fields.sendTo = ''; this.fields.sendAmt = ''; state.view = 'rgbsend';
@@ -1061,6 +1172,7 @@ export class WalletRgb {
           if (d.expirationTimestamp && d.expirationTimestamp <= Date.now() / 1000) throw new Error('This invoice has expired. Ask them to make a new one.');
           if (!this.profile.invoiceNets.includes(String(d.network).toLowerCase())) throw new Error(`This invoice is not for ${this.profile.label}.`);
           // an invoice with a fixed amount fills it in; an NFT is always 1
+          if (this.listedWhy(a)) throw new Error(this.listedWhy(a));
           if (this.isNft(a)) this.fields.sendAmt = '1';
           const amount = this.isNft(a) ? 1 : d.amount || toBase(this.fields.sendAmt, a.precision);
           if (d.amount) this.fields.sendAmt = this.amount(a, d.amount).replace(/,/g, '');
@@ -1095,7 +1207,12 @@ export class WalletRgb {
             throw new Error('Transfer server permission changed. Review the server and try again.');
           }
           // the token change needs a free RGB output of this wallet: none (or all full), make some first
-          const r = await this.withOutputs(() => this.service.send({ invoice: p.invoice, assetId: p.assetId, amount: String(p.amount), fee: this.fee(), endpoint: p.check.endpoint, nft: !!p.nft }), { retry: false });
+          const r = await this.withOutputs(() => this.service.send({ invoice: p.invoice, assetId: p.assetId, amount: String(p.amount), fee: this.fee(), endpoint: p.check.endpoint, nft: !!p.nft }), { retry: false })
+            .catch((err) => {
+              // the engine only says the asset isn't on an output it can spend: a listing holding it says why
+              const a = this.find(p.assetId), why = a && /insufficient total assignments/i.test(String(err?.message || err)) && this.listedWhy(a);
+              throw why ? new Error(why) : err;
+            });
           this.sent = { txid: r?.txid || '', shown: p.shown, ticker: p.ticker, nft: !!p.nft };
           this.pending = null;
           await this.refresh();

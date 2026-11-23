@@ -1,7 +1,7 @@
 import { esc, fmtBtc, short, sumSats } from '../../core/format.mjs';
 import { NETWORKS } from '../../bitcoin/networks.mjs';
 import { TRADE_PADDING } from '../../trade/trade-core.mjs';
-import { NEEDS_PREP } from '../../dapp/ApprovalController.mjs';
+import { NEEDS_PREP, CONFLICT_RGB, fixesFor } from '../../dapp/ApprovalController.mjs';
 import { View } from '../View.mjs';
 import { I, btcLogo, rowKV } from '../html.mjs';
 
@@ -41,7 +41,7 @@ export class ApproveView extends View {
   footNote(a, busy) {
     const st = this.state.status.approve;
     const fixes = !busy && a.fixes?.length ? a.fixes
-      : !busy && a.prepErr && /^rgb/.test(a.method) ? [{ id: 'reprep', label: 'Refresh and check again' }] : [];
+      : !busy && a.prepErr && /^rgb/.test(a.method) ? (CONFLICT_RGB.test(a.prepErr) ? fixesFor(a.method, a.prepErr) : [{ id: 'reprep', label: 'Refresh and check again' }]) : [];
     const text = st ? `<p class="msg ${st[1]}" role="status">${esc(st[0])}</p>` : a.prepErr ? `<p class="msg err" role="alert">${esc(a.prepErr)}</p>` : '';
     if (!text && !fixes.length) return '';
     return `<div class="ap-note">${text}${fixes.length ? `<div class="ap-fixes">${fixes.map((x) => `<button class="btn ghost wide" data-ap-fix="${esc(x.id)}">${esc(x.label)}</button>`).join('')}</div>` : ''}</div>`;
@@ -191,9 +191,9 @@ export class ApproveView extends View {
     if (m === 'rgbInstantList') {
       return `<p class="hero-bal center">${b ? esc(b.shown) : '…'}</p><div class="kv">${rowKV('Token', tok)}${b ? rowKV('You get', `<b>${sats(b.price)}</b>`) : ''}${b ? rowKV('Market', `<span class="mono">${esc(b.market)}</span>`) : ''}${rowKV('Network', esc(this.app.rgb.profile.label))}</div>
       <p class="info">MASKED signs this sale once. Anyone can then buy it at this exact price, even while your computer is off: the signature is only valid if the transaction pays you ${b ? sats(b.price) : 'the price'}.</p>
-      ${b?.finishing ? '<p class="info">Your tokens were already moved to an output of their own for this listing. MASKED checks they arrived and signs it: no new transaction.</p>' : ''}
-      <p class="info">If these tokens share an output with others, MASKED first moves them to an output of their own: one transaction (network fee about ${b ? `${sats(b.fee)}, ${esc(String(b.rate))} sat/vB × ~${b.vb} vB` : '…'}), and the listing goes live after it confirms, about 10 minutes, the next time MASKED is open.</p>
-      <p class="info">Cancelling later also takes one transaction: MASKED moves the tokens so the signature can't be used.</p>
+      ${b?.finishing ? `<p class="info">Your ${b.nft ? 'NFT was' : 'tokens were'} already moved to an output of ${b.nft ? 'its' : 'their'} own for this listing. MASKED checks ${b.nft ? 'it' : 'they'} arrived and signs it: no new transaction.</p>` : ''}
+      <p class="info">If ${b?.nft ? 'this NFT shares' : 'these tokens share'} an output with others, MASKED first moves ${b?.nft ? 'it' : 'them'} to an output of ${b?.nft ? 'its' : 'their'} own: one transaction (network fee about ${b ? `${sats(b.fee)}, ${esc(String(b.rate))} sat/vB × ~${b.vb} vB` : '…'}), and the listing goes live after it confirms, about 10 minutes, the next time MASKED is open.</p>
+      <p class="info">Cancelling later also takes one transaction: MASKED moves ${b?.nft ? 'the NFT' : 'the tokens'} so the signature can't be used.</p>
       ${this.rgbWait(a)}${this.error(a)}`;
     }
     if (m === 'rgbInstantListLots') {

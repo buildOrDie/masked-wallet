@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { ed25519 } from '@noble/curves/ed25519';
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex, hexToBytes, utf8ToBytes } from '@noble/hashes/utils';
-import { invoiceIdOf, transferIdOf, newSenderKey, sharedKeys, encryptBlob, decryptBlob, sha256Hex, leadingZeroBits, proofOfWork, readInvoiceV1, isInvoiceV1, pickEndpoint, deliverConsignment, CHUNK, endpointUrl } from '../src/rgb/proxyV1.mjs';
+import { invoiceIdOf, transferIdOf, newSenderKey, sharedKeys, encryptBlob, decryptBlob, sha256Hex, leadingZeroBits, proofOfWork, readInvoiceV1, isInvoiceV1, pickEndpoint, deliverConsignment, CHUNK, endpointUrl, mediaIdOf } from '../src/rgb/proxyV1.mjs';
 
 // the example table of the RGB HTTP JSON-RPC spec (Identifiers)
 const INVOICE_PK = '5c298bf4b0dcf967871778ca682b4de838eb7a201853845c49adc15b10681360';
@@ -73,8 +73,18 @@ test('reading a 1.0 invoice: beneficiary as written, pk, enc, expiry, endpoints'
 
 /** A stand-in 1.0 recipient server that applies the spec's checks to consignment.post. */
 function fakeServer({ difficulty = 0, version = '1.0', status = 'available', draftSignature = false } = {}) {
-  const posts = [];
+  const posts = [], medias = [];
   const fetchFn = async (url, init) => {
+    if (init.body instanceof FormData && init.body.get('method') === 'media.post') {
+      const f = init.body, params = JSON.parse(f.get('params')), file = new Uint8Array(await f.get('file').arrayBuffer());
+      const sender = posts.find((p) => p.params.transfer_id === params.transfer_id)?.params.sender_pk;
+      assert.ok(sender, 'a media file comes after its transfer');
+      assert.equal(Number(params.file_size), file.length);
+      const ok = ed25519.verify(hexToBytes(params.signature), sha256(utf8ToBytes(params.transfer_id + params.media_id + sha256Hex(file) + 'media')), hexToBytes(sender));
+      if (!ok) return Response.json({ id: 1, error: { code: -502, message: 'Invalid signature' } });
+      medias.push({ params, file });
+      return Response.json({ id: 1, result: true });
+    }
     if (init.body instanceof FormData) {
       const f = init.body;
       const keys = [...f.keys()];
@@ -95,7 +105,7 @@ function fakeServer({ difficulty = 0, version = '1.0', status = 'available', dra
     if (body.method === 'invoice.check') return Response.json({ id: body.id, result: { [body.params.invoice_ids[0]]: { status, pow_difficulty: String(difficulty) } } });
     return Response.json({ id: body.id, error: { code: -32601 } });
   };
-  return { posts, fetchFn };
+  return { posts, medias, fetchFn };
 }
 
 test('delivering a donation: the recipient can decrypt it with its own key, and the IDs line up', async () => {
@@ -240,4 +250,26 @@ test('wallet: a failed upload drops the colouring and never broadcasts', async (
   w.outpointInfo = async () => ({ sats: 5000, script: '5120' + '55'.repeat(32), tx: 'aa' });
   await assert.rejects(w.onchainSend({ invoice, assetId: ASSET, amount: 500, feeRate: 1 }), /quota exceeded/);
   assert.deepEqual(log, [['abandon', T('5')]]);
+});
+
+test('an NFT\'s files go with its transfer: named by the shared media key, encrypted, signed; a wrong file is refused', async () => {
+  const recipient = newSenderKey(new Uint8Array(32).fill(9));
+  const inv = readInvoiceV1(`rgb:~/~/~/sb:wvout:A8cJ7Ww3?expiry=1791400000&endpoints=rpcs://r.example/json-rpc&pk=${recipient.pk}`);
+  const s = fakeServer();
+  const picked = await pickEndpoint(inv.endpoints, invoiceIdOf(inv.beneficiary, inv.pk), s.fetchFn);
+  const sender = newSenderKey();
+  const { key, kmid } = sharedKeys(sender.seed, inv.pk);
+  const png = new Uint8Array([137, 80, 78, 71, 1, 2, 3]), meta = utf8ToBytes('{"traits":{"Eyes":"Laser"}}');
+  const medias = [{ digest: sha256Hex(png), bytes: png }, { digest: sha256Hex(meta), bytes: meta }];
+  await deliverConsignment({ invoice: inv, picked, sender, key, kmid, medias, consignment: new Uint8Array(100).fill(1) }, s.fetchFn);
+  assert.equal(s.medias.length, 2);
+  // the recipient finds each by its own media key and decrypts it
+  const r = sharedKeys(recipient.seed, s.posts[0].params.sender_pk);
+  for (const [k, m] of medias.entries()) {
+    const got = s.medias.find((x) => x.params.media_id === mediaIdOf(r.kmid, m.digest));
+    assert.ok(got, `file ${k} under the id the recipient derives`);
+    assert.equal(got.params.transfer_id, s.posts[0].params.transfer_id);
+    assert.deepEqual(decryptBlob(r.key, got.file, m.digest), m.bytes);
+  }
+  await assert.rejects(deliverConsignment({ invoice: inv, picked, sender: newSenderKey(), key, kmid, medias: [{ digest: sha256Hex(png), bytes: meta }], consignment: new Uint8Array(10) }, s.fetchFn), /does not match its fingerprint/);
 });

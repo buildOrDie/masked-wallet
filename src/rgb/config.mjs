@@ -8,6 +8,10 @@ export const MASKED_PROXY = 'https://scan.maskedwallet.com/rgb-proxy/json-rpc';
 export const PUBLIC_PROXY = 'https://proxy.iriswallet.com/0.2/json-rpc';
 /** MASKED's transfer server for protocol 1.0 (rgb-proxy-server 0.4), used by the RGB 0.11.2 engine. */
 export const MASKED_PROXY_V1 = 'https://scan.maskedwallet.com/rgb-proxy-v1/json-rpc';
+/** The NFT collections MASKED's launchpad whitelisted, with their asset IDs (the escrow's /api/nft-verified). */
+export const NFT_VERIFIED_URL = 'https://scan.maskedwallet.com/nft-verified/signet.json';
+/** Their pictures (the escrow's /api/nft/<slug>/<n>): used only when the NFT's own copy isn't here yet, and checked. */
+export const NFT_MEDIA_URL = 'https://scan.maskedwallet.com/nft-media/signet';
 export const RGB_PROFILES = Object.freeze({
   public: Object.freeze({
     id: 'public',
@@ -22,6 +26,8 @@ export const RGB_PROFILES = Object.freeze({
     }),
     invoiceNets: Object.freeze(['signet']),
     vaultKey: 'masked.rgb.public-signet.v1',
+    nftVerified: NFT_VERIFIED_URL,
+    nftMedia: NFT_MEDIA_URL,
     funding: 'Send Signet coins here, for example from your MASKED Signet Public balance.',
   }),
   utexo: Object.freeze({
