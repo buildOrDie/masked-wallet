@@ -300,6 +300,13 @@ test('NFTs (RGB21 / UDA): only with an engine that has them; listed with their i
   const bad = async () => ({ json: async () => ({ result: Buffer.from([1, 2, 3]).toString('base64') }) });
   assert.equal(await w.nftImage(n.media, bad), null);
   assert.equal(await w.nftImage({ digest, mime: 'text/html' }, good), null); // only pictures
+  // 2.32 engine: the picture the NFT came with, no server asked; a wrong copy is not shown
+  const none = async () => { throw new Error('no server should be asked'); };
+  w.wallet.mediaFile = (d) => (d === digest ? png : undefined);
+  assert.equal(await w.nftImage(n.media, none), `data:image/png;base64,${b64}`);
+  w.wallet.mediaFile = () => new Uint8Array([9, 9]);
+  assert.equal(await w.nftImage(n.media, bad), null);
+  delete w.wallet.mediaFile;
 
   // sending: the token itself, to an invoice for any asset
   await w.onchainSend({ invoice: 'rgb:any', assetId: 'rgb:N1', amount: 1, feeRate: 2, nft: true });

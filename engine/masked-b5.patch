@@ -11,10 +11,52 @@ index 884d686..e2896b5 100644
  rgb-strict-encoding = { version = "=1.0.5", default-features = false, features = [
      "bitcoin",
 diff --git a/bindings/wasm/src/lib.rs b/bindings/wasm/src/lib.rs
-index 51b6efd..8138d5d 100644
+index 51b6efd..e6c6e92 100644
 --- a/bindings/wasm/src/lib.rs
 +++ b/bindings/wasm/src/lib.rs
-@@ -635,6 +635,364 @@ impl WasmWallet {
+@@ -179,6 +179,41 @@ impl WasmWallet {
+         to_js(&asset)
+     }
+ 
++    /// A media file this wallet holds (an NFT's picture) by its SHA-256 digest (hex), or
++    /// undefined. The wallet checked it against the contract when it received the NFT.
++    #[wasm_bindgen(js_name = "mediaFile")]
++    pub fn media_file(&self, digest: &str) -> Option<Vec<u8>> {
++        self.inner.borrow().media_file(digest)
++    }
++
++    /// Issue a new UDA (Unique Digital Asset, RGB21): an NFT, one token.
++    ///
++    /// `media` is the token's picture (its bytes) and `mime` its type (e.g. `image/png`), both
++    /// or neither. The contract commits to the picture's SHA-256 digest; the wallet keeps the
++    /// bytes and posts them, encrypted, with each transfer of the NFT.
++    #[wasm_bindgen(js_name = "issueAssetUda")]
++    pub fn issue_asset_uda(
++        &self,
++        ticker: &str,
++        name: &str,
++        details: Option<String>,
++        precision: u8,
++        media: Option<Vec<u8>>,
++        mime: Option<String>,
++    ) -> Result<JsValue, JsValue> {
++        let media = match (media, mime) {
++            (Some(bytes), Some(mime)) => Some((bytes, mime)),
++            (None, None) => None,
++            _ => return Err(JsValue::from_str("Give the media and its mime type together.")),
++        };
++        let asset = self
++            .inner
++            .borrow_mut()
++            .issue_asset_uda(ticker.to_string(), name.to_string(), details, precision, media)
++            .map_err(|e| JsValue::from_str(&e.to_string()))?;
++        to_js(&asset)
++    }
++
+     /// Issue a new IFA (Inflatable Fungible Asset).
+     ///
+     /// `amounts_js` is a JS array of u64 values.
+@@ -635,6 +670,364 @@ impl WasmWallet {
          to_js(&result)
      }
  
@@ -379,7 +421,7 @@ index 51b6efd..8138d5d 100644
      /// Send RGB assets (end): broadcast a signed PSBT. Returns an OperationResult JS object.
      #[wasm_bindgen(js_name = "sendEnd")]
      pub async fn send_end(
-@@ -763,6 +1121,56 @@ impl WasmWallet {
+@@ -763,6 +1156,56 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -436,7 +478,7 @@ index 51b6efd..8138d5d 100644
      /// Drain all wallet funds (end): broadcast a signed PSBT. Returns the txid string.
      #[wasm_bindgen(js_name = "drainToEnd")]
      pub async fn drain_to_end(
-@@ -1074,6 +1482,22 @@ impl WasmWallet {
+@@ -1074,6 +1517,22 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -459,7 +501,7 @@ index 51b6efd..8138d5d 100644
      /// Check if the wallet needs a backup. Returns true if modified since last backup.
      #[wasm_bindgen(js_name = "backupInfo")]
      pub fn backup_info(&self) -> Result<bool, JsValue> {
-@@ -1217,7 +1641,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
+@@ -1217,7 +1676,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
  /// Works before the witness transaction is broadcast. Takes the raw consignment
  /// bytes (strict-encoded, not base64), the witness transaction ID, and the Bitcoin network.
  ///
@@ -469,7 +511,7 @@ index 51b6efd..8138d5d 100644
  #[wasm_bindgen(js_name = "validateConsignmentOffchain")]
  pub fn validate_consignment_offchain(
      consignment_bytes: &[u8],
-@@ -1235,3 +1660,43 @@ pub fn validate_consignment_offchain(
+@@ -1235,3 +1695,43 @@ pub fn validate_consignment_offchain(
      .map_err(|e| JsValue::from_str(&e.to_string()))?;
      to_js(&result)
  }
@@ -491,7 +533,7 @@ index 51b6efd..8138d5d 100644
 +/// MASKED: the features of this engine build.
 +#[wasm_bindgen(js_name = "engineFeatures")]
 +pub fn engine_features() -> Vec<String> {
-+    vec!["swap".into(), "presign".into(), "proxy-v1".into(), "p2p-swap".into(), "output-locks".into(), "legacy-migration".into(), "legacy-consignments".into(), "legacy-backup".into()]
++    vec!["swap".into(), "presign".into(), "proxy-v1".into(), "p2p-swap".into(), "output-locks".into(), "uda".into(), "legacy-migration".into(), "legacy-consignments".into(), "legacy-backup".into()]
 +}
 +
 +#[wasm_bindgen(js_name = "inspectSwapConsignment")]
@@ -513,6 +555,133 @@ index 51b6efd..8138d5d 100644
 +    .map_err(|e| JsValue::from_str(&e.to_string()))?;
 +    to_js(&result)
 +}
+diff --git a/src/database/enums.rs b/src/database/enums.rs
+index 94bd041..cb420e1 100644
+--- a/src/database/enums.rs
++++ b/src/database/enums.rs
+@@ -5,6 +5,8 @@ use super::*;
+ pub enum AssetSchema {
+     /// NIA schema
+     Nia = 1,
++    /// UDA schema (RGB21 unique digital asset, an NFT)
++    Uda = 2,
+     /// IFA schema
+     Ifa = 4,
+     /// BFA schema
+@@ -23,6 +25,7 @@ impl TryFrom<String> for AssetSchema {
+     fn try_from(schema_id: String) -> Result<Self, Self::Error> {
+         Ok(match &schema_id[..] {
+             SCHEMA_ID_NIA => AssetSchema::Nia,
++            SCHEMA_ID_UDA => AssetSchema::Uda,
+             SCHEMA_ID_IFA => AssetSchema::Ifa,
+             SCHEMA_ID_BFA => AssetSchema::Bfa,
+             _ => return Err(Error::UnknownRgbSchema { schema_id }),
+@@ -39,11 +42,12 @@ impl TryFrom<SchemaId> for AssetSchema {
+ }
+ 
+ impl AssetSchema {
+-    pub(crate) const VALUES: [Self; NUM_KNOWN_SCHEMAS] = [Self::Nia, Self::Ifa, Self::Bfa];
++    pub(crate) const VALUES: [Self; NUM_KNOWN_SCHEMAS] = [Self::Nia, Self::Uda, Self::Ifa, Self::Bfa];
+ 
+     fn from_schema_id_str(schema_id: String) -> Result<Self, Error> {
+         Ok(match &schema_id[..] {
+             SCHEMA_ID_NIA => AssetSchema::Nia,
++            SCHEMA_ID_UDA => AssetSchema::Uda,
+             SCHEMA_ID_IFA => AssetSchema::Ifa,
+             SCHEMA_ID_BFA => AssetSchema::Bfa,
+             _ => return Err(Error::UnknownRgbSchema { schema_id }),
+@@ -66,13 +70,14 @@ impl AssetSchema {
+     pub(crate) fn supports_link(&self) -> bool {
+         match self {
+             Self::Ifa | Self::Bfa => true,
+-            Self::Nia => false,
++            Self::Nia | Self::Uda => false,
+         }
+     }
+ 
+     pub(crate) fn schema_rules(&self) -> SchemaRules {
+         match self {
+             Self::Nia => NonInflatableAsset::schema_rules(),
++            Self::Uda => UniqueDigitalAsset::schema_rules(),
+             Self::Ifa => InflatableFungibleAsset::schema_rules(),
+             Self::Bfa => BridgedFungibleAsset::schema_rules(),
+         }
+@@ -81,6 +86,7 @@ impl AssetSchema {
+     pub(crate) fn schema_definition(&self) -> SchemaDefinition {
+         match self {
+             Self::Nia => NonInflatableAsset::schema_definition(),
++            Self::Uda => UniqueDigitalAsset::schema_definition(),
+             Self::Ifa => InflatableFungibleAsset::schema_definition(),
+             Self::Bfa => BridgedFungibleAsset::schema_definition(),
+         }
+@@ -97,6 +103,7 @@ impl From<AssetSchema> for SchemaId {
+         match asset_schema {
+             AssetSchema::Ifa => SchemaId::from_str(SCHEMA_ID_IFA).unwrap(),
+             AssetSchema::Nia => SchemaId::from_str(SCHEMA_ID_NIA).unwrap(),
++            AssetSchema::Uda => SchemaId::from_str(SCHEMA_ID_UDA).unwrap(),
+             AssetSchema::Bfa => SchemaId::from_str(SCHEMA_ID_BFA).unwrap(),
+         }
+     }
+@@ -415,3 +422,15 @@ mod tests {
+         }
+     }
+ }
++
++#[cfg(test)]
++mod uda_schema_id_test {
++    use super::*;
++
++    #[test]
++    fn uda_schema_id_matches_the_schema() {
++        let id = UniqueDigitalAsset::schema_definition().schema.schema_id().to_string();
++        eprintln!("UDA schema id: {id}");
++        assert_eq!(id, SCHEMA_ID_UDA);
++    }
++}
+diff --git a/src/lib.rs b/src/lib.rs
+index ae9e92a..524d4ad 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -149,7 +149,7 @@ use rand::{Rng, TryRng, distr::Alphanumeric, rngs::SysRng};
+ use reqwest::{Client as RestClient, header::CONTENT_TYPE, multipart};
+ use rgbinvoice::{AddressPayload, Beneficiary, RgbInvoice, RgbInvoiceBuilder, XChainNet};
+ use rgbstd::{
+-    Allocation, Amount, Genesis, GraphSeal, Identity, Layer1, Operation, OutputSeal, OwnedFraction,
++    Allocation, Amount, Genesis, GraphSeal, Identity, Layer1, Operation, OutputSeal, OwnedFraction, TokenIndex,
+     Precision, Schema, SecretSeal, Transition, TransitionType,
+     containers::{BuilderSeal, ValidConsignment, ValidContract, ValidTransfer},
+     contract::{
+@@ -163,7 +163,7 @@ use rgbstd::{
+     },
+     rgbcore::commit_verify::Conceal,
+     stl::{
+-        AssetSpec, Attachment, BurnReason, ContractTerms, Details, MediaType, Name,
++        AssetSpec, Attachment, TokenData, BurnReason, ContractTerms, Details, MediaType, Name,
+         RejectListLocation, RejectListUrl, RicardianContract, Ticker, UnicodeTicker,
+     },
+     txout::{BlindSeal, CloseMethod, ExplicitSeal},
+@@ -184,10 +184,10 @@ use rgbstd::{
+ use rgbstd::{RevealedValue, TypedAssigns};
+ #[cfg(feature = "esplora")]
+ use schemata::{
+-    BfaWrapper, IfaWrapper, NiaWrapper, OS_ASSET, OS_INFLATION, OS_LINK, OS_MINT, TS_BURN, TS_LINK,
++    BfaWrapper, IfaWrapper, NiaWrapper, UdaWrapper, OS_ASSET, OS_INFLATION, OS_LINK, OS_MINT, TS_BURN, TS_LINK,
+     TS_MINT,
+ };
+-use schemata::{BridgedFungibleAsset, InflatableFungibleAsset, NonInflatableAsset};
++use schemata::{BridgedFungibleAsset, InflatableFungibleAsset, NonInflatableAsset, UniqueDigitalAsset};
+ use serde::de::{self, Unexpected, Visitor};
+ use serde::{Deserialize, Deserializer, Serialize};
+ #[cfg(feature = "esplora")]
+@@ -250,7 +250,7 @@ use crate::{
+         get_descriptors, get_descriptors_from_xpubs, load_rgb_runtime, now, parse_address_str,
+         setup_logger, str_to_xpub,
+     },
+-    wallet::{Balance, NUM_KNOWN_SCHEMAS, Outpoint, SCHEMA_ID_BFA, SCHEMA_ID_IFA, SCHEMA_ID_NIA},
++    wallet::{Balance, NUM_KNOWN_SCHEMAS, Outpoint, SCHEMA_ID_BFA, SCHEMA_ID_IFA, SCHEMA_ID_NIA, SCHEMA_ID_UDA},
+ };
+ 
+ /// Text that replaces a secret in Debug output.
 diff --git a/src/utils.rs b/src/utils.rs
 index 0440f89..78ba361 100644
 --- a/src/utils.rs
@@ -527,10 +696,20 @@ index 0440f89..78ba361 100644
  #[cfg(feature = "esplora")]
  #[derive(Clone)]
 diff --git a/src/wallet/backup.rs b/src/wallet/backup.rs
-index 2300f6a..c681a3a 100644
+index 2300f6a..1952fcd 100644
 --- a/src/wallet/backup.rs
 +++ b/src/wallet/backup.rs
-@@ -160,6 +160,8 @@ impl super::Wallet {
+@@ -36,6 +36,9 @@ pub(crate) struct WalletBackupPayload {
+     pub(crate) transfer_artifacts:
+         std::collections::HashMap<String, super::online::TransferArtifacts>,
+     pub(crate) received_consignments: std::collections::HashMap<String, Vec<u8>>,
++    /// Media files (an NFT's picture) keyed by their SHA-256 digest (hex).
++    #[serde(default)]
++    pub(crate) media_files: std::collections::HashMap<String, Vec<u8>>,
+     pub(crate) received_consignment_meta:
+         std::collections::HashMap<String, super::ReceivedConsignmentMeta>,
+     pub(crate) received_signed_txs: std::collections::HashMap<String, Vec<u8>>,
+@@ -160,6 +163,8 @@ impl super::Wallet {
      /// The wallet must be created first via `Wallet::new()` with the same mnemonic/xpubs.
      /// The restored state persists only if this wallet may save: it was built with `Wallet::restore()`, or its data directory holds no snapshot.
      /// A restore that fails changes nothing. When only the save fails, the restored state stays in memory and the call returns a persistence error.
@@ -539,7 +718,7 @@ index 2300f6a..c681a3a 100644
      pub fn restore_backup(&mut self, backup_bytes: &[u8], password: &str) -> Result<(), Error> {
          let (pub_data, ciphertext) = decode_backup(backup_bytes)?;
          let payload_json = decrypt_payload(ciphertext, password, &pub_data)?;
-@@ -172,8 +174,77 @@ impl super::Wallet {
+@@ -172,8 +177,77 @@ impl super::Wallet {
          Ok(())
      }
  
@@ -617,7 +796,23 @@ index 2300f6a..c681a3a 100644
          let payload: WalletBackupPayload =
              serde_json::from_slice(payload_json).map_err(|_| Error::InvalidBackup)?;
          // Without a BDK changeset the restore skips the descriptor check.
-@@ -860,6 +931,54 @@ mod tests {
+@@ -188,6 +262,7 @@ impl super::Wallet {
+             bdk_changeset: payload.bdk_changeset,
+             transfer_artifacts: payload.transfer_artifacts,
+             received_consignments: payload.received_consignments,
++            media_files: payload.media_files,
+             received_consignment_meta: payload.received_consignment_meta,
+             received_signed_txs: payload.received_signed_txs,
+             received_mints: payload.received_mints,
+@@ -323,6 +398,7 @@ impl super::Wallet {
+             reuse_address_index: self.reuse_address_index.clone(),
+             transfer_artifacts: self.transfer_artifacts.clone(),
+             received_consignments: self.received_consignments.clone(),
++            media_files: self.media_files.clone(),
+             received_consignment_meta: self.received_consignment_meta.clone(),
+             received_signed_txs: self.received_signed_txs.clone(),
+             received_mints: self.received_mints.clone(),
+@@ -860,6 +936,54 @@ mod tests {
          );
      }
  
@@ -673,10 +868,20 @@ index 2300f6a..c681a3a 100644
      #[cfg(not(target_arch = "wasm32"))]
      fn failed_restore_with_bad_rgb_store_keeps_wallet() {
 diff --git a/src/wallet/idb_store.rs b/src/wallet/idb_store.rs
-index 03ebcc5..171059a 100644
+index 03ebcc5..390cccf 100644
 --- a/src/wallet/idb_store.rs
 +++ b/src/wallet/idb_store.rs
-@@ -212,6 +212,23 @@ pub(crate) fn deserialize_stock(store_b64: &str) -> Result<MemStock, String> {
+@@ -33,6 +33,9 @@ pub struct WalletSnapshot {
+     /// Received consignment bytes keyed by recipient_id.
+     #[serde(default)]
+     pub received_consignments: HashMap<String, Vec<u8>>,
++    /// Media files (an NFT's picture) keyed by their SHA-256 digest (hex).
++    #[serde(default)]
++    pub media_files: HashMap<String, Vec<u8>>,
+     /// Proxy data of each received consignment keyed by recipient_id.
+     pub(crate) received_consignment_meta: HashMap<String, super::ReceivedConsignmentMeta>,
+     /// Signed TXs released by the sender proxy keyed by recipient_id.
+@@ -212,6 +215,23 @@ pub(crate) fn deserialize_stock(store_b64: &str) -> Result<MemStock, String> {
      Ok(Stock::with(MemRgbStore::from_bytes(&bytes)?))
  }
  
@@ -700,12 +905,20 @@ index 03ebcc5..171059a 100644
  /// Load a wallet snapshot from IndexedDB for the given key.
  pub async fn load_snapshot(key: &str) -> Result<Option<WalletSnapshot>, String> {
      let db = open_db().await?;
+@@ -331,6 +351,7 @@ mod tests {
+             bdk_changeset: None,
+             transfer_artifacts: HashMap::from([("funding-txid".to_owned(), transfer_artifact)]),
+             received_consignments: HashMap::from([("rid".to_owned(), vec![5])]),
++            media_files: HashMap::new(),
+             received_consignment_meta: HashMap::from([(
+                 "rid".to_owned(),
+                 super::super::ReceivedConsignmentMeta {
 diff --git a/src/wallet/legacy_migration.rs b/src/wallet/legacy_migration.rs
 new file mode 100644
-index 0000000..0bc354a
+index 0000000..00586c9
 --- /dev/null
 +++ b/src/wallet/legacy_migration.rs
-@@ -0,0 +1,460 @@
+@@ -0,0 +1,461 @@
 +//! MASKED: upgrade of a wallet saved by rgb-lib-wasm 1.0.0-beta.3 (RGB 0.11.1) to this version.
 +//!
 +//! The older version saved its IndexedDB snapshot under the wallet directory (this one adds the
@@ -1041,6 +1254,7 @@ index 0000000..0bc354a
 +        bdk_changeset,
 +        transfer_artifacts: HashMap::new(),
 +        received_consignments,
++        media_files: HashMap::new(),
 +        received_consignment_meta: HashMap::new(),
 +        received_signed_txs: HashMap::new(),
 +        received_mints: HashMap::new(),
@@ -1196,10 +1410,145 @@ index c5c45b2..46cf640 100644
  pub(crate) mod offline;
  #[cfg(feature = "esplora")]
 diff --git a/src/wallet/offline.rs b/src/wallet/offline.rs
-index a3a9f46..17942dd 100644
+index a3a9f46..c43f5b6 100644
 --- a/src/wallet/offline.rs
 +++ b/src/wallet/offline.rs
-@@ -1312,9 +1312,69 @@ pub struct Wallet {
+@@ -37,7 +37,10 @@ pub(crate) const CONFIRMATION_MARGIN_SECS: u32 = 86400;
+ #[cfg(feature = "esplora")]
+ pub(crate) const MAX_POW_DIFFICULTY: u32 = 28;
+ 
+-pub(crate) const NUM_KNOWN_SCHEMAS: usize = 3;
++pub(crate) const NUM_KNOWN_SCHEMAS: usize = 4;
++
++/// The one token a UDA contract holds.
++pub(crate) const UDA_FIXED_INDEX: u32 = 0;
+ 
+ pub(crate) const MAX_TRANSPORT_ENDPOINTS: usize = 3;
+ 
+@@ -64,6 +67,8 @@ pub(crate) const RGB_METADATA_ALLOWED_INFLATION: &str = "allowedInflation";
+ 
+ pub(crate) const SCHEMA_ID_NIA: &str =
+     "rgb:sch:RWhwUfTMpuP2Zfx1~j4nswCANGeJrYOqDcKelaMV4zU#remote-digital-pegasus";
++pub(crate) const SCHEMA_ID_UDA: &str =
++    "rgb:sch:~6rjymf3GTE840lb5JoXm2aFwE8eWCk3mCjOf_mUztE#spider-montana-fantasy";
+ pub(crate) const SCHEMA_ID_IFA: &str =
+     "rgb:sch:A2n9kPNWtXUqwQJyXfY8yGHKyEPZgvrNYYYPGhXawOk#graph-salute-retro";
+ pub(crate) const SCHEMA_ID_BFA: &str =
+@@ -272,6 +277,75 @@ impl AssetNIA {
+     }
+ }
+ 
++/// A Unique Digital Asset (RGB21): an NFT, one token.
++#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
++#[cfg_attr(feature = "camel_case", serde(rename_all = "camelCase"))]
++pub struct AssetUDA {
++    /// ID of the asset
++    pub asset_id: String,
++    /// Ticker of the asset
++    pub ticker: String,
++    /// Name of the asset
++    pub name: String,
++    /// Details of the asset
++    pub details: Option<String>,
++    /// Precision, also known as divisibility, of the asset
++    pub precision: u8,
++    /// Timestamp of asset genesis
++    pub timestamp: i64,
++    /// Timestamp of asset import
++    pub added_at: i64,
++    /// Current balance of the asset (1 while this wallet holds the token)
++    pub balance: Balance,
++    /// The token's media (its picture): digest and mime type
++    pub media: Option<Media>,
++}
++
++impl AssetUDA {
++    #[allow(clippy::too_many_arguments)]
++    pub(crate) fn get_asset_details(
++        wallet: &Wallet,
++        asset: &DbAsset,
++        transfers: Option<Vec<DbTransfer>>,
++        asset_transfers: Option<Vec<DbAssetTransfer>>,
++        batch_transfers: Option<Vec<DbBatchTransfer>>,
++        colorings: Option<Vec<DbColoring>>,
++        txos: Option<Vec<DbTxo>>,
++        medias: Option<Vec<DbMedia>>,
++    ) -> Result<AssetUDA, Error> {
++        let media = {
++            let medias = if let Some(m) = medias {
++                m
++            } else {
++                wallet.database.iter_media()?
++            };
++            medias
++                .iter()
++                .find(|m| Some(m.idx) == asset.media_idx)
++                .map(|m| Media::from_db_media(m, wallet.get_media_dir()))
++        };
++        let balance = wallet.database.get_asset_balance(
++            asset.id.clone(),
++            transfers,
++            asset_transfers,
++            batch_transfers,
++            colorings,
++            txos,
++        )?;
++        Ok(AssetUDA {
++            asset_id: asset.id.clone(),
++            ticker: asset.ticker.clone().unwrap_or_default(),
++            name: asset.name.clone(),
++            details: asset.details.clone(),
++            precision: asset.precision,
++            timestamp: asset.timestamp,
++            added_at: asset.added_at,
++            balance,
++            media,
++        })
++    }
++}
++
+ /// An Inflatable Fungible Asset.
+ #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
+ #[cfg_attr(feature = "camel_case", serde(rename_all = "camelCase"))]
+@@ -440,6 +514,8 @@ impl AssetBFA {
+ pub struct Assets {
+     /// List of NIA assets
+     pub nia: Option<Vec<AssetNIA>>,
++    /// List of UDA assets (NFTs)
++    pub uda: Option<Vec<AssetUDA>>,
+     /// List of IFA assets
+     pub ifa: Option<Vec<AssetIFA>>,
+     /// List of BFA assets
+@@ -661,6 +737,18 @@ impl Invoice {
+                     }
+                 }
+             }
++            Some(AssetSchema::Uda) => {
++                match (decoded.assignment_state, assignment_name.as_deref()) {
++                    (Some(InvoiceState::Data(_)) | None, Some(RGB_STATE_ASSET_OWNER) | None) => {
++                        Assignment::NonFungible
++                    }
++                    (_, _) => {
++                        return Err(Error::InvalidInvoice {
++                            details: s!("invalid assignment"),
++                        });
++                    }
++                }
++            }
+             Some(AssetSchema::Ifa) => {
+                 match (decoded.assignment_state, assignment_name.as_deref()) {
+                     (Some(InvoiceState::Amount(v)), Some(RGB_STATE_ASSET_OWNER)) => {
+@@ -1294,6 +1382,9 @@ pub struct Wallet {
+     /// Key: recipient_id
+     #[cfg(feature = "esplora")]
+     pub(crate) received_consignments: HashMap<String, Vec<u8>>,
++    /// The media files of the contracts this wallet holds (an NFT's picture), keyed by their
++    /// SHA-256 digest (hex): a sender posts them, encrypted, with each transfer
++    pub(crate) media_files: HashMap<String, Vec<u8>>,
+     /// Proxy data of each received consignment. Key: recipient_id
+     #[cfg(feature = "esplora")]
+     pub(crate) received_consignment_meta: HashMap<String, ReceivedConsignmentMeta>,
+@@ -1312,9 +1403,69 @@ pub struct Wallet {
      pub(crate) rgb_stock: std::rc::Rc<std::cell::RefCell<Option<crate::utils::MemStock>>>,
      pub(crate) vss_client: Option<super::vss::VssBackupClient>,
      pub(crate) last_vss_backup_error: std::cell::RefCell<Option<String>>,
@@ -1269,7 +1618,7 @@ index a3a9f46..17942dd 100644
      /// Create a wallet and restore its latest durable IndexedDB snapshot, if one exists.
      ///
      /// The returned wallet is ready for use only after the IndexedDB read and snapshot
-@@ -1325,6 +1385,31 @@ impl Wallet {
+@@ -1325,6 +1476,31 @@ impl Wallet {
          let snapshot = super::idb_store::load_snapshot(&wallet.idb_key())
              .await
              .map_err(|details| Error::Persistence { details })?;
@@ -1301,7 +1650,15 @@ index a3a9f46..17942dd 100644
          if let Some(snapshot) = snapshot {
              wallet.idb_loaded = Some((snapshot.writer, snapshot.sequence));
              wallet
-@@ -1475,6 +1560,18 @@ impl Wallet {
+@@ -1460,6 +1636,7 @@ impl Wallet {
+             transfer_artifacts: HashMap::new(),
+             #[cfg(feature = "esplora")]
+             received_consignments: HashMap::new(),
++            media_files: HashMap::new(),
+             #[cfg(feature = "esplora")]
+             received_consignment_meta: HashMap::new(),
+             #[cfg(feature = "esplora")]
+@@ -1475,6 +1652,18 @@ impl Wallet {
              },
              vss_client: None,
              last_vss_backup_error: std::cell::RefCell::new(None),
@@ -1320,7 +1677,26 @@ index a3a9f46..17942dd 100644
          })
      }
  
-@@ -1690,8 +1787,10 @@ impl Wallet {
+@@ -1542,6 +1731,18 @@ impl Wallet {
+         self.wallet_data.supported_schemas.contains(asset_schema)
+     }
+ 
++    /// Import into the RGB stock the supported schemas it doesn't know yet: a wallet made before
++    /// a schema was supported (an NFT, UDA, in a MASKED wallet from before 2.32) gets it here.
++    pub(crate) fn import_missing_schemas(&self, runtime: &mut RgbRuntime) -> Result<(), Error> {
++        let known: HashSet<_> = runtime.schemata()?.iter().map(|s| s.id).collect();
++        for schema in &self.wallet_data.supported_schemas {
++            if !known.contains(&SchemaId::from(*schema)) {
++                schema.import_schema_definition(runtime)?;
++            }
++        }
++        Ok(())
++    }
++
+     pub(crate) fn check_schema_support(&self, asset_schema: &AssetSchema) -> Result<(), Error> {
+         if !self.supports_schema(asset_schema) {
+             return Err(Error::UnsupportedSchema {
+@@ -1690,8 +1891,10 @@ impl Wallet {
              None => rgb_allocations.as_deref().unwrap(),
          };
  
@@ -1332,7 +1708,208 @@ index a3a9f46..17942dd 100644
          allocatable.sort_by_key(|t| t.rgb_allocations.len() + t.pending_blinded as usize);
          match allocatable.first() {
              Some(mut selected) => {
-@@ -2618,7 +2717,7 @@ impl Wallet {
+@@ -2597,6 +2800,200 @@ impl Wallet {
+         Ok(asset)
+     }
+ 
++    /// A media file this wallet holds (an NFT's picture), by its SHA-256 digest (hex).
++    pub fn media_file(&self, digest: &str) -> Option<Vec<u8>> {
++        self.media_files.get(&digest.to_ascii_lowercase()).cloned()
++    }
++
++    /// Issue a new RGB UDA asset (an NFT, RGB21) with the provided `ticker`, `name`, optional
++    /// `details` and `precision`, then return it.
++    ///
++    /// The optional `media` is the token's picture: its bytes and mime type (e.g. `image/png`).
++    /// Its SHA-256 digest and mime type are committed to in the contract; the wallet keeps the
++    /// bytes and posts them, encrypted, with each transfer of the asset (wasm has no filesystem).
++    pub fn issue_asset_uda(
++        &mut self,
++        ticker: String,
++        name: String,
++        details: Option<String>,
++        precision: u8,
++        media: Option<(Vec<u8>, String)>,
++    ) -> Result<AssetUDA, Error> {
++        info!(
++            self.logger,
++            "Issuing UDA asset with ticker '{}' name '{}' precision '{}'...", ticker, name, precision,
++        );
++
++        let asset_schema = &AssetSchema::Uda;
++
++        self.check_schema_support(asset_schema)?;
++
++        let media = match media {
++            Some((bytes, mime)) => {
++                if bytes.is_empty() {
++                    return Err(Error::EmptyFile {
++                        file_path: s!("media"),
++                    });
++                }
++                let mime = mime.trim().to_ascii_lowercase();
++                let valid_mime = mime
++                    .split_once('/')
++                    .is_some_and(|(t, st)| !t.is_empty() && !st.is_empty() && !st.contains('/'));
++                if !valid_mime {
++                    return Err(Error::InvalidAttachments {
++                        details: format!("invalid media type '{mime}'"),
++                    });
++                }
++                let digest_bytes: [u8; 32] = Sha256::digest(&bytes).into();
++                let digest = hex::encode(digest_bytes);
++                // MediaType keeps a &'static str: one small leak per issued NFT
++                let media_ty: &'static str = Box::leak(mime.clone().into_boxed_str());
++                let attachment = Attachment {
++                    ty: MediaType::with(media_ty),
++                    digest: digest_bytes.into(),
++                };
++                Some((attachment, digest, mime, bytes))
++            }
++            None => None,
++        };
++
++        let db_data = self.database.get_db_data(false)?;
++
++        let mut unspents: Vec<LocalUnspent> = self.database.get_rgb_allocations(
++            self.database.get_unspent_txos(db_data.txos.clone())?,
++            None,
++            None,
++            None,
++            None,
++        )?;
++        unspents.retain(|u| {
++            !(u.rgb_allocations
++                .iter()
++                .any(|a| !a.incoming && a.status.waiting_counterparty()))
++        });
++
++        let created_at = now().unix_timestamp();
++        let text = RicardianContract::default();
++        let terms = self.new_asset_terms(text, None);
++        let details_obj = if let Some(details) = &details {
++            Some(self.check_details(details.clone())?)
++        } else {
++            None
++        };
++        let spec = AssetSpec {
++            ticker: self._check_ticker(ticker.clone())?,
++            name: self._check_name(name.clone())?,
++            details: details_obj,
++            precision: self._check_precision(precision)?,
++        };
++
++        let issue_utxo = self.get_utxo(&[], Some(&unspents), false, None)?;
++        debug!(self.logger, "Issuing on UTXO: {issue_utxo:?}");
++
++        let index = TokenIndex::from(UDA_FIXED_INDEX);
++        let mut runtime = self.rgb_runtime()?;
++        self.import_missing_schemas(&mut runtime)?;
++        drop(runtime);
++        let token_data = TokenData {
++            index,
++            media: media.as_ref().map(|(a, _, _, _)| a.clone()),
++            ..Default::default()
++        };
++        let allocation = Allocation::with(index, OwnedFraction::from(1u64));
++
++        let mut runtime = self.rgb_runtime()?;
++        let builder = ContractBuilder::with(
++            Identity::default(),
++            UniqueDigitalAsset::schema_rules(),
++            self.chain_net(),
++        )
++        .add_global_state("spec", spec)
++        .expect("invalid spec")
++        .add_global_state("terms", terms)
++        .expect("invalid terms")
++        .add_data(
++            RGB_STATE_ASSET_OWNER,
++            self.get_builder_seal(issue_utxo.clone()),
++            allocation,
++        )
++        .expect("invalid owned state")
++        .add_global_state("tokens", token_data)
++        .expect("invalid tokens");
++
++        let validated_contract = builder.issue_contract().expect("failure issuing contract");
++        let asset_id = validated_contract.contract_id().to_string();
++        runtime
++            .import_contract(validated_contract.clone(), &DumbResolver)
++            .expect("failure importing issued contract");
++        // Drop runtime so Stock returns to RefCell before auto-save
++        drop(runtime);
++
++        let media_idx = if let Some((_, digest, mime, bytes)) = media {
++            let idx = self.get_or_insert_media(digest.clone(), mime)?;
++            self.media_files.insert(digest, bytes);
++            Some(idx)
++        } else {
++            None
++        };
++
++        let asset_data = LocalAssetData {
++            name,
++            precision,
++            ticker: Some(ticker),
++            details,
++            media_idx,
++            initial_supply: 1,
++            max_supply: None,
++            known_circulating_supply: None,
++            reject_list_url: None,
++            linked_from_contract: None,
++        };
++        let asset = self.add_asset_to_db(
++            asset_id.clone(),
++            asset_schema,
++            Some(created_at),
++            created_at,
++            asset_data,
++        )?;
++        let batch_transfer = DbBatchTransferActMod {
++            status: ActiveValue::Set(TransferStatus::Settled),
++            expiration: ActiveValue::Set(None),
++            created_at: ActiveValue::Set(created_at),
++            min_confirmations: ActiveValue::Set(0),
++            ..Default::default()
++        };
++        let batch_transfer_idx = self.database.set_batch_transfer(batch_transfer)?;
++        let asset_transfer = DbAssetTransferActMod {
++            user_driven: ActiveValue::Set(true),
++            batch_transfer_idx: ActiveValue::Set(batch_transfer_idx),
++            asset_id: ActiveValue::Set(Some(asset_id)),
++            ..Default::default()
++        };
++        let asset_transfer_idx = self.database.set_asset_transfer(asset_transfer)?;
++        let transfer = DbTransferActMod {
++            asset_transfer_idx: ActiveValue::Set(asset_transfer_idx),
++            incoming: ActiveValue::Set(true),
++            ..Default::default()
++        };
++        self.database.set_transfer(transfer)?;
++        let db_coloring = DbColoringActMod {
++            txo_idx: ActiveValue::Set(issue_utxo.idx),
++            asset_transfer_idx: ActiveValue::Set(asset_transfer_idx),
++            r#type: ActiveValue::Set(ColoringType::Issue),
++            assignment: ActiveValue::Set(Assignment::NonFungible),
++            ..Default::default()
++        };
++        self.database.set_coloring(db_coloring)?;
++
++        let asset = AssetUDA::get_asset_details(self, &asset, None, None, None, None, None, None)?;
++
++        self.update_backup_info(false)?;
++        self.queue_save()?;
++
++        info!(self.logger, "Issue asset UDA completed");
++        Ok(asset)
++    }
++
+     /// Finalize a PSBT, optionally providing BDK sign options to tweak the behavior of the
+     /// finalizer.
+     pub fn finalize_psbt(
+@@ -2618,7 +3015,7 @@ impl Wallet {
          Ok(psbt.to_string())
      }
  
@@ -1341,7 +1918,88 @@ index a3a9f46..17942dd 100644
          let sign_options = sign_options.unwrap_or_default();
          let [colored, vanilla] = &self.signers;
          self.bdk_wallet
-@@ -4215,6 +4314,18 @@ pub(crate) mod address_reuse_tests {
+@@ -2877,6 +3274,7 @@ impl Wallet {
+ 
+         let assets = self.database.iter_assets()?;
+         let mut nia = None;
++        let mut uda = None;
+         let mut ifa = None;
+         let mut bfa = None;
+         for schema in filter_asset_schemas {
+@@ -2901,6 +3299,26 @@ impl Wallet {
+                             .collect::<Result<Vec<AssetNIA>, Error>>()?,
+                     );
+                 }
++                AssetSchema::Uda => {
++                    uda = Some(
++                        assets
++                            .iter()
++                            .filter(|a| a.schema == schema)
++                            .map(|a| {
++                                AssetUDA::get_asset_details(
++                                    self,
++                                    a,
++                                    transfers.clone(),
++                                    asset_transfers.clone(),
++                                    batch_transfers.clone(),
++                                    colorings.clone(),
++                                    txos.clone(),
++                                    medias.clone(),
++                                )
++                            })
++                            .collect::<Result<Vec<AssetUDA>, Error>>()?,
++                    );
++                }
+                 AssetSchema::Ifa => {
+                     ifa = Some(
+                         assets
+@@ -2945,7 +3363,7 @@ impl Wallet {
+         }
+ 
+         info!(self.logger, "List assets completed");
+-        Ok(Assets { nia, ifa, bfa })
++        Ok(Assets { nia, uda, ifa, bfa })
+     }
+ 
+     pub(crate) fn sync_if_requested(
+@@ -4019,6 +4437,7 @@ impl Wallet {
+             bdk_changeset: self.bdk_database.get_data().clone(),
+             transfer_artifacts: self.transfer_artifacts.clone(),
+             received_consignments: self.received_consignments.clone(),
++            media_files: self.media_files.clone(),
+             received_consignment_meta: self.received_consignment_meta.clone(),
+             received_signed_txs: self.received_signed_txs.clone(),
+             received_mints: self.received_mints.clone(),
+@@ -4116,6 +4535,7 @@ impl Wallet {
+ 
+         // Restore received consignments
+         self.received_consignments = snapshot.received_consignments;
++        self.media_files = snapshot.media_files;
+         self.received_consignment_meta = snapshot.received_consignment_meta;
+         self.received_signed_txs = snapshot.received_signed_txs;
+         self.received_mints = snapshot.received_mints;
+@@ -4125,7 +4545,11 @@ impl Wallet {
+ 
+         *self.rgb_stock.borrow_mut() = Some(stock);
+ 
+-        Ok(())
++        // a snapshot saved before a schema was supported: add it now
++        let mut runtime = self.rgb_runtime()?;
++        let res = self.import_missing_schemas(&mut runtime);
++        drop(runtime);
++        res
+     }
+ }
+ 
+@@ -4203,6 +4627,7 @@ pub(crate) mod address_reuse_tests {
+             transfer_artifacts: HashMap::new(),
+             #[cfg(feature = "esplora")]
+             received_consignments: HashMap::new(),
++            media_files: HashMap::new(),
+             #[cfg(feature = "esplora")]
+             received_consignment_meta: HashMap::new(),
+             #[cfg(feature = "esplora")]
+@@ -4215,6 +4640,18 @@ pub(crate) mod address_reuse_tests {
              rgb_stock: std::rc::Rc::new(std::cell::RefCell::new(None)),
              vss_client: None,
              last_vss_backup_error: std::cell::RefCell::new(None),
@@ -1361,7 +2019,7 @@ index a3a9f46..17942dd 100644
      }
  
 diff --git a/src/wallet/online.rs b/src/wallet/online.rs
-index ca96b4a..38da3de 100644
+index ca96b4a..8e860ba 100644
 --- a/src/wallet/online.rs
 +++ b/src/wallet/online.rs
 @@ -4,6 +4,12 @@
@@ -1724,7 +2382,40 @@ index ca96b4a..38da3de 100644
  
          let prev_outputs = psbt
              .unsigned_tx
-@@ -3217,6 +3398,19 @@ impl Wallet {
+@@ -3131,6 +3312,8 @@ impl Wallet {
+                 main_schema.assignments.keys().copied().collect();
+             let mut main_inputs = vec![];
+             let mut main_used = false;
++            // a UDA has a single state, its one token, which the transition passes on as it is
++            let mut uda_state = None;
+             let mut side_transfers: BTreeMap<AssignmentType, SideTransfer> = BTreeMap::new();
+             // a retry raises the need, but the transition spends no more mint rights than asked
+             let inputs_needed = AssignmentsCollection {
+@@ -3157,6 +3340,9 @@ impl Wallet {
+                     .entry(txo_idx)
+                     .or_default()
+                     .push(Assignment::from_opout_and_state(opout, &state));
++                if matches!(state, AllocatedState::Data(_)) {
++                    uda_state = Some(state.clone());
++                }
+                 if main_input_types.contains(&opout.ty) {
+                     main_inputs.push((opout, state.clone()));
+                 } else {
+@@ -3204,6 +3390,13 @@ impl Wallet {
+                     Assignment::Fungible(amt) => (OS_ASSET, Amount::from(*amt).into()),
+                     Assignment::InflationRight(amt) => (OS_INFLATION, Amount::from(*amt).into()),
+                     Assignment::LinkRight => (OS_LINK, AllocatedState::Void),
++                    Assignment::NonFungible => (
++                        OS_ASSET,
++                        uda_state.clone().ok_or(Error::InsufficientAssignments {
++                            asset_id: asset_id.clone(),
++                            available: inputs_added.clone(),
++                        })?,
++                    ),
+                     _ => unreachable!(),
+                 };
+                 asset_transition_builder = add_or_side_output(
+@@ -3217,6 +3410,19 @@ impl Wallet {
                  )?;
              }
  
@@ -1744,7 +2435,7 @@ index ca96b4a..38da3de 100644
              let change = inputs_added.change(&transfer_info.original_assignments_needed);
  
              if change != AssignmentsCollection::default() {
-@@ -3614,6 +3808,7 @@ impl Wallet {
+@@ -3614,6 +3820,7 @@ impl Wallet {
              entropy,
              operation_secret_key: None,
              sender_transport_endpoint: None,
@@ -1752,7 +2443,7 @@ index ca96b4a..38da3de 100644
          };
          self.transfer_artifacts
              .entry(txid_key.to_string())
-@@ -3732,6 +3927,7 @@ impl Wallet {
+@@ -3732,6 +3939,7 @@ impl Wallet {
                  info.extra_allocations,
                  info.change_utxo_idx,
                  info.btc_change,
@@ -1760,7 +2451,89 @@ index ca96b4a..38da3de 100644
                  TransferStatus::Initiated,
                  min_confirmations,
                  expiration_timestamp,
-@@ -4723,6 +4919,22 @@ impl Wallet {
+@@ -4362,7 +4570,8 @@ impl Wallet {
+     }
+ 
+     /// Fetch the media of a contract from the proxy and check it against the contract. Return
+-    /// `false` if it is missing or does not match.
++    /// `None` if one is missing or does not match, else the media files by digest (hex), which
++    /// the wallet keeps to post them with its own transfers of the asset.
+     #[allow(clippy::too_many_arguments)]
+     async fn _contract_media_verified(
+         &self,
+@@ -4373,9 +4582,22 @@ impl Wallet {
+         recipient_seed: &[u8],
+         seed: &[u8; 32],
+         sender_vk: &VerifyingKey,
+-    ) -> Result<bool, Error> {
++    ) -> Result<Option<Vec<(String, Vec<u8>)>>, Error> {
+         let mut attachments = vec![];
++        let mut files = vec![];
+         match asset_schema {
++            AssetSchema::Uda => {
++                let contract_data = runtime.consignment_data(valid_contract)?;
++                let contract = UdaWrapper::with(contract_data);
++                if let Some(attachment) = contract.contract_terms().media {
++                    attachments.push(attachment)
++                }
++                let token = contract.token_data();
++                if let Some(attachment) = token.media {
++                    attachments.push(attachment)
++                }
++                attachments.extend(token.attachments.into_iter().map(|(_, a)| a));
++            }
+             AssetSchema::Nia => {
+                 let contract_data = runtime.consignment_data(valid_contract)?;
+                 let contract = NiaWrapper::with(contract_data);
+@@ -4412,26 +4634,27 @@ impl Wallet {
+                     self.logger,
+                     "Cannot find the media file but the contract defines one"
+                 );
+-                return Ok(false);
++                return Ok(None);
+             };
+             // also checks the plaintext against the digest in the contract
+-            if Self::decrypt_payload_with_shared_key(
++            match Self::decrypt_payload_with_shared_key(
+                 &media_b64,
+                 data.recipient_encryption,
+                 recipient_seed,
+                 &data.sender_pubkey,
+                 &digest,
+-            )
+-            .is_err()
+-            {
+-                error!(
+-                    self.logger,
+-                    "Attached file has a different hash than the one in the contract"
+-                );
+-                return Ok(false);
++            ) {
++                Ok(bytes) => files.push((digest, bytes)),
++                Err(_) => {
++                    error!(
++                        self.logger,
++                        "Attached file has a different hash than the one in the contract"
++                    );
++                    return Ok(None);
++                }
+             }
+         }
+-        Ok(true)
++        Ok(Some(files))
+     }
+ 
+     /// Validate what a consignment pays and its history. `None` means refuse the consignment.
+@@ -4468,7 +4691,7 @@ impl Wallet {
+             AssetSchema::Bfa => BfaWrapper::with(runtime.consignment_data(&valid_consignment)?)
+                 .reject_list()
+                 .map(RejectListSource::from),
+-            AssetSchema::Nia => None,
++            AssetSchema::Nia | AssetSchema::Uda => None,
+         };
+         if let Some(source) = &reject_list_source {
+             let (reject_opouts, allow_opouts) = self._get_reject_list_async(source).await?;
+@@ -4723,6 +4946,22 @@ impl Wallet {
                  &data.consignment_hash,
              ) {
                  Ok(bytes) => {
@@ -1783,7 +2556,7 @@ index ca96b4a..38da3de 100644
                      self.received_consignments
                          .insert(recipient_id.clone(), bytes);
                  }
-@@ -4871,7 +5083,14 @@ impl Wallet {
+@@ -4871,7 +5110,14 @@ impl Wallet {
                  .await;
          };
          let blinding = derive_shared(&ed25519_from_seed(&seed), &sender_vk)?.seal_blinding;
@@ -1799,7 +2572,7 @@ index ca96b4a..38da3de 100644
          let spent = Self::known_spent_opouts(&consignment);
          let mut payments: Vec<_> = self.find_payments(&consignment, &matcher, &spent).collect();
          if payments.len() != 1 {
-@@ -4904,7 +5123,10 @@ impl Wallet {
+@@ -4904,7 +5150,10 @@ impl Wallet {
          let witness_id = paying_bundle.witness_id();
          let txid = witness_id.to_string();
  
@@ -1811,7 +2584,86 @@ index ca96b4a..38da3de 100644
              error!(
                  self.logger,
                  "Consignment pays this recipient {} allocations, refusing it",
-@@ -5288,6 +5510,31 @@ impl Wallet {
+@@ -5150,7 +5399,8 @@ impl Wallet {
+                         // the proxy can delete the media before the mint settles: verify it now
+                         if asset_transfer.asset_id.is_none()
+                             && self.database.check_asset_exists(asset_id.clone()).is_err()
+-                            && !self
++                        {
++                            let Some(files) = self
+                                 ._contract_media_verified(
+                                     &runtime,
+                                     &valid_consignment.into_valid_contract(),
+@@ -5161,15 +5411,17 @@ impl Wallet {
+                                     &sender_vk,
+                                 )
+                                 .await?
+-                        {
+-                            return self
+-                                ._refuse_consignment_async(
+-                                    data,
+-                                    &recipient_id,
+-                                    recipient_seed,
+-                                    updated_batch_transfer,
+-                                )
+-                                .await;
++                            else {
++                                return self
++                                    ._refuse_consignment_async(
++                                        data,
++                                        &recipient_id,
++                                        recipient_seed,
++                                        updated_batch_transfer,
++                                    )
++                                    .await;
++                            };
++                            self.media_files.extend(files);
+                         }
+                         self.received_mints.insert(recipient_id, mint.clone());
+                     }
+@@ -5218,8 +5470,8 @@ impl Wallet {
+                 let valid_contract = valid_consignment.clone().into_valid_contract();
+ 
+                 // a checked mint has its media verified by the check
+-                if !checked_mint
+-                    && !self
++                if !checked_mint {
++                    let Some(files) = self
+                         ._contract_media_verified(
+                             &runtime,
+                             &valid_contract,
+@@ -5230,17 +5482,21 @@ impl Wallet {
+                             &sender_vk,
+                         )
+                         .await?
+-                {
+-                    return self
+-                        ._refuse_consignment_async(
+-                            data,
+-                            &recipient_id,
+-                            recipient_seed,
+-                            updated_batch_transfer,
+-                        )
+-                        .await;
++                    else {
++                        return self
++                            ._refuse_consignment_async(
++                                data,
++                                &recipient_id,
++                                recipient_seed,
++                                updated_batch_transfer,
++                            )
++                            .await;
++                    };
++                    self.media_files.extend(files);
+                 }
+ 
++                // a wallet made before this schema was supported doesn't have it yet
++                self.import_missing_schemas(&mut runtime)?;
+                 runtime
+                     .import_contract(valid_contract.clone(), &chain_resolver)
+                     .expect("failure importing received contract");
+@@ -5288,6 +5544,31 @@ impl Wallet {
              retention_grace = Some(grace);
          }
  
@@ -1843,7 +2695,7 @@ index ca96b4a..38da3de 100644
          updated_batch_transfer.txid = ActiveValue::Set(Some(txid.clone()));
  
          let utxo_idx = match transfer.recipient_type {
-@@ -5805,17 +6052,23 @@ impl Wallet {
+@@ -5805,17 +6086,23 @@ impl Wallet {
                      details: s!("consignment not found in memory"),
                  })?
                  .clone();
@@ -1870,7 +2722,7 @@ index ca96b4a..38da3de 100644
                  let txo = self.database.get_txo(&outpoint)?.expect("txo must exist");
                  let mut txo: DbTxoActMod = txo.into();
                  txo.pending_witness = ActiveValue::Set(false);
-@@ -6446,7 +6699,7 @@ impl Wallet {
+@@ -6446,7 +6733,7 @@ impl Wallet {
          skip_sync: bool,
      ) -> Result<bool, Error> {
          if !skip_sync {
@@ -1879,9 +2731,29 @@ index ca96b4a..38da3de 100644
          }
  
          let mut db_data = self.database.get_db_data(false)?;
-@@ -7053,6 +7306,10 @@ impl Wallet {
+@@ -6593,6 +6880,7 @@ impl Wallet {
+                 }
+             }
+             (Assignment::LinkRight, AssetSchema::Ifa | AssetSchema::Bfa) => {}
++            (Assignment::NonFungible, AssetSchema::Uda) => {}
+             _ => {
+                 return Err(Error::InvalidAssignment);
+             }
+@@ -7044,6 +7332,7 @@ impl Wallet {
+     #[allow(clippy::too_many_arguments)]
+     async fn post_transfer_data(
+         &self,
++        asset_id: &str,
+         recipients: &mut [LocalRecipient],
+         consignment: &[u8],
+         sender_sk: &SigningKey,
+@@ -7052,7 +7341,14 @@ impl Wallet {
+         consignment_hash: &str,
          batch: bool,
      ) -> Result<(), Error> {
++        // the contract's media files (an NFT's picture): the recipient fetches and checks them
++        // before accepting an asset it doesn't know yet
++        let medias = self.asset_media_files(asset_id)?;
          for recipient in recipients {
 +            // no transfer server: the caller delivers the consignment itself (MASKED swaps and listings)
 +            if recipient.transport_endpoints.is_empty() {
@@ -1890,7 +2762,76 @@ index ca96b4a..38da3de 100644
              let recipient_id = &recipient.recipient_id;
              let recipient_vk = verifying_key_from_bytes(&recipient.public_key)?;
              let derived = derive_shared(sender_sk, &recipient_vk)?;
-@@ -7590,6 +7847,246 @@ impl Wallet {
+@@ -7130,6 +7426,29 @@ impl Wallet {
+                     Err(_) => continue,
+                 }
+ 
++                for (digest, bytes) in &medias {
++                    let media_id = derived.media_id(digest);
++                    let posted_media = if recipient.encryption != Encryption::Unsupported {
++                        encrypt_blob(bytes, &derived.sym_key, &decode_hash_hex(digest)?)?
++                    } else {
++                        bytes.clone()
++                    };
++                    let media_hash = hex::encode(sha256_digest(&posted_media));
++                    let signature = hex::encode(sign_ed25519(
++                        sender_sk,
++                        &sha256_digest(
++                            post_media_message(&transfer_id, &media_id, &media_hash).as_bytes(),
++                        ),
++                    ));
++                    let res = proxy_client
++                        .post_media(&transfer_id, &media_id, &posted_media, &signature)
++                        .await?;
++                    debug!(self.logger, "Media POST response: {:?}", res);
++                    if let Some(err) = res.error {
++                        return Err(map_proxy_error(err));
++                    }
++                }
++
+                 transport_endpoint.used = true;
+                 found_valid = true;
+                 break;
+@@ -7142,6 +7461,30 @@ impl Wallet {
+         Ok(())
+     }
+ 
++    /// The media files of an asset's contract this wallet holds (an NFT's picture), by digest.
++    /// An error when the contract has one this wallet doesn't hold: the recipient would refuse
++    /// the transfer.
++    fn asset_media_files(&self, asset_id: &str) -> Result<Vec<(String, Vec<u8>)>, Error> {
++        let Ok(asset) = self.database.check_asset_exists(asset_id.to_string()) else {
++            return Ok(vec![]);
++        };
++        let Some(media_idx) = asset.media_idx else {
++            return Ok(vec![]);
++        };
++        let Some(media) = self.database.get_media(media_idx)? else {
++            return Ok(vec![]);
++        };
++        match self.media_files.get(&media.digest) {
++            Some(bytes) => Ok(vec![(media.digest, bytes.clone())]),
++            None => Err(Error::InvalidAttachments {
++                details: format!(
++                    "the media file {} of asset {asset_id} is not in this wallet",
++                    media.digest
++                ),
++            }),
++        }
++    }
++
+     /// Complete the send operation (wasm32 async).
+     ///
+     /// See native [`send_end`](Wallet::send_end) for full documentation.
+@@ -7321,6 +7664,7 @@ impl Wallet {
+             for (asset_id, info_contents_asset) in asset_infos.iter_mut() {
+                 post_result = self
+                     .post_transfer_data(
++                        asset_id,
+                         &mut info_contents_asset.recipients,
+                         &consignment_bytes[asset_id],
+                         &sender_sk,
+@@ -7590,6 +7934,246 @@ impl Wallet {
          Ok(tx.compute_txid().to_string())
      }
  
@@ -2137,7 +3078,7 @@ index ca96b4a..38da3de 100644
      /// Prepare the PSBT to inflate an IFA asset.
      pub async fn inflate_begin(
          &mut self,
-@@ -7782,6 +8279,7 @@ impl Wallet {
+@@ -7782,6 +8366,7 @@ impl Wallet {
              info_contents.extra_allocations,
              info_contents.change_utxo_idx,
              info_contents.btc_change,
@@ -2145,7 +3086,7 @@ index ca96b4a..38da3de 100644
              TransferStatus::WaitingConfirmations,
              info_contents.min_confirmations,
              info_contents.expiration_timestamp,
-@@ -8119,6 +8617,7 @@ impl Wallet {
+@@ -8119,6 +8704,7 @@ impl Wallet {
                  info_contents.extra_allocations,
                  info_contents.change_utxo_idx,
                  info_contents.btc_change,
@@ -2153,7 +3094,15 @@ index ca96b4a..38da3de 100644
                  TransferStatus::WaitingConfirmations,
                  info_contents.min_confirmations,
                  None,
-@@ -8838,7 +9337,7 @@ impl Wallet {
+@@ -8605,6 +9191,7 @@ impl Wallet {
+         // follows, as the TX is signed only after the lock
+         let post_result = self
+             .post_transfer_data(
++                &asset_id,
+                 &mut asset_infos
+                     .get_mut(&asset_id)
+                     .expect("saved by _prepare_transfer_psbt_wasm")
+@@ -8838,7 +9425,7 @@ impl Wallet {
          self.check_online(online)?;
  
          if !skip_sync {
@@ -2162,7 +3111,7 @@ index ca96b4a..38da3de 100644
              self.flush().await?;
          }
  
-@@ -9321,6 +9820,7 @@ mod send_end_tests {
+@@ -9321,6 +9908,7 @@ mod send_end_tests {
              entropy: 0,
              operation_secret_key: Some(OPERATION_SEED.to_vec()),
              sender_transport_endpoint: None,
@@ -2170,7 +3119,7 @@ index ca96b4a..38da3de 100644
          };
          let db = DbBatchTransfer {
              idx: 1,
-@@ -9427,6 +9927,7 @@ mod send_end_tests {
+@@ -9427,6 +10015,7 @@ mod send_end_tests {
              entropy: 0,
              operation_secret_key: Some(OPERATION_SEED.to_vec()),
              sender_transport_endpoint: Some(s!("rpc://127.0.0.1:1")),
@@ -2178,13 +3127,14 @@ index ca96b4a..38da3de 100644
          }
      }
  
-@@ -10024,6 +10525,156 @@ mod send_end_tests {
+@@ -10024,8 +10613,218 @@ mod send_end_tests {
          assert!(kept.signed_psbt.is_none());
      }
  
 +    /// MASKED lots in one transaction: every lot output is recorded as this wallet's own (a new output of the
 +    /// transaction, holding exactly its lot), next to the change, with no receive needed.
-+    #[test]
+     #[test]
+-    fn update_or_save_transfers_updates_outgoing_batch() {
 +    fn save_transfers_records_lot_outputs() {
 +        let (wallet, _) = setup();
 +        let txid = s!("lots");
@@ -2231,6 +3181,66 @@ index ca96b4a..38da3de 100644
 +        v.as_object_mut().unwrap().remove("lots");
 +        let info: InfoBatchTransfer = serde_json::from_value(v).unwrap();
 +        assert!(info.lots.is_empty());
++    }
++
++    /// An NFT (UDA): issued with its picture, listed with the picture's digest, and its bytes kept
++    /// to post with a transfer.
++    #[test]
++    fn uda_issue_list_and_media() {
++        let (mut wallet, _) = setup();
++        wallet.wallet_data.supported_schemas = vec![AssetSchema::Nia, AssetSchema::Uda];
++        seed_txo(&wallet, &"ab".repeat(32), 0);
++        let picture = vec![0x89, b'P', b'N', b'G', 1, 2, 3];
++        let digest = hex::encode(sha256_digest(&picture));
++        let asset = wallet
++            .issue_asset_uda(
++                s!("MASK"),
++                s!("Mask #1"),
++                Some(s!("first one")),
++                0,
++                Some((picture.clone(), s!("image/png"))),
++            )
++            .unwrap();
++        assert!(asset.asset_id.starts_with("rgb:"));
++        assert_eq!(asset.media.as_ref().map(|m| m.digest.clone()), Some(digest.clone()));
++        assert_eq!(asset.media.as_ref().map(|m| m.mime.clone()), Some(s!("image/png")));
++        assert_eq!(asset.balance.settled, 1);
++        let listed = wallet.list_assets(vec![AssetSchema::Uda]).unwrap().uda.unwrap();
++        assert_eq!(listed.len(), 1);
++        assert_eq!(listed[0].name, "Mask #1");
++        assert_eq!(listed[0].details.as_deref(), Some("first one"));
++        assert_eq!(wallet.media_file(&digest.to_uppercase()), Some(picture.clone()));
++        assert_eq!(
++            wallet.asset_media_files(&asset.asset_id).unwrap(),
++            vec![(digest.clone(), picture.clone())]
++        );
++        // the contract's token commits to the picture
++        let runtime = wallet.rgb_runtime().unwrap();
++        let contract = runtime
++            .contract_wrapper::<UniqueDigitalAsset>(ContractId::from_str(&asset.asset_id).unwrap())
++            .unwrap();
++        let token = contract.token_data();
++        assert_eq!(token.media.map(|a| hex::encode(a.digest)), Some(digest.clone()));
++        drop(runtime);
++        // a picture the wallet lost: a transfer would be refused, so it fails before posting
++        wallet.media_files.clear();
++        assert!(wallet.asset_media_files(&asset.asset_id).is_err());
++        // bad media
++        seed_txo(&wallet, &"cd".repeat(32), 0);
++        assert!(wallet.issue_asset_uda(s!("X"), s!("X"), None, 0, Some((vec![], s!("image/png")))).is_err());
++        assert!(wallet.issue_asset_uda(s!("X"), s!("X"), None, 0, Some((vec![1], s!("png")))).is_err());
++        // an NFT without picture
++        let plain = wallet.issue_asset_uda(s!("NOPIC"), s!("No picture"), None, 0, None).unwrap();
++        assert!(plain.media.is_none());
++        assert!(wallet.asset_media_files(&plain.asset_id).unwrap().is_empty());
++    }
++
++    /// An NFT invoice: the UDA schema and the "assetOwner" data assignment.
++    #[test]
++    fn uda_schema_and_invoice_assignment() {
++        assert_eq!(AssetSchema::try_from(SCHEMA_ID_UDA.to_string()).unwrap(), AssetSchema::Uda);
++        assert_eq!(SchemaId::from(AssetSchema::Uda).to_string(), SCHEMA_ID_UDA);
++        assert!(!AssetSchema::Uda.supports_link());
 +    }
 +
 +    /// What holds an output: a sale that spends it and never went out shows up, and releasing it frees the output.
@@ -2332,10 +3342,12 @@ index ca96b4a..38da3de 100644
 +        assert!(wallet.swap_releases.is_empty() && wallet.held_swaps.is_empty());
 +    }
 +
-     #[test]
-     fn update_or_save_transfers_updates_outgoing_batch() {
++    #[test]
++    fn update_or_save_transfers_updates_outgoing_batch() {
          let (wallet, _) = setup();
-@@ -10051,6 +10702,7 @@ mod send_end_tests {
+         let txid = s!("t");
+         let input_idx = seed_txo(&wallet, "i", 0);
+@@ -10051,6 +10850,7 @@ mod send_end_tests {
                  info.extra_allocations.clone(),
                  info.change_utxo_idx,
                  None,
@@ -2343,7 +3355,7 @@ index ca96b4a..38da3de 100644
                  TransferStatus::Initiated,
                  1,
                  None,
-@@ -12074,3 +12726,1313 @@ mod bfa_tests {
+@@ -12074,3 +12874,1313 @@ mod bfa_tests {
          assert!(options(&format!(r#","evm_chains":{{"mainnet":{chain}}}"#)).is_err());
      }
  }
@@ -2958,7 +3970,7 @@ index ca96b4a..38da3de 100644
 +            let bytes = consignment_bytes.get(asset_id).ok_or(Error::Internal { details: s!("missing consignment bytes") })?;
 +            let hash = hex::encode(sha256_digest(bytes));
 +            result = self
-+                .post_transfer_data(&mut info_asset.recipients, bytes, &sender_sk, &sender_pubkey_hex, &endpoint, &hash, false)
++                .post_transfer_data(asset_id, &mut info_asset.recipients, bytes, &sender_sk, &sender_pubkey_hex, &endpoint, &hash, false)
 +                .await;
 +            if result.is_err() {
 +                break;
@@ -3658,7 +4670,7 @@ index ca96b4a..38da3de 100644
 +    }
 +}
 diff --git a/src/wallet/rust_only.rs b/src/wallet/rust_only.rs
-index 4e07a9c..e598be7 100644
+index 4e07a9c..bac9cbc 100644
 --- a/src/wallet/rust_only.rs
 +++ b/src/wallet/rust_only.rs
 @@ -3,6 +3,7 @@
@@ -3682,7 +4694,49 @@ index 4e07a9c..e598be7 100644
  }
  
  impl Wallet {
-@@ -554,6 +561,18 @@ pub fn validate_consignment_offchain(
+@@ -157,6 +164,8 @@ impl Wallet {
+                 beneficiaries.push(seal);
+ 
+                 match schema {
++                    // MASKED's swaps and listings move fungible tokens only
++                    AssetSchema::Uda => return Err(Error::InvalidAssignment),
+                     AssetSchema::Nia | AssetSchema::Ifa | AssetSchema::Bfa => {
+                         asset_transition_builder = asset_transition_builder.add_fungible_state(
+                             assignment_name.clone(),
+@@ -370,6 +379,32 @@ impl Wallet {
+                     linked_from_contract: None,
+                 }
+             }
++            AssetSchema::Uda => {
++                let contract = runtime.contract_wrapper::<UniqueDigitalAsset>(contract_id)?;
++                let spec = contract.spec();
++                // the NFT's picture is the token's media (the contract terms' media if it has none)
++                let media = contract.token_data().media.or(contract.contract_terms().media);
++                let media_idx = if let Some(attachment) = media {
++                    Some(self.get_or_insert_media(
++                        hex::encode(attachment.digest),
++                        attachment.ty.to_string(),
++                    )?)
++                } else {
++                    None
++                };
++                LocalAssetData {
++                    name: spec.name().to_string(),
++                    precision: spec.precision.into(),
++                    ticker: Some(spec.ticker().to_string()),
++                    details: spec.details().map(|d| d.to_string()),
++                    media_idx,
++                    initial_supply: 1,
++                    max_supply: None,
++                    known_circulating_supply: None,
++                    reject_list_url: None,
++                    linked_from_contract: None,
++                }
++            }
+             AssetSchema::Ifa => {
+                 let contract = runtime.contract_wrapper::<InflatableFungibleAsset>(contract_id)?;
+                 let spec = contract.spec();
+@@ -554,6 +589,18 @@ pub fn validate_consignment_offchain(
      consignment_bytes: &[u8],
      txid: &str,
      bitcoin_network: BitcoinNetwork,
@@ -3701,7 +4755,7 @@ index 4e07a9c..e598be7 100644
  ) -> Result<ValidateConsignmentResult, Error> {
      let consignment = RgbTransfer::load(consignment_bytes).map_err(|e| Error::Internal {
          details: format!("Failed to load consignment: {e}"),
-@@ -589,6 +608,26 @@ pub fn validate_consignment_offchain(
+@@ -589,6 +636,26 @@ pub fn validate_consignment_offchain(
      {
          Ok(valid_consignment) => {
              let status = valid_consignment.validation_status();
@@ -3728,7 +4782,7 @@ index 4e07a9c..e598be7 100644
              Ok(ValidateConsignmentResult {
                  valid: true,
                  warnings: Some(
-@@ -600,6 +639,8 @@ pub fn validate_consignment_offchain(
+@@ -600,6 +667,8 @@ pub fn validate_consignment_offchain(
                  ),
                  error: None,
                  details: None,
@@ -3737,7 +4791,7 @@ index 4e07a9c..e598be7 100644
              })
          }
          Err(ValidationError::InvalidConsignment(failure)) => Ok(ValidateConsignmentResult {
-@@ -607,24 +648,32 @@ pub fn validate_consignment_offchain(
+@@ -607,24 +676,32 @@ pub fn validate_consignment_offchain(
              warnings: None,
              error: Some("invalid".to_string()),
              details: Some(failure.to_string()),
@@ -3770,7 +4824,7 @@ index 4e07a9c..e598be7 100644
          }),
      }
  }
-@@ -633,6 +682,55 @@ pub fn validate_consignment_offchain(
+@@ -633,6 +710,55 @@ pub fn validate_consignment_offchain(
  mod tests {
      use super::*;
  
@@ -3826,7 +4880,7 @@ index 4e07a9c..e598be7 100644
      #[test]
      fn validate_consignment_offchain_invalid_bytes() {
          let result = validate_consignment_offchain(
-@@ -666,9 +764,12 @@ mod tests {
+@@ -666,9 +792,12 @@ mod tests {
              warnings: Some(vec!["warn1".to_string()]),
              error: None,
              details: None,
@@ -3839,7 +4893,7 @@ index 4e07a9c..e598be7 100644
          assert!(deserialized.valid);
          assert_eq!(deserialized.warnings.unwrap(), vec!["warn1".to_string()]);
          assert!(deserialized.error.is_none());
-@@ -678,6 +779,8 @@ mod tests {
+@@ -678,6 +807,8 @@ mod tests {
              warnings: None,
              error: Some("invalid".to_string()),
              details: Some("schema mismatch".to_string()),
@@ -3848,7 +4902,7 @@ index 4e07a9c..e598be7 100644
          };
          let json = serde_json::to_string(&result_invalid).unwrap();
          let deserialized: ValidateConsignmentResult = serde_json::from_str(&json).unwrap();
-@@ -719,3 +822,1060 @@ mod tests {
+@@ -719,3 +850,1060 @@ mod tests {
          assert_eq!(IndexerProtocol::Esplora.to_string(), "Esplora");
      }
  }

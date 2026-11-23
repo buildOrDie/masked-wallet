@@ -41,7 +41,7 @@ const asset = (a) => ({
   precision: num(a?.precision), issuedSupply: num(a?.issuedSupply), balance: balance(a?.balance),
 });
 
-/** An NFT (RGB21 / UDA): one token; its image is fetched from the transfer server by digest (see nftImage). */
+/** An NFT (RGB21 / UDA): one token; its image is the engine's own copy, or the transfer server's (see nftImage). */
 const nft = (a) => ({
   assetId: String(a?.assetId ?? ''), ticker: String(a?.ticker ?? '').slice(0, 12), name: String(a?.name ?? a?.ticker ?? ''),
   details: a?.details ? String(a.details) : '', balance: balance(a?.balance),
@@ -244,6 +244,17 @@ export class LiteWallet {
    */
   async nftImage(media, fetchFn = fetch) {
     if (!media?.digest || !/^[0-9a-f]{64}$/.test(media.digest) || !IMAGE_MIME.test(media.mime)) return null;
+    // the engine's own copy (2.32+): the picture came with the NFT, encrypted for this wallet, and was checked
+    // against the contract then; checked again here
+    try {
+      const own = typeof this.wallet?.mediaFile === 'function' ? this.wallet.mediaFile(media.digest) : null;
+      if (own?.length) {
+        const bytes = own instanceof Uint8Array ? own : new Uint8Array(own);
+        const sum = hex.encode(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)));
+        if (sum === media.digest) return `data:${media.mime};base64,${base64.encode(bytes)}`;
+      }
+    } catch { /* the transfer servers, below */ }
+    // older transfer servers (protocol 0.2) served pictures by digest
     for (const e of this.transports) {
       try {
         const j = await rpc(endpointUrl(e), 'media.get', { attachment_id: media.digest }, fetchFn);
