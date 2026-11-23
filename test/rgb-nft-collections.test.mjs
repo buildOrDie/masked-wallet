@@ -20,3 +20,12 @@ test('an incoming NFT counts as incoming (its assignment is NonFungible, not an 
   assert.equal(b.future, 1);
   assert.equal(b.spendable, 0);
 });
+
+test('a listed NFT says so instead of failing to send', () => {
+  const a = { assetId: 'd', ticker: 'RATS', name: 'RATS #5', nft: true };
+  const me = { service: { instantListings: () => [{ assetId: 'd', stage: 'moving' }, { assetId: 'x', stage: 'ready' }] }, isNft: P.isNft };
+  me.openListing = P.openListing.bind(me);
+  assert.match(P.listedWhy.call(me, a), /RATS #5 is in Your listings \(going live\).*Cancel the listing first/);
+  me.service.instantListings = () => [{ assetId: 'd', stage: 'cancelled' }];
+  assert.equal(P.listedWhy.call(me, a), '');
+});

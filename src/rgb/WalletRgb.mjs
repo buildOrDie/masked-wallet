@@ -342,6 +342,20 @@ export class WalletRgb {
   /** NFTs (RGB21 / UDA) held or on their way in. */
   nfts() { return (this.data?.groups?.uda || []).filter((a) => a?.assetId && (Number(a.balance?.future) > 0 || Number(a.balance?.settled) > 0)).map((a) => ({ ...a, nft: true, precision: 0 })); }
   isNft(a) { return !!a?.nft; }
+  /** This wallet's open Instant listing of an asset (on sale, going live, cancelling), or null. */
+  openListing(assetId) {
+    let list = [];
+    try { list = this.service?.instantListings?.() || []; } catch { list = []; }
+    return list.find((e) => e?.assetId === assetId && ['ready', 'moving', 'outdated', 'cancelling'].includes(String(e.stage))) || null;
+  }
+  /** Why an NFT can't be sent while it's listed, or ''. */
+  listedWhy(a) {
+    const e = this.isNft(a) ? this.openListing(a.assetId) : null;
+    if (!e) return '';
+    return e.stage === 'cancelling'
+      ? `${a.name} is coming back from a cancelled listing. It can be sent after that cancel's block (about 10 minutes).`
+      : `${a.name} is in Your listings (${e.stage === 'ready' ? 'on sale' : e.stage === 'moving' ? 'going live' : 'can\'t sell'}). Its output is promised to that listing, so it can't be sent. Cancel the listing first: Home → Your listings.`;
+  }
   /** NFTs by collection (their ticker), each sorted by number: [{ key, name, list }], the biggest collection first. */
   collections() {
     const num = (a) => Number((String(a.name).match(/#\s*(\d+)/) || [])[1] ?? Infinity);
@@ -1086,6 +1100,7 @@ export class WalletRgb {
           if (d.expirationTimestamp && d.expirationTimestamp <= Date.now() / 1000) throw new Error('This invoice has expired. Ask them to make a new one.');
           if (!this.profile.invoiceNets.includes(String(d.network).toLowerCase())) throw new Error(`This invoice is not for ${this.profile.label}.`);
           // an invoice with a fixed amount fills it in; an NFT is always 1
+          if (this.listedWhy(a)) throw new Error(this.listedWhy(a));
           if (this.isNft(a)) this.fields.sendAmt = '1';
           const amount = this.isNft(a) ? 1 : d.amount || toBase(this.fields.sendAmt, a.precision);
           if (d.amount) this.fields.sendAmt = this.amount(a, d.amount).replace(/,/g, '');
@@ -1120,7 +1135,12 @@ export class WalletRgb {
             throw new Error('Transfer server permission changed. Review the server and try again.');
           }
           // the token change needs a free RGB output of this wallet: none (or all full), make some first
-          const r = await this.withOutputs(() => this.service.send({ invoice: p.invoice, assetId: p.assetId, amount: String(p.amount), fee: this.fee(), endpoint: p.check.endpoint, nft: !!p.nft }), { retry: false });
+          const r = await this.withOutputs(() => this.service.send({ invoice: p.invoice, assetId: p.assetId, amount: String(p.amount), fee: this.fee(), endpoint: p.check.endpoint, nft: !!p.nft }), { retry: false })
+            .catch((err) => {
+              // the engine only says the asset isn't on an output it can spend: a listing holding it says why
+              const a = this.find(p.assetId), why = a && /insufficient total assignments/i.test(String(err?.message || err)) && this.listedWhy(a);
+              throw why ? new Error(why) : err;
+            });
           this.sent = { txid: r?.txid || '', shown: p.shown, ticker: p.ticker, nft: !!p.nft };
           this.pending = null;
           await this.refresh();

@@ -312,14 +312,14 @@ export class RgbTokenView extends View {
       <div class="tok-hero nft-hero">${nftPic(r, a, true)}<p class="tok-name">${esc(a.name)} ${rgbBadge}</p>
         ${fut > s ? '<p class="pend-t small">On its way · waiting for a block</p>' : ''}</div>
       <section class="card tok-box">
-        ${s && !sp ? (() => {
+        ${r.listedWhy?.(a) ? `<p class="info warn small">${esc(r.listedWhy(a))}</p><button class="btn ghost wide" data-rgb="listings">Your listings</button>` : s && !sp ? (() => {
           const unsent = r.unsent(a.assetId).length, stuck = r.unsent(a.assetId).filter((t) => r.stranded(t)).length;
           return unsent > stuck
             ? `<p class="info warn small">It's held by a send the other wallet hasn't accepted yet. Nothing has been broadcast, so you can cancel it: the NFT stays here.</p>
               <button class="btn ghost wide" data-rgb="cancelSend" ${r.busy ? 'disabled' : ''}>Cancel unsent transfer</button>`
             : '<p class="info small">It\'s held by a transfer waiting for a block, and can be sent once it confirms.</p>';
         })() : ''}
-        <div class="tok-acts"><button class="tact" data-rgb="send" data-rgb-arg="${esc(a.assetId)}" ${sp ? '' : 'disabled'}>${I.send}<span>Send</span></button></div>
+        <div class="tok-acts"><button class="tact" data-rgb="send" data-rgb-arg="${esc(a.assetId)}" ${sp && !r.listedWhy?.(a) ? '' : 'disabled'}>${I.send}<span>Send</span></button></div>
       </section>
       ${nftTraitsCard(r.nftMeta?.(a))}
       <section class="card"><div class="kv">
