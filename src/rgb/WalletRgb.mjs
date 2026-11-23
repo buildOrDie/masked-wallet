@@ -95,7 +95,7 @@ async function publishInstant(e, v) {
   const r = await fetch(`${e.market}/api/swap/offers/${encodeURIComponent(v.offerId)}/presigned`, {
     method: 'POST', credentials: 'omit', cache: 'no-store',
     headers: { 'content-type': 'application/json', 'x-swap-token': e.token },
-    body: JSON.stringify({ psbt: v.psbt, consignment: v.consignment, templateTxid: v.templateTxid, sellerOutpoint: v.sellerOutpoint }),
+    body: JSON.stringify({ psbt: v.psbt, consignment: v.consignment, templateTxid: v.templateTxid, sellerOutpoint: v.sellerOutpoint, ...(v.media?.length ? { media: v.media } : {}) }),
   });
   // a refusal (offer cancelled or closed on the market) is final too: don't send it again, but say so
   if (!r.ok && r.status >= 400 && r.status < 500) {

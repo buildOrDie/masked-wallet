@@ -103,6 +103,11 @@ function swapParams(method, p) {
     const l = p.listing;
     if (!l || typeof l !== 'object') throw err(4000, 'listing (the signed listing from the market) is required.');
     out.listing = { psbt: str(l.psbt, 20_000, 'listing.psbt'), consignment: str(l.consignment, 4_000_000, 'listing.consignment'), templateTxid: str(l.templateTxid, 64, 'listing.templateTxid') };
+    // an NFT listing's files (picture, metadata.json): the wallet checks each against the NFT
+    if (Array.isArray(l.media)) {
+      if (l.media.length > 21) throw err(4000, 'listing.media: too many files.');
+      out.listing.media = l.media.map((m) => ({ digest: str(m?.digest, 64, 'listing.media.digest'), data: str(m?.data, 2_000_000, 'listing.media.data') }));
+    }
   }
   return out;
 }

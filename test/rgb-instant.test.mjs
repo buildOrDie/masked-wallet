@@ -1064,3 +1064,14 @@ test('lots: an engine without one-transaction lots moves them one after another,
   assert.ok(s.log.filter((x) => x[0] === 'colorSwap').length >= 1);
   assert.ok(s.log.filter((x) => x[0] === 'colorSwap').every((x) => x[2] === '500'), 'one lot per move');
 });
+
+test('an NFT listing carries its files, each checked against its fingerprint before paying', async () => {
+  const { listingMedia } = await import('../src/rgb/LiteWallet.mjs');
+  const { createHash } = await import('node:crypto');
+  const png = Buffer.from([137, 80, 78, 71, 5]);
+  const digest = createHash('sha256').update(png).digest('hex');
+  assert.deepEqual(listingMedia({ media: [{ digest, data: png.toString('base64') }] }), [{ digest, data: png.toString('base64') }]);
+  assert.throws(() => listingMedia({}), /without its picture/);
+  assert.throws(() => listingMedia({ media: [{ digest, data: Buffer.from([1]).toString('base64') }] }), /does not match/);
+  assert.throws(() => listingMedia({ media: [{ digest: 'xx', data: '' }] }), /fingerprint/);
+});

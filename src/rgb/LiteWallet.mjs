@@ -5,6 +5,7 @@
 
 import * as btc from '@scure/btc-signer';
 import { hex, base64 } from '@scure/base';
+import { sha256 } from '@noble/hashes/sha256';
 import { isInvoiceV1, readInvoiceV1, invoiceIdOf, pickEndpoint, newSenderKey, sharedKeys, deliverConsignment, endpointUrl, rpc, PROXY_V1 } from './proxyV1.mjs';
 import { SEAL_SATS, SEAL_OUTPUT, SWAP_SIZE_VB, b64, buyerOutputs, outpointOf, completionBlocker, readOffer, buyerCoinFor, offerable, heldBreakdown, payoutFor, changedTerms, unb64, exactCoinFor, freeSellerCoinFor, sendCoinsFor, instantAmounts, INSTANT_SEAL_OUTPUT, INSTANT_SEAL_SATS, payCoinsFor, txVbytes, OPRET_SCRIPT, P2TR_SCRIPT, BUY_FEE_MIN, COMBINED_MAX, payCoinsForCombined } from './swap.mjs';
 import { RGB_UTXO_SATS, RGB_KEEP_SPARE } from './config.mjs';
@@ -51,6 +52,22 @@ const nft = (a) => ({
   files: Object.entries(a?.attachments || {}).sort(([x], [y]) => Number(x) - Number(y))
     .filter(([, m]) => m?.digest).map(([, m]) => ({ digest: String(m.digest), mime: String(m.mime || '') })),
 });
+/**
+ * The files an NFT listing carries (picture, metadata.json), each checked against its fingerprint: [{ digest, data }].
+ * The NFT itself names which files it needs; the wallet checks that when it takes the NFT in.
+ */
+export function listingMedia(l) {
+  const list = Array.isArray(l?.media) ? l.media : [];
+  if (!list.length) throw new Error('This NFT listing came without its picture: the NFT couldn\'t be received. Nothing was paid. Ask the seller to list it again with an up-to-date MASKED.');
+  if (list.length > 21) throw new Error('This NFT listing carries too many files.');
+  return list.map((m) => {
+    const digest = String(m?.digest || ''), data = String(m?.data || '');
+    if (!/^[0-9a-f]{64}$/.test(digest)) throw new Error('A file of this NFT listing has no valid fingerprint.');
+    const bytes = unb64(data);
+    if (hex.encode(sha256(bytes)) !== digest) throw new Error('A file of this NFT listing does not match its fingerprint. Nothing was paid.');
+    return { digest, data };
+  });
+}
 /** At most this much of an NFT's metadata.json is read. */
 const NFT_META_MAX = 64 * 1024;
 /**
@@ -1787,7 +1804,8 @@ export class LiteWallet {
     }
     const payout = await this.payoutScript();
     const r = plain(await this.wallet.presignSale(online, e.assetId, BigInt(e.amount), coin.outpoint, payout, BigInt(e.priceSats), 1));
-    const next = { ...e, moveHex: undefined, stage: 'ready', payoutPublic: payout === this.payoutHex, coin: String(r.sellerOutpoint), psbt: String(r.psbt), consignment: b64(Uint8Array.from(r.consignment)), templateTxid: String(r.templateTxid), sellerSats: String(r.sellerSats), at: Date.now() };
+    const media = await this.nftFiles(e.assetId);
+    const next = { ...e, moveHex: undefined, stage: 'ready', payoutPublic: payout === this.payoutHex, coin: String(r.sellerOutpoint), psbt: String(r.psbt), consignment: b64(Uint8Array.from(r.consignment)), templateTxid: String(r.templateTxid), sellerSats: String(r.sellerSats), ...(media.length ? { media } : {}), at: Date.now() };
     store.set(offerId, next);
     this.reserve([...new Set([...this.reserved, next.coin])]);
     await this.save();
@@ -1971,7 +1989,8 @@ export class LiteWallet {
     const online = this.requireOnline();
     const payout = await this.payoutScript();
     const r = plain(await this.wallet.presignSale(online, e.assetId, BigInt(e.amount), String(e.coin), payout, BigInt(e.priceSats), 1));
-    const next = { ...e, moveHex: e.moveHex, stage: 'ready', waiting: '', payoutPublic: payout === this.payoutHex, coin: String(r.sellerOutpoint), psbt: String(r.psbt), consignment: b64(Uint8Array.from(r.consignment)), templateTxid: String(r.templateTxid), sellerSats: String(r.sellerSats), at: Date.now() };
+    const media = await this.nftFiles(e.assetId);
+    const next = { ...e, moveHex: e.moveHex, stage: 'ready', waiting: '', payoutPublic: payout === this.payoutHex, coin: String(r.sellerOutpoint), psbt: String(r.psbt), consignment: b64(Uint8Array.from(r.consignment)), templateTxid: String(r.templateTxid), sellerSats: String(r.sellerSats), ...(media.length ? { media } : {}), at: Date.now() };
     store.set(offerId, next);
     this.reserve([...new Set([...this.reserved, next.coin])]);
     await this.save();
@@ -2110,7 +2129,23 @@ export class LiteWallet {
     try { this.lib.inspectSwapConsignment(bytes, String(txid), this.net, INSTANT_SEAL_OUTPUT); return false; } catch (e) { return OLD_CONSIGNMENT.test(String(e?.message || e)); }
   }
   instantView(offerId, e) {
-    return { offerId: String(offerId), stage: e.stage === 'queued' ? 'moving' : e.stage, txid: e.soldTxid || e.cancelTxid || e.moveTxid || null, ...(e.stage === 'ready' ? { psbt: e.psbt, consignment: e.consignment, templateTxid: e.templateTxid, sellerOutpoint: e.coin } : e.waiting ? { waiting: String(e.waiting) } : {}) };
+    return { offerId: String(offerId), stage: e.stage === 'queued' ? 'moving' : e.stage, txid: e.soldTxid || e.cancelTxid || e.moveTxid || null, ...(e.stage === 'ready' ? { psbt: e.psbt, consignment: e.consignment, templateTxid: e.templateTxid, sellerOutpoint: e.coin, ...(e.media?.length ? { media: e.media } : {}) } : e.waiting ? { waiting: String(e.waiting) } : {}) };
+  }
+  /**
+   * An NFT's files (picture, metadata.json) for its listing: [{ digest, data (base64) }], [] for a token. The buyer
+   * posts them with the transfer to itself; its wallet checks each against the NFT before accepting it.
+   */
+  async nftFiles(assetId) {
+    if (!this.canNft || typeof this.wallet?.mediaFile !== 'function') return [];
+    const a = (await this.listAssets()).uda.find((x) => x.assetId === assetId);
+    if (!a) return [];
+    const out = [];
+    for (const f of [a.media, ...(a.files || [])].filter(Boolean)) {
+      const bytes = this.wallet.mediaFile(f.digest);
+      if (!bytes?.length) throw new Error('This wallet doesn\'t have this NFT\'s picture: it can\'t be sold until it does (load the newer RGB backup).');
+      out.push({ digest: f.digest, data: b64(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)) });
+    }
+    return out;
   }
   /**
    * Seller, after a refresh: sign listings whose tokens have settled on their own output, and notice listings that
@@ -2315,6 +2350,8 @@ export class LiteWallet {
     lap('check');
     const { info, si, consignment, check, nft } = pre;
     if (nft && !this.canNft) throw new Error('This MASKED build can\'t hold NFTs yet. Update MASKED, then try again.');
+    // an NFT's files must come with its listing (its wallet refuses the NFT without them): checked before paying
+    if (nft) listingMedia(l);
     if ((await this.ownOutpoints()).has(String(info.sellerOutpoint))) throw new Error('This is your own listing.');
     // pay: one confirmed coin covering the price, the seal and the fee
     // economy rates below 1 sat/vB are fine here: the fee is worked out below, not by the RGB engine (2.29.29)
@@ -2361,7 +2398,7 @@ export class LiteWallet {
     lap('sign');
     // kept with the purchase: if a server drops it, a refresh sends it again; the wallet only expects the tokens
     // once a block server has the transaction
-    store.set(o.offerId, { role: 'buyer', assetId: o.assetId, amount: String(o.amount), priceSats: String(o.priceSats), recipientId: r.recipientId, invoice: r.invoice, txid, txHex, completed: b64(completed), posted: false, at: Date.now() });
+    store.set(o.offerId, { role: 'buyer', assetId: o.assetId, amount: String(o.amount), priceSats: String(o.priceSats), recipientId: r.recipientId, invoice: r.invoice, txid, txHex, completed: b64(completed), ...(nft ? { media: listingMedia(l) } : {}), posted: false, at: Date.now() });
     this.expectPurchases([...this.purchases, r.recipientId]);
     onStep('Sending the purchase to the Bitcoin network…');
     try { await this.broadcastAll(txHex, txid); this.spentNow(pay.coins.map((c) => c.outpoint)); } catch (err) {
@@ -2510,8 +2547,10 @@ export class LiteWallet {
     const invoiceId = invoiceIdOf(q.beneficiary, q.pk);
     const picked = await pickEndpoint(q.endpoints.length ? q.endpoints : d.transportEndpoints, invoiceId);
     const sender = newSenderKey();
-    const { key } = sharedKeys(sender.seed, q.pk);
-    await deliverConsignment({ invoice: q, picked, sender, key, consignment: unb64(e.completed) });
+    const { key, kmid } = sharedKeys(sender.seed, q.pk);
+    // an NFT's files came with its listing: posted next to its transfer, as its seller would
+    const medias = (e.media || []).map((m) => ({ digest: String(m.digest), bytes: unb64(String(m.data)) }));
+    await deliverConsignment({ invoice: q, picked, sender, key, kmid, medias, consignment: unb64(e.completed) });
   }
   /** @type {Set<string>} */
   get purchases() { return this._purchases || new Set(); }
