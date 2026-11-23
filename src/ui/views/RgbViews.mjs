@@ -227,16 +227,38 @@ export function nftTraitsCard(m) {
     <div class="trait-grid">${m.traits.map(([k, v]) => `<div class="trait"><span class="muted small">${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}</div></section>`;
 }
 
-/** The NFTs (RGB21 / UDA) this wallet holds, as a grid on Home. */
+/** The NFTs (RGB21 / UDA) this wallet holds, on Home: one row per collection, opening its own page. */
 export function nftGrid(r) {
-  const list = r.nfts?.() || [];
-  if (!list.length) return '';
-  return `<div class="list-h nft-h"><b>NFTs</b><span class="muted small">${list.length}</span></div>
-    <div class="nft-grid">${list.map((a) => {
-      const { settled: s, future: fut } = r.bal(a);
-      return `<button class="nft-tile" data-rgb="token" data-rgb-arg="${esc(a.assetId)}">${nftPic(r, a)}
-        <span class="nft-name">${esc(a.name)}</span>${fut > s ? '<span class="pend-t small">incoming</span>' : ''}</button>`;
+  const cols = r.collections?.() || [];
+  if (!cols.length) return '';
+  return `<div class="list-h nft-h"><b>NFT collections</b><span class="muted small">${cols.length}</span></div>
+    <div class="tok-list">${cols.map((c) => {
+      const incoming = c.list.filter((a) => { const { settled: s, future: f } = r.bal(a); return f > s; }).length;
+      return `<button class="tok-line coll-line" data-rgb="coll" data-rgb-arg="${esc(c.key)}">
+        <span class="coll-pics" aria-hidden="true">${c.list.slice(0, 3).map((a) => nftPic(r, a)).join('')}</span>
+        <span class="bal-txt"><b class="tk" translate="no">${esc(c.name)}</b><span>RGB NFTs${incoming ? ` · <span class="pend-t">${incoming} incoming</span>` : ''}</span></span>
+        <span class="bal-amt"><b>${c.list.length}</b><span>NFT${c.list.length === 1 ? '' : 's'}</span></span><span class="chev">›</span></button>`;
     }).join('')}</div>`;
+}
+
+/** One NFT collection of this wallet: its NFTs as a grid. */
+export class RgbCollectionView extends View {
+  render() {
+    const r = this.app.rgb, c = (r.ready && r.collections?.().find((x) => x.key === r.coll)) || null;
+    if (!c) { this.state.view = 'home'; return this.app.ui.view('home').render(); }
+    return `
+    <div class="tok-page">
+      <div class="view-head"><button class="icon-btn" data-go="home" aria-label="Back">${I.back}</button><span class="head-sp"></span></div>
+      <div class="coll-hero"><p class="tok-name" translate="no">${esc(c.name)} ${rgbBadge}</p>
+        <p class="muted small">${c.list.length} NFT${c.list.length === 1 ? '' : 's'} in this wallet</p></div>
+      <div class="nft-grid">${c.list.map((a) => {
+        const { settled: s, future: fut } = r.bal(a);
+        return `<button class="nft-tile" data-rgb="token" data-rgb-arg="${esc(a.assetId)}">${nftPic(r, a)}
+          <span class="nft-name">${esc(a.name)}</span>${fut > s ? '<span class="pend-t small">incoming</span>' : ''}</button>`;
+      }).join('')}</div>
+      <p class="info small">Anyone can make an NFT with any name. NFTs are grouped by their collection name, so check the asset ID on an NFT's page before trusting it.</p>
+    </div>`;
+  }
 }
 
 /** A token page for one RGB asset, like the BRC-20 one. */
@@ -286,16 +308,22 @@ export class RgbTokenView extends View {
     const r = this.app.rgb, { settled: s, future: fut, spendable: sp } = r.bal(a);
     return `
     <div class="tok-page">
-      <div class="view-head"><button class="icon-btn" data-go="home" aria-label="Back">${I.back}</button><span class="head-sp"></span></div>
+      <div class="view-head"><button class="icon-btn" data-rgb="coll" data-rgb-arg="${esc(a.ticker)}" aria-label="Back">${I.back}</button><span class="head-sp"></span></div>
       <div class="tok-hero nft-hero">${nftPic(r, a, true)}<p class="tok-name">${esc(a.name)} ${rgbBadge}</p>
         ${fut > s ? '<p class="pend-t small">On its way · waiting for a block</p>' : ''}</div>
       <section class="card tok-box">
-        ${s && !sp && fut <= s ? '<p class="info small">It\'s held by a transfer waiting for a block, and can be sent once it confirms.</p>' : ''}
+        ${s && !sp ? (() => {
+          const unsent = r.unsent(a.assetId).length, stuck = r.unsent(a.assetId).filter((t) => r.stranded(t)).length;
+          return unsent > stuck
+            ? `<p class="info warn small">It's held by a send the other wallet hasn't accepted yet. Nothing has been broadcast, so you can cancel it: the NFT stays here.</p>
+              <button class="btn ghost wide" data-rgb="cancelSend" ${r.busy ? 'disabled' : ''}>Cancel unsent transfer</button>`
+            : '<p class="info small">It\'s held by a transfer waiting for a block, and can be sent once it confirms.</p>';
+        })() : ''}
         <div class="tok-acts"><button class="tact" data-rgb="send" data-rgb-arg="${esc(a.assetId)}" ${sp ? '' : 'disabled'}>${I.send}<span>Send</span></button></div>
       </section>
       ${nftTraitsCard(r.nftMeta?.(a))}
       <section class="card"><div class="kv">
-        ${rowKV('Collection', esc(a.ticker))}
+        ${rowKV('Collection', `<button class="link" data-rgb="coll" data-rgb-arg="${esc(a.ticker)}" translate="no">${esc(a.ticker)}</button>`)}
         ${a.details ? rowKV('Details', esc(a.details)) : ''}
         ${rowKV('Kind', 'NFT (RGB21), one of one')}
         ${rowKV('Network', r.isMain ? 'Bitcoin mainnet · beta' : `${esc(r.profile.label)} · test`)}

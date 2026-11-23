@@ -51,6 +51,9 @@ export function rgbError(error, profile = profileOf('utexo')) {
     if (/min relay fee|mempool min fee|fee not met/i.test(reason)) return `Not sent: the network fee was too low. Pick a higher fee and try again. (${reason})`;
     return `Not sent: the Bitcoin network refused the transaction${reason ? `: ${reason}` : ` (${text})`}`;
   }
+  if (/insufficient total assignments|InsufficientAssignments/i.test(text)) {
+    return `What you're sending isn't free to move yet: the output it sits on is still tied to something else (a transfer waiting for a block, a send the other wallet hasn't accepted, an open invoice or a listing). Tap Refresh, wait for the next block, then try again. Nothing was sent. (${text})`;
+  }
   if (/insufficient ?allocation|allocation ?slots|no (colorable|available) (utxo|output)s?/i.test(text)) {
     return `RGB is still setting up. Wait for one block (about 10 minutes), then try again. (${text})`;
   }
@@ -339,6 +342,14 @@ export class WalletRgb {
   /** NFTs (RGB21 / UDA) held or on their way in. */
   nfts() { return (this.data?.groups?.uda || []).filter((a) => a?.assetId && (Number(a.balance?.future) > 0 || Number(a.balance?.settled) > 0)).map((a) => ({ ...a, nft: true, precision: 0 })); }
   isNft(a) { return !!a?.nft; }
+  /** NFTs by collection (their ticker), each sorted by number: [{ key, name, list }], the biggest collection first. */
+  collections() {
+    const num = (a) => Number((String(a.name).match(/#\s*(\d+)/) || [])[1] ?? Infinity);
+    const m = new Map();
+    for (const a of this.nfts()) { const k = String(a.ticker || '?'); if (!m.has(k)) m.set(k, []); m.get(k).push(a); }
+    return [...m].map(([key, list]) => ({ key, name: key, list: list.sort((x, y) => num(x) - num(y) || String(x.name).localeCompare(String(y.name))) }))
+      .sort((x, y) => y.list.length - x.list.length || x.key.localeCompare(y.key));
+  }
   find(id) { return this.assets().find((a) => a.assetId === id) || this.nfts().find((a) => a.assetId === id) || null; }
   /**
    * An NFT's image as a data: URL once loaded (checked against the digest in the NFT), '' while loading or when no
@@ -391,10 +402,12 @@ export class WalletRgb {
     const free = all.filter((x) => !x.coin || !locked.has(x.coin)).reduce((n, x) => n + x.amount, 0);
     const cut = (n, by) => Math.max(0, Number(n || 0) - by);
     // incoming transfers the network dropped never arrive: not counted as incoming
+    // (an NFT's assignment is 'NonFungible': its one token)
+    const units = (x) => (x === 'NonFungible' || x?.NonFungible !== undefined ? 1 : Number(x?.Fungible ?? x?.amount ?? 0));
     const gone = (this.data?.transfers?.[a.assetId] || []).filter((t) => this.isDropped(t) && String(t.status) === 'WaitingConfirmations')
-      .reduce((n, t) => n + (t.assignments || []).reduce((m, x) => m + Number(x?.Fungible ?? x?.amount ?? 0), 0), 0);
+      .reduce((n, t) => n + (t.assignments || []).reduce((m, x) => m + units(x), 0), 0);
     // and never more incoming than the waiting receives listed: the engine can count one twice (a dropped one, say)
-    const sum = (t) => (t.assignments || []).reduce((m, x) => m + Number(x?.Fungible ?? x?.amount ?? 0), 0);
+    const sum = (t) => (t.assignments || []).reduce((m, x) => m + units(x), 0);
     const visible = (this.data?.transfers?.[a.assetId] || []).filter((t) => String(t?.kind || '').startsWith('Receive') && ['WaitingCounterparty', 'WaitingConfirmations'].includes(String(t.status)) && !this.isDropped(t))
       .reduce((n, t) => n + sum(t), 0);
     const settled = cut(b.settled, d);
@@ -984,6 +997,7 @@ export class WalletRgb {
       }
       case 'mint': f.mintMode = 'rgb'; state.view = 'mint'; this.issued = null; return app.render();
       case 'token': this.asset = arg; state.view = 'rgbtok'; return app.render();
+      case 'coll': this.coll = arg; state.view = 'rgbcoll'; return app.render();
       case 'receive': f.recvKind = 'rgb'; this.fields.recvAsset = arg || ''; this.invoice = ''; state.view = 'receive'; return app.render();
       case 'send':
         this.asset = arg; this.pending = null; this.sent = null; this.fields.sendTo = ''; this.fields.sendAmt = ''; state.view = 'rgbsend';

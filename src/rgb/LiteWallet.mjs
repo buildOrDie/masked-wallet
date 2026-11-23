@@ -7,7 +7,7 @@ import * as btc from '@scure/btc-signer';
 import { hex, base64 } from '@scure/base';
 import { sha256 } from '@noble/hashes/sha256';
 import { isInvoiceV1, readInvoiceV1, invoiceIdOf, pickEndpoint, newSenderKey, sharedKeys, deliverConsignment, endpointUrl, rpc, PROXY_V1 } from './proxyV1.mjs';
-import { SEAL_SATS, SEAL_OUTPUT, SWAP_SIZE_VB, b64, buyerOutputs, outpointOf, completionBlocker, readOffer, buyerCoinFor, offerable, heldBreakdown, payoutFor, changedTerms, unb64, exactCoinFor, freeSellerCoinFor, sendCoinsFor, instantAmounts, INSTANT_SEAL_OUTPUT, INSTANT_SEAL_SATS, payCoinsFor, txVbytes, OPRET_SCRIPT, P2TR_SCRIPT, BUY_FEE_MIN, COMBINED_MAX, payCoinsForCombined } from './swap.mjs';
+import { SEAL_SATS, SEAL_OUTPUT, SWAP_SIZE_VB, b64, buyerOutputs, outpointOf, completionBlocker, readOffer, buyerCoinFor, offerable, heldBreakdown, payoutFor, changedTerms, unb64, exactCoinFor, freeSellerCoinFor, sendCoinsFor, instantAmounts, unitsOf, INSTANT_SEAL_OUTPUT, INSTANT_SEAL_SATS, payCoinsFor, txVbytes, OPRET_SCRIPT, P2TR_SCRIPT, BUY_FEE_MIN, COMBINED_MAX, payCoinsForCombined } from './swap.mjs';
 import { RGB_UTXO_SATS, RGB_KEEP_SPARE } from './config.mjs';
 import { keptFetch } from './rgbFetch.mjs';
 import { mediaStore } from './mediaStore.mjs';
@@ -771,8 +771,12 @@ export class LiteWallet {
     try { await this.wallet.sync(online); } catch { /* last known */ }
     if (store) this.syncOwnUnconfirmed(store);
     const all = this.listable(plain(this.wallet.listUnspents(false)) || []);
-    const { nia, ifa } = await this.listAssets();
-    const meta = new Map([...nia, ...ifa].map((a) => [a.assetId, { ticker: a.ticker, precision: a.precision }]));
+    const { nia, ifa, uda = [] } = await this.listAssets();
+    // (an NFT shows by its name: RATS #5)
+    /** @type {Map<string, { ticker: string, precision: number }>} */
+    const meta = new Map();
+    for (const a of [...nia, ...ifa]) meta.set(a.assetId, { ticker: a.ticker, precision: a.precision });
+    for (const a of uda) meta.set(a.assetId, { ticker: a.name || a.ticker, precision: 0 });
     // what each promised output is for
     const promised = new Map();
     try { for (const [id, e] of Object.entries(store?.all?.() || {})) if (e?.role === 'seller' && e.coin && ['moving', 'queued', 'ready', 'cancelling'].includes(e.stage)) promised.set(String(e.coin).toLowerCase(), { offerId: id, stage: e.stage === 'moving' && e.resign && e.templateTxid ? 'ready' : e.stage, assetId: e.assetId, amount: String(e.amount || ''), priceSats: String(e.priceSats || ''), waiting: e.stage === 'moving' && e.waiting ? String(e.waiting).slice(0, 240) : '' }); } catch { /* none */ }
@@ -781,7 +785,7 @@ export class LiteWallet {
     const rgb = all.map((u) => {
       const o = u.utxo?.outpoint || {};
       const op = `${String(o.txid).toLowerCase()}:${o.vout}`;
-      const tokens = (u.rgbAllocations || []).filter((a) => a.assignment?.Fungible != null).map((a) => ({ assetId: a.assetId, ticker: meta.get(a.assetId)?.ticker || '', precision: meta.get(a.assetId)?.precision ?? 0, amount: String(a.assignment.Fungible), settled: !!a.settled }));
+      const tokens = (u.rgbAllocations || []).filter((a) => unitsOf(a.assignment) != null).map((a) => ({ assetId: a.assetId, ticker: meta.get(a.assetId)?.ticker || '', precision: meta.get(a.assetId)?.precision ?? 0, amount: String(unitsOf(a.assignment)), settled: !!a.settled }));
       const p = promised.get(op);
       const invoices = Number(u.pendingBlinded || 0);
       // a plain bitcoin coin the engine lists too: it's in `coins`
