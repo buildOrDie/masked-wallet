@@ -57,3 +57,24 @@ test('a send whose finish fails drops the begun transfer, so the next try can us
   await assert.rejects(LiteWallet.prototype.endOrForget.call(me, {}, 'p'), /proxy refused/);
   assert.deepEqual(calls, []);
 });
+
+test('an NFT on its way: its verified collection\'s picture from MASKED\'s server, shown and kept only if it matches', async () => {
+  const { LiteWallet } = await import('../src/rgb/LiteWallet.mjs');
+  const { memoryMediaStore } = await import('../src/rgb/mediaStore.mjs');
+  const bytes = new Uint8Array([137, 80, 78, 71, 1, 2, 3]);
+  const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((b) => b.toString(16).padStart(2, '0')).join('');
+  const added = [];
+  const me = Object.create(LiteWallet.prototype);
+  Object.assign(me, { w: { mediaFile: () => null, addMediaFile: (b) => { added.push(b.length); return digest; } }, media: memoryMediaStore() });
+  Object.defineProperty(me, 'engineV1', { value: true });
+  const fetchOk = async () => new Response(bytes);
+  const src = await me.nftImage({ digest, mime: 'image/png' }, fetchOk, { url: 'https://scan.maskedwallet.com/nft-media/signet/rats2/5' });
+  assert.match(src, /^data:image\/png;base64,/);
+  assert.deepEqual(added, [7]);
+  assert.equal((await me.media.get(digest)).length, 7, 'kept: shown at once next time');
+  // another file than the NFT's: not shown; and no slow asks to old transfer servers with this engine
+  let asked = 0;
+  const other = async () => { asked++; return new Response(new Uint8Array([9])); };
+  assert.equal(await me.nftImage({ digest, mime: 'image/png' }, other, { url: 'https://x/1' }), null);
+  assert.equal(asked, 1);
+});

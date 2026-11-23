@@ -120,7 +120,12 @@ export function trustMap(list) {
   for (const c of Array.isArray(list) ? list : []) {
     const slug = String(c?.slug || ''), name = String(c?.name || c?.ticker || '').slice(0, 40);
     if (!/^[a-z0-9-]{2,31}$/.test(slug) || !name) continue;
-    for (const id of Array.isArray(c.assetIds) ? c.assetIds : []) if (typeof id === 'string' && id.startsWith('rgb:')) m.set(id, { slug, name });
+    const ids = Array.isArray(c.assetIds) ? c.assetIds : [], ns = Array.isArray(c.ns) ? c.ns : [];
+    ids.forEach((id, k) => {
+      if (typeof id !== 'string' || !id.startsWith('rgb:')) return;
+      const n = Number(ns[k]);
+      m.set(id, { slug, name, ...(Number.isInteger(n) && n > 0 ? { n } : {}) });
+    });
   }
   return m;
 }
@@ -130,7 +135,7 @@ export class WalletRgb {
     this.app = app;
     this.service = null;
     /** @type {Map<string, string>} NFT images by digest: data: URL, '' while loading */
-    /** @type {Map<string, string | { loading?: boolean, failedAt?: number }>} picture digest → data URL, or its state */
+    /** @type {Map<string, string | { loading?: boolean, failedAt?: number, data?: any }>} picture digest → data URL, or its state */
     this.imgs = new Map();
     /** @type {Map<string, any>} */ this.metas = new Map();
     this.data = null;
@@ -401,11 +406,16 @@ export class WalletRgb {
     if (!d) return '';
     const hit = this.imgs.get(d);
     if (typeof hit === 'string') return hit;
-    // loading, or not found lately: no new try on every redraw (each one asked every transfer server again)
-    if (hit && (hit.loading || Date.now() - Number(hit.failedAt || 0) < 60_000)) return '';
+    // loading, or not found lately: no new try on every redraw. Tried again after a refresh (the NFT's own copy comes
+    // with its transfer) or after 30 seconds
+    if (hit && (hit.loading || (hit.data === this.data && Date.now() - Number(hit.failedAt || 0) < 30_000))) return '';
     this.imgs.set(d, { loading: true });
-    const failed = () => this.imgs.set(d, { failedAt: Date.now() });
-    Promise.resolve(this.service?.nftImage?.(a.media)).then((url) => { if (url) { this.imgs.set(d, url); this.redrawSoon(); } else failed(); }, failed);
+    const failed = () => this.imgs.set(d, { failedAt: Date.now(), data: this.data });
+    // a verified collection's picture from MASKED's server when this wallet doesn't hold the NFT's copy yet (an NFT
+    // on its way): the wallet shows it only if it matches the NFT's fingerprint
+    const v = this.nftTrust().get(a.assetId), base = this.profile?.nftMedia;
+    const url = v?.n && base ? `${base}/${v.slug}/${v.n}` : '';
+    Promise.resolve(this.service?.nftImage?.(a.media, url ? { url } : undefined)).then((src) => { if (src) { this.imgs.set(d, src); this.redrawSoon(); } else failed(); }, failed);
     return '';
   }
   /** One redraw for pictures that arrive together, not one per picture. */

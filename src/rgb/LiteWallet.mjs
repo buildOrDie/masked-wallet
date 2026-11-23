@@ -308,8 +308,10 @@ export class LiteWallet {
    * An NFT's image: asked from the transfer servers by its digest, and kept only if its SHA-256 is that digest (the
    * contract commits to it, so a server can't swap the picture). A data: URL, or null when no server has it.
    */
-  async nftImage(media, fetchFn = fetch) {
+  /** @param {{ digest: string, mime: string }} media @param {typeof fetch} [fetchFn] @param {{ url?: string }} [o] */
+  async nftImage(media, fetchFn = fetch, { url = '' } = {}) {
     if (!media?.digest || !/^[0-9a-f]{64}$/.test(media.digest) || !IMAGE_MIME.test(media.mime)) return null;
+    const timed = (ms) => (typeof AbortSignal?.timeout === 'function' ? AbortSignal.timeout(ms) : undefined);
     // the engine's own copy (2.32+): the picture came with the NFT, encrypted for this wallet, and was checked
     // against the contract then; checked again here
     try {
@@ -320,7 +322,24 @@ export class LiteWallet {
         if (sum === media.digest) return `data:${media.mime};base64,${base64.encode(bytes)}`;
       }
     } catch { /* the transfer servers, below */ }
-    // older transfer servers (protocol 0.2) served pictures by digest
+    // a verified collection's picture from MASKED's server (an NFT still on its way): kept like the NFT's own copy
+    // once it matches the fingerprint the NFT carries
+    if (url) {
+      try {
+        const r = await fetchFn(url, { signal: timed(8000) });
+        if (r.ok) {
+          const bytes = new Uint8Array(await r.arrayBuffer());
+          const sum = hex.encode(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)));
+          if (sum === media.digest) {
+            try { if (typeof this.w?.addMediaFile === 'function' && this.w.addMediaFile(bytes) === sum) { await this.media.put(sum, bytes); (this.mediaKept ??= new Set()).add(sum); } } catch { /* shown, not kept */ }
+            return `data:${media.mime};base64,${base64.encode(bytes)}`;
+          }
+        }
+      } catch { /* the transfer servers, below */ }
+    }
+    // older transfer servers (protocol 0.2) served pictures by digest: not the RGB 0.11.2 engine's (its pictures come
+    // with each transfer), so not asked then (each ask was a slow failure before the picture showed)
+    if (this.engineV1) return null;
     for (const e of this.transports) {
       try {
         const j = await rpc(endpointUrl(e), 'media.get', { attachment_id: media.digest }, fetchFn);
