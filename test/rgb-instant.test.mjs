@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { LiteWallet, outspendCacheClear } from '../src/rgb/LiteWallet.mjs';
-import { exactCoinFor, freeSellerCoinFor, b64 } from '../src/rgb/swap.mjs';
+import { exactCoinFor, freeSellerCoinFor, b64, unb64 } from '../src/rgb/swap.mjs';
 
 const ASSET = 'rgb:2dkSTbr-jFhznbPmo-TQ3Kdm9-SWcFsJA-bFZa5Ef-Q8Fy8oo';
 const T = (c) => c.repeat(64);
@@ -227,6 +227,53 @@ test('co-signed claim never sent by the launchpad: given up after 30 minutes, no
   b.mem[offer.offerId].at -= 31 * 60_000;
   assert.equal(await b.w.instantPost(offer.offerId, b.store), false);
   assert.match(b.mem[offer.offerId].failed, /never completed this claim: nothing was paid/);
+});
+
+test('a launchpad claim minted by this wallet: built, minted and signed here, nothing broadcast; the NFT taken in once the launchpad sent it', async () => {
+  const chain = fakeChain();
+  const coin = `${T('d')}:1`, claimCoin = `${T('e')}:1`;
+  chain.outs[coin] = { sats: 30000, script: '5120buy', tx: 'dd' };
+  chain.outs[claimCoin] = { sats: 1000, script: '5120' + 'cc'.repeat(32), tx: 'ee' };
+  const b = wallet({ name: 'claimer', lib: fakeLib(), chain, coins: [{ outpoint: coin, txout: { value: 30000 }, is_spent: false }] });
+  let built = null; const adopted = [];
+  const make = b.w.lib.WasmWallet.newSwapPsbt;
+  b.w.lib.WasmWallet.newSwapPsbt = (ins, outs) => { built = { ins, outs }; return make(ins, outs); };
+  Object.assign(b.w.w, {
+    coloredAddress: () => 'tb1pdt26ymk4j6qf0lmhhsvcfru4ma83kefwecqqay3hmzsvuyfc3feq3efjan',
+    udaGenesisFor: (ticker, name, details, precision, media, mime, atts, txid, vout) => { assert.equal(vout, 3); assert.equal(txid, T('7')); return { assetId: 'rgb:minted-here-aaaaaaaaaaaaa', consignment: new TextEncoder().encode(`genesis:${name}:${media.length}:${atts.length}`) }; },
+    adoptUdaGenesis: (g, files) => { if (!chain.synced) throw new Error('the claim\'s output isn\'t in this wallet yet: try again after the next refresh'); adopted.push([new TextDecoder().decode(g), files.length]); return {}; },
+  });
+  const listing = { mint: {
+    recipe: { ticker: 'FROG', name: 'Frogs #4', details: 'Hat: Cap', precision: 0 },
+    media: { mime: 'image/png', data: b64(new Uint8Array([137, 80, 78, 71, 1])) },
+    attachments: [{ mime: 'application/json', data: b64(new TextEncoder().encode('{"traits":{"Hat":"Cap"}}')) }],
+    coin: { outpoint: claimCoin, sats: 1000, script: '5120' + 'cc'.repeat(32) },
+    payout: { script: '5120' + 'aa'.repeat(32), sats: 2000 }, back: { script: '5120' + 'cc'.repeat(32), sats: 1000 }, sealVout: 3, sealSats: 330,
+  } };
+  const offer = { offerId: 'c0123456789aa', amount: '1', priceSats: '2000', state: 'OPEN' };
+  const r = await b.w.instantBuy({ offerId: offer.offerId, network: 'Signet', offer, listing, feeRate: 2 }, b.store);
+  assert.equal(r.txid, T('7'));
+  assert.equal(r.assetId, 'rgb:minted-here-aaaaaaaaaaaaa');
+  assert.equal(new TextDecoder().decode(unb64(r.mint.genesis)), 'genesis:Frogs #4:5:1');
+  // the claim: this wallet's coin first, the launchpad's claim coin second; the price, the coin back, the NFT's output
+  assert.deepEqual(built.ins.map((i) => i.outpoint), [coin, claimCoin]);
+  assert.deepEqual(built.outs.slice(0, 3).map((o) => [o.script, o.sats]), [['5120' + 'aa'.repeat(32), 2000], ['5120' + 'cc'.repeat(32), 1000], [built.outs[2].script, 330]]);
+  assert.match(built.outs[2].script, /^5120/);
+  assert.equal(chain.posted.length, 0, 'nothing goes out from the wallet: the launchpad signs last');
+  // asked again (a reload): the same claim
+  assert.equal((await b.w.instantBuy({ offerId: offer.offerId, network: 'Signet', offer, listing }, b.store)).mint.tx, r.mint.tx);
+  // a claim that pays another price is refused
+  await assert.rejects(b.w.instantBuy({ offerId: 'c0123456789ab', network: 'Signet', offer: { ...offer, offerId: 'c0123456789ab', priceSats: '1500' }, listing }, b.store), /another amount than its price/);
+  // not sent yet: nothing taken in
+  assert.equal(await b.w.instantPost(offer.offerId, b.store), false);
+  // sent by the launchpad, the output not synced yet: later
+  chain.posted.push('the launchpad\'s broadcast');
+  assert.equal(await b.w.instantPost(offer.offerId, b.store), false);
+  chain.synced = true;
+  assert.equal(await b.w.instantPost(offer.offerId, b.store), true);
+  assert.deepEqual(adopted, [['genesis:Frogs #4:5:1', 2]]);
+  assert.equal(b.mem[offer.offerId].posted, true);
+  assert.equal(b.mem[offer.offerId].genesis, undefined, 'its files and contract aren\'t kept twice');
 });
 
 test('without the listing engine, Instant calls say MASKED needs an update', async () => {

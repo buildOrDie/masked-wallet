@@ -11,10 +11,38 @@ index 884d686..e2896b5 100644
  rgb-strict-encoding = { version = "=1.0.5", default-features = false, features = [
      "bitcoin",
 diff --git a/bindings/wasm/src/lib.rs b/bindings/wasm/src/lib.rs
-index 51b6efd..73c1194 100644
+index 51b6efd..01db1d8 100644
 --- a/bindings/wasm/src/lib.rs
 +++ b/bindings/wasm/src/lib.rs
-@@ -179,6 +179,81 @@ impl WasmWallet {
+@@ -77,6 +77,27 @@ pub fn init() {
+     });
+ }
+ 
++/// `[{ bytes: Uint8Array, mime }]` (an NFT's attachments) as (bytes, mime) pairs.
++fn files_of(list_js: &JsValue) -> Result<Vec<(Vec<u8>, String)>, JsValue> {
++    let mut out = vec![];
++    if list_js.is_undefined() || list_js.is_null() {
++        return Ok(out);
++    }
++    for f in js_sys::Array::from(list_js).iter() {
++        let bytes = js_sys::Reflect::get(&f, &"bytes".into())
++            .ok()
++            .filter(|b| b.is_instance_of::<js_sys::Uint8Array>())
++            .map(|b| js_sys::Uint8Array::from(b).to_vec())
++            .ok_or_else(|| JsValue::from_str("Invalid attachments: bytes must be a Uint8Array"))?;
++        let mime = js_sys::Reflect::get(&f, &"mime".into())
++            .ok()
++            .and_then(|m| m.as_string())
++            .ok_or_else(|| JsValue::from_str("Invalid attachments: mime must be text"))?;
++        out.push((bytes, mime));
++    }
++    Ok(out)
++}
++
+ #[wasm_bindgen(js_name = "generateKeys")]
+ pub fn generate_keys(network: &str) -> Result<JsValue, JsValue> {
+     let bitcoin_network = network
+@@ -179,6 +200,161 @@ impl WasmWallet {
          to_js(&asset)
      }
  
@@ -31,6 +59,86 @@ index 51b6efd..73c1194 100644
 +    /// or neither. `attachments_js` is an array of `{ bytes: Uint8Array, mime }`: the token's
 +    /// other files (e.g. its `metadata.json`), 20 at most. The contract commits to each file's
 +    /// SHA-256 digest; the wallet keeps the bytes and posts them, encrypted, with each transfer.
++    /// A launchpad NFT minted by its claimer onto output `vout` of its claim transaction `txid`
++    /// (not broadcast yet): `{ assetId, consignment: Uint8Array }`. Nothing in the wallet changes
++    /// until `adoptUdaGenesis`.
++    #[wasm_bindgen(js_name = "udaGenesisFor")]
++    #[allow(clippy::too_many_arguments)]
++    pub fn uda_genesis_for(
++        &self,
++        ticker: &str,
++        name: &str,
++        details: Option<String>,
++        precision: u8,
++        media: Option<Vec<u8>>,
++        mime: Option<String>,
++        attachments_js: JsValue,
++        txid: &str,
++        vout: u32,
++    ) -> Result<JsValue, JsValue> {
++        let media = match (media, mime) {
++            (Some(bytes), Some(mime)) => Some((bytes, mime)),
++            (None, None) => None,
++            _ => return Err(JsValue::from_str("Give the media and its mime type together.")),
++        };
++        let attachments = files_of(&attachments_js)?;
++        let (asset_id, consignment) = self
++            .inner
++            .borrow()
++            .uda_genesis_for(ticker.to_string(), name.to_string(), details, precision, media, attachments, txid.to_string(), vout)
++            .map_err(|e| JsValue::from_str(&e.to_string()))?;
++        let out = js_sys::Object::new();
++        js_sys::Reflect::set(&out, &"assetId".into(), &JsValue::from_str(&asset_id))?;
++        js_sys::Reflect::set(&out, &"consignment".into(), &js_sys::Uint8Array::from(&consignment[..]).into())?;
++        Ok(out.into())
++    }
++
++    /// Take in an NFT minted with `udaGenesisFor` once its claim transaction is out and the wallet
++    /// sees its output. `files`: Uint8Array[] (its picture, attachments). Errors until the output is known.
++    #[wasm_bindgen(js_name = "adoptUdaGenesis")]
++    pub fn adopt_uda_genesis(&self, consignment: Vec<u8>, files_js: JsValue) -> Result<JsValue, JsValue> {
++        let mut files = vec![];
++        if !(files_js.is_undefined() || files_js.is_null()) {
++            for f in js_sys::Array::from(&files_js).iter() {
++                if f.is_instance_of::<js_sys::Uint8Array>() {
++                    files.push(js_sys::Uint8Array::from(f).to_vec());
++                }
++            }
++        }
++        let asset = self
++            .inner
++            .borrow_mut()
++            .adopt_uda_genesis(consignment, files)
++            .map_err(|e| JsValue::from_str(&e.to_string()))?;
++        to_js(&asset)
++    }
++
++    /// A launchpad's check of an NFT its claimer minted: `recipe` `{ ticker, name, details?, precision }`,
++    /// the picture and attachments `[{ bytes, mime }]`, on output `vout` of `txid`. Returns its asset ID.
++    #[wasm_bindgen(js_name = "checkUdaGenesis")]
++    #[allow(clippy::too_many_arguments)]
++    pub fn check_uda_genesis(
++        consignment: Vec<u8>,
++        network: &str,
++        recipe_js: JsValue,
++        media: Option<Vec<u8>>,
++        mime: Option<String>,
++        attachments_js: JsValue,
++        txid: &str,
++        vout: u32,
++    ) -> Result<String, JsValue> {
++        let network = network.parse::<rgb_lib_wasm::BitcoinNetwork>().map_err(|e| JsValue::from_str(&e.to_string()))?;
++        let recipe: rgb_lib_wasm::wallet::rust_only::UdaRecipeIn = serde_wasm_bindgen::from_value(recipe_js).map_err(|e| JsValue::from_str(&format!("Invalid recipe: {e}")))?;
++        let media = match (media, mime) {
++            (Some(bytes), Some(mime)) => Some((bytes, mime)),
++            (None, None) => None,
++            _ => return Err(JsValue::from_str("Give the media and its mime type together.")),
++        };
++        let attachments = files_of(&attachments_js)?;
++        rgb_lib_wasm::wallet::rust_only::check_uda_genesis(&consignment, network, recipe, media, attachments, txid, vout)
++            .map_err(|e| JsValue::from_str(&e.to_string()))
++    }
++
 +    #[wasm_bindgen(js_name = "issueAssetUda")]
 +    #[allow(clippy::too_many_arguments)]
 +    pub fn issue_asset_uda(
@@ -96,7 +204,7 @@ index 51b6efd..73c1194 100644
      /// Issue a new IFA (Inflatable Fungible Asset).
      ///
      /// `amounts_js` is a JS array of u64 values.
-@@ -467,6 +542,15 @@ impl WasmWallet {
+@@ -467,6 +643,15 @@ impl WasmWallet {
      }
  
      /// Return a new Bitcoin address from the vanilla wallet.
@@ -112,7 +220,7 @@ index 51b6efd..73c1194 100644
      #[wasm_bindgen(js_name = "getAddress")]
      pub fn get_address(&self) -> Result<String, JsValue> {
          self.inner
-@@ -635,6 +719,396 @@ impl WasmWallet {
+@@ -635,6 +820,396 @@ impl WasmWallet {
          to_js(&result)
      }
  
@@ -509,7 +617,7 @@ index 51b6efd..73c1194 100644
      /// Send RGB assets (end): broadcast a signed PSBT. Returns an OperationResult JS object.
      #[wasm_bindgen(js_name = "sendEnd")]
      pub async fn send_end(
-@@ -763,6 +1237,56 @@ impl WasmWallet {
+@@ -763,6 +1338,56 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -566,7 +674,7 @@ index 51b6efd..73c1194 100644
      /// Drain all wallet funds (end): broadcast a signed PSBT. Returns the txid string.
      #[wasm_bindgen(js_name = "drainToEnd")]
      pub async fn drain_to_end(
-@@ -1074,6 +1598,22 @@ impl WasmWallet {
+@@ -1074,6 +1699,22 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -589,7 +697,7 @@ index 51b6efd..73c1194 100644
      /// Check if the wallet needs a backup. Returns true if modified since last backup.
      #[wasm_bindgen(js_name = "backupInfo")]
      pub fn backup_info(&self) -> Result<bool, JsValue> {
-@@ -1217,7 +1757,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
+@@ -1217,7 +1858,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
  /// Works before the witness transaction is broadcast. Takes the raw consignment
  /// bytes (strict-encoded, not base64), the witness transaction ID, and the Bitcoin network.
  ///
@@ -599,7 +707,7 @@ index 51b6efd..73c1194 100644
  #[wasm_bindgen(js_name = "validateConsignmentOffchain")]
  pub fn validate_consignment_offchain(
      consignment_bytes: &[u8],
-@@ -1235,3 +1776,43 @@ pub fn validate_consignment_offchain(
+@@ -1235,3 +1877,43 @@ pub fn validate_consignment_offchain(
      .map_err(|e| JsValue::from_str(&e.to_string()))?;
      to_js(&result)
  }
@@ -621,7 +729,7 @@ index 51b6efd..73c1194 100644
 +/// MASKED: the features of this engine build.
 +#[wasm_bindgen(js_name = "engineFeatures")]
 +pub fn engine_features() -> Vec<String> {
-+    vec!["swap".into(), "presign".into(), "proxy-v1".into(), "p2p-swap".into(), "output-locks".into(), "uda".into(), "cosign".into(), "legacy-migration".into(), "legacy-consignments".into(), "legacy-backup".into()]
++    vec!["swap".into(), "presign".into(), "proxy-v1".into(), "p2p-swap".into(), "output-locks".into(), "uda".into(), "cosign".into(), "uda-claim".into(), "legacy-migration".into(), "legacy-consignments".into(), "legacy-backup".into()]
 +}
 +
 +#[wasm_bindgen(js_name = "inspectSwapConsignment")]
@@ -727,9 +835,18 @@ index 94bd041..cb420e1 100644
 +    }
 +}
 diff --git a/src/lib.rs b/src/lib.rs
-index ae9e92a..524d4ad 100644
+index ae9e92a..86eb22b 100644
 --- a/src/lib.rs
 +++ b/src/lib.rs
+@@ -43,7 +43,7 @@ pub use bdk_wallet::bitcoin;
+ pub use rgbinvoice::RgbTransport;
+ pub use rgbstd::{
+     ChainNet, ContractId, Txid as RgbTxid,
+-    containers::{ConsignmentExt, Fascia, FileContent, Transfer as RgbTransfer},
++    containers::{Consignment as RgbConsignment, ConsignmentExt, Fascia, FileContent, Transfer as RgbTransfer},
+     indexers::AnyResolver,
+     persistence::UpdateRes,
+     schema::SchemaId,
 @@ -149,7 +149,7 @@ use rand::{Rng, TryRng, distr::Alphanumeric, rngs::SysRng};
  use reqwest::{Client as RestClient, header::CONTENT_TYPE, multipart};
  use rgbinvoice::{AddressPayload, Beneficiary, RgbInvoice, RgbInvoiceBuilder, XChainNet};
@@ -1597,7 +1714,7 @@ index c5c45b2..d793073 100644
  pub(crate) mod offline;
  #[cfg(feature = "esplora")]
 diff --git a/src/wallet/offline.rs b/src/wallet/offline.rs
-index a3a9f46..fcac33d 100644
+index a3a9f46..9cff31a 100644
 --- a/src/wallet/offline.rs
 +++ b/src/wallet/offline.rs
 @@ -37,7 +37,13 @@ pub(crate) const CONFIRMATION_MARGIN_SECS: u32 = 86400;
@@ -1911,7 +2028,7 @@ index a3a9f46..fcac33d 100644
          allocatable.sort_by_key(|t| t.rgb_allocations.len() + t.pending_blinded as usize);
          match allocatable.first() {
              Some(mut selected) => {
-@@ -2597,6 +2816,289 @@ impl Wallet {
+@@ -2597,6 +2816,410 @@ impl Wallet {
          Ok(asset)
      }
  
@@ -1956,6 +2073,127 @@ index a3a9f46..fcac33d 100644
 +            .map(|c| c.token_data());
 +        drop(runtime);
 +        Ok(Some(token?))
++    }
++
++    /// MASKED: a launchpad NFT minted by its claimer, onto output `vout` of its claim transaction
++    /// `txid` (not broadcast yet): returns its asset ID and its contract (genesis) consignment. Nothing
++    /// in this wallet changes: once the claim's transaction is out, [`Self::adopt_uda_genesis`] takes
++    /// the NFT in. The launchpad checks the contract against its recipe ([`check_uda_genesis`]) before
++    /// it signs the claim, so only that contract is the collection's.
++    #[allow(clippy::too_many_arguments)]
++    pub fn uda_genesis_for(
++        &self,
++        ticker: String,
++        name: String,
++        details: Option<String>,
++        precision: u8,
++        media: Option<(Vec<u8>, String)>,
++        attachments: Vec<(Vec<u8>, String)>,
++        txid: String,
++        vout: u32,
++    ) -> Result<(String, Vec<u8>), Error> {
++        self.check_schema_support(&AssetSchema::Uda)?;
++        let txid = RgbTxid::from_str(&txid).map_err(|_| Error::Internal { details: s!("bad txid") })?;
++        let seal = BlindSeal::new_random(txid, vout);
++        let recipe = UdaRecipe { ticker, name, details, precision, media, attachments };
++        let valid = build_uda_genesis(self.chain_net(), &recipe, seal, now().unix_timestamp())?;
++        let asset_id = valid.contract_id().to_string();
++        let mut bytes = vec![];
++        valid.into_consignment().save(&mut bytes).map_err(|e| Error::Internal { details: e.to_string() })?;
++        Ok((asset_id, bytes))
++    }
++
++    /// MASKED: take in an NFT this wallet minted with [`Self::uda_genesis_for`] once its claim
++    /// transaction is out and the wallet sees its output: the contract, the asset and the NFT on
++    /// that output. `files`: the NFT's picture and attachments (kept when they match). Errors while
++    /// the output isn't known yet (try again after the next sync); a second call returns the asset.
++    pub fn adopt_uda_genesis(&mut self, consignment: Vec<u8>, files: Vec<Vec<u8>>) -> Result<AssetUDA, Error> {
++        self.check_schema_support(&AssetSchema::Uda)?;
++        let contract = RgbConsignment::<false>::load(&consignment[..]).map_err(|e| Error::Internal { details: format!("can't read the NFT's contract: {e}") })?;
++        if contract.transfer || !contract.bundles.is_empty() {
++            return Err(Error::Internal { details: s!("not a newly minted NFT") });
++        }
++        let (txid, vout) = uda_genesis_seal(contract.genesis())?;
++        let contract_id = contract.contract_id();
++        let asset_id = contract_id.to_string();
++        if let Ok(existing) = self.database.check_asset_exists(asset_id.clone()) {
++            return AssetUDA::get_asset_details(self, &existing, None, None, None, None, None, None);
++        }
++        let db_data = self.database.get_db_data(false)?;
++        let txo = db_data
++            .txos
++            .iter()
++            .find(|t| t.txid == txid && t.vout == vout)
++            .cloned()
++            .ok_or(Error::Internal { details: s!("the claim's output isn't in this wallet yet: try again after the next refresh") })?;
++        let validation_config = ValidationConfig { chain_net: self.chain_net(), ..Default::default() };
++        let valid = contract
++            .validate(&UniqueDigitalAsset::schema_rules(), &DumbResolver, &validation_config)
++            .map_err(|e| Error::Internal { details: format!("the NFT's contract is not valid: {e:?}") })?;
++        let created_at = valid.genesis.timestamp;
++        let mut runtime = self.rgb_runtime()?;
++        self.import_missing_schemas(&mut runtime)?;
++        runtime.import_contract(valid, &DumbResolver).map_err(|e| Error::Internal { details: e.to_string() })?;
++        let wrapper = runtime.contract_wrapper::<UniqueDigitalAsset>(contract_id)?;
++        let spec = wrapper.spec();
++        let token = wrapper.token_data();
++        drop(wrapper);
++        drop(runtime);
++        // the NFT's files: kept when one is the picture's or an attachment's
++        let wanted: Vec<String> = token.media.iter().chain(token.attachments.values()).map(|a| hex::encode(a.digest)).collect();
++        for bytes in files {
++            let digest = hex::encode(<[u8; 32]>::from(Sha256::digest(&bytes)));
++            if wanted.contains(&digest) {
++                self.media_files.insert(digest, bytes);
++            }
++        }
++        let media_idx = match &token.media {
++            Some(a) => Some(self.get_or_insert_media(hex::encode(a.digest), a.ty.to_string())?),
++            None => None,
++        };
++        let asset_data = LocalAssetData {
++            name: spec.name().to_string(),
++            precision: spec.precision.into(),
++            ticker: Some(spec.ticker().to_string()),
++            details: spec.details().map(|d| d.to_string()),
++            media_idx,
++            initial_supply: 1,
++            max_supply: None,
++            known_circulating_supply: None,
++            reject_list_url: None,
++            linked_from_contract: None,
++        };
++        let added_at = now().unix_timestamp();
++        let asset = self.add_asset_to_db(asset_id.clone(), &AssetSchema::Uda, Some(created_at), added_at, asset_data)?;
++        let batch_transfer_idx = self.database.set_batch_transfer(DbBatchTransferActMod {
++            status: ActiveValue::Set(TransferStatus::Settled),
++            expiration: ActiveValue::Set(None),
++            created_at: ActiveValue::Set(added_at),
++            min_confirmations: ActiveValue::Set(0),
++            ..Default::default()
++        })?;
++        let asset_transfer_idx = self.database.set_asset_transfer(DbAssetTransferActMod {
++            user_driven: ActiveValue::Set(true),
++            batch_transfer_idx: ActiveValue::Set(batch_transfer_idx),
++            asset_id: ActiveValue::Set(Some(asset_id)),
++            ..Default::default()
++        })?;
++        self.database.set_transfer(DbTransferActMod {
++            asset_transfer_idx: ActiveValue::Set(asset_transfer_idx),
++            incoming: ActiveValue::Set(true),
++            ..Default::default()
++        })?;
++        self.database.set_coloring(DbColoringActMod {
++            txo_idx: ActiveValue::Set(txo.idx),
++            asset_transfer_idx: ActiveValue::Set(asset_transfer_idx),
++            r#type: ActiveValue::Set(ColoringType::Issue),
++            assignment: ActiveValue::Set(Assignment::NonFungible),
++            ..Default::default()
++        })?;
++        let asset = AssetUDA::get_asset_details(self, &asset, None, None, None, None, None, None)?;
++        self.update_backup_info(false)?;
++        self.queue_save()?;
++        Ok(asset)
 +    }
 +
 +    /// Issue a new RGB UDA asset (an NFT, RGB21) with the provided `ticker`, `name`, optional
@@ -2201,7 +2439,7 @@ index a3a9f46..fcac33d 100644
      /// Finalize a PSBT, optionally providing BDK sign options to tweak the behavior of the
      /// finalizer.
      pub fn finalize_psbt(
-@@ -2618,7 +3120,7 @@ impl Wallet {
+@@ -2618,7 +3241,7 @@ impl Wallet {
          Ok(psbt.to_string())
      }
  
@@ -2210,7 +2448,7 @@ index a3a9f46..fcac33d 100644
          let sign_options = sign_options.unwrap_or_default();
          let [colored, vanilla] = &self.signers;
          self.bdk_wallet
-@@ -2877,6 +3379,7 @@ impl Wallet {
+@@ -2877,6 +3500,7 @@ impl Wallet {
  
          let assets = self.database.iter_assets()?;
          let mut nia = None;
@@ -2218,7 +2456,7 @@ index a3a9f46..fcac33d 100644
          let mut ifa = None;
          let mut bfa = None;
          for schema in filter_asset_schemas {
-@@ -2901,6 +3404,26 @@ impl Wallet {
+@@ -2901,6 +3525,26 @@ impl Wallet {
                              .collect::<Result<Vec<AssetNIA>, Error>>()?,
                      );
                  }
@@ -2245,7 +2483,7 @@ index a3a9f46..fcac33d 100644
                  AssetSchema::Ifa => {
                      ifa = Some(
                          assets
-@@ -2945,7 +3468,7 @@ impl Wallet {
+@@ -2945,7 +3589,7 @@ impl Wallet {
          }
  
          info!(self.logger, "List assets completed");
@@ -2254,7 +2492,7 @@ index a3a9f46..fcac33d 100644
      }
  
      pub(crate) fn sync_if_requested(
-@@ -3877,6 +4400,17 @@ impl Wallet {
+@@ -3877,6 +4521,17 @@ impl Wallet {
          Ok(address.to_string())
      }
  
@@ -2272,7 +2510,7 @@ index a3a9f46..fcac33d 100644
      /// Rotate the pinned address for the given keychain.
      ///
      /// Only meaningful when `reuse_addresses` is `true`. Increments the pinned derivation
-@@ -4019,6 +4553,7 @@ impl Wallet {
+@@ -4019,6 +4674,7 @@ impl Wallet {
              bdk_changeset: self.bdk_database.get_data().clone(),
              transfer_artifacts: self.transfer_artifacts.clone(),
              received_consignments: self.received_consignments.clone(),
@@ -2280,7 +2518,7 @@ index a3a9f46..fcac33d 100644
              received_consignment_meta: self.received_consignment_meta.clone(),
              received_signed_txs: self.received_signed_txs.clone(),
              received_mints: self.received_mints.clone(),
-@@ -4116,6 +4651,7 @@ impl Wallet {
+@@ -4116,6 +4772,7 @@ impl Wallet {
  
          // Restore received consignments
          self.received_consignments = snapshot.received_consignments;
@@ -2288,7 +2526,7 @@ index a3a9f46..fcac33d 100644
          self.received_consignment_meta = snapshot.received_consignment_meta;
          self.received_signed_txs = snapshot.received_signed_txs;
          self.received_mints = snapshot.received_mints;
-@@ -4125,7 +4661,11 @@ impl Wallet {
+@@ -4125,7 +4782,11 @@ impl Wallet {
  
          *self.rgb_stock.borrow_mut() = Some(stock);
  
@@ -2301,7 +2539,7 @@ index a3a9f46..fcac33d 100644
      }
  }
  
-@@ -4203,6 +4743,7 @@ pub(crate) mod address_reuse_tests {
+@@ -4203,6 +4864,7 @@ pub(crate) mod address_reuse_tests {
              transfer_artifacts: HashMap::new(),
              #[cfg(feature = "esplora")]
              received_consignments: HashMap::new(),
@@ -2309,7 +2547,7 @@ index a3a9f46..fcac33d 100644
              #[cfg(feature = "esplora")]
              received_consignment_meta: HashMap::new(),
              #[cfg(feature = "esplora")]
-@@ -4215,6 +4756,18 @@ pub(crate) mod address_reuse_tests {
+@@ -4215,6 +4877,18 @@ pub(crate) mod address_reuse_tests {
              rgb_stock: std::rc::Rc::new(std::cell::RefCell::new(None)),
              vss_client: None,
              last_vss_backup_error: std::cell::RefCell::new(None),
@@ -2328,8 +2566,111 @@ index a3a9f46..fcac33d 100644
          }
      }
  
+@@ -4271,6 +4945,102 @@ pub(crate) mod address_reuse_tests {
+     }
+ }
+ 
++
++/// MASKED: what a launchpad NFT is made of (its collection's recipe for one NFT).
++pub(crate) struct UdaRecipe {
++    pub(crate) ticker: String,
++    pub(crate) name: String,
++    pub(crate) details: Option<String>,
++    pub(crate) precision: u8,
++    pub(crate) media: Option<(Vec<u8>, String)>,
++    pub(crate) attachments: Vec<(Vec<u8>, String)>,
++}
++
++fn uda_attachment(bytes: &[u8], mime: &str) -> Result<Attachment, Error> {
++    if bytes.is_empty() {
++        return Err(Error::EmptyFile { file_path: s!("media") });
++    }
++    let mime = mime.trim().to_ascii_lowercase();
++    if !mime.split_once('/').is_some_and(|(t, st)| !t.is_empty() && !st.is_empty() && !st.contains('/')) {
++        return Err(Error::InvalidAttachments { details: format!("invalid media type '{mime}'") });
++    }
++    let digest: [u8; 32] = Sha256::digest(bytes).into();
++    // MediaType keeps a &'static str: one small leak per file
++    let ty: &'static str = Box::leak(mime.into_boxed_str());
++    Ok(Attachment { ty: MediaType::with(ty), digest: digest.into() })
++}
++
++/// MASKED: an NFT's contract (genesis) from its recipe, on `seal`, at `timestamp`: the same recipe,
++/// seal and time always make the same contract (its ID), which is how a launchpad checks one.
++pub(crate) fn build_uda_genesis(chain_net: ChainNet, r: &UdaRecipe, seal: BlindSeal<RgbTxid>, timestamp: i64) -> Result<ValidContract, Error> {
++    if r.ticker.to_ascii_uppercase() != r.ticker {
++        return Err(Error::InvalidTicker { details: s!("ticker needs to be all uppercase") });
++    }
++    if r.attachments.len() > MAX_ATTACHMENTS {
++        return Err(Error::InvalidAttachments { details: format!("no more than {MAX_ATTACHMENTS} attachments are supported") });
++    }
++    let details = match &r.details {
++        Some(d) if d.is_empty() => return Err(Error::InvalidDetails { details: s!("ident must contain at least one character") }),
++        Some(d) => Some(Details::from_str(d).map_err(|e| Error::InvalidDetails { details: e.to_string() })?),
++        None => None,
++    };
++    let spec = AssetSpec {
++        ticker: Ticker::try_from(r.ticker.clone()).map_err(|e| Error::InvalidTicker { details: e.to_string() })?,
++        name: Name::try_from(r.name.clone()).map_err(|e| Error::InvalidName { details: e.to_string() })?,
++        details,
++        precision: Precision::try_from(r.precision).map_err(|_| Error::InvalidPrecision { details: s!("precision is too high") })?,
++    };
++    let media = match &r.media {
++        Some((b, m)) => Some(uda_attachment(b, m)?),
++        None => None,
++    };
++    let attachments = r
++        .attachments
++        .iter()
++        .enumerate()
++        .map(|(i, (b, m))| uda_attachment(b, m).map(|a| (i as u8, a)))
++        .collect::<Result<BTreeMap<u8, Attachment>, Error>>()?;
++    let index = TokenIndex::from(UDA_FIXED_INDEX);
++    let token_data = TokenData {
++        index,
++        media,
++        attachments: Confined::try_from(attachments)
++            .map_err(|_| Error::InvalidAttachments { details: format!("no more than {MAX_ATTACHMENTS} attachments are supported") })?,
++        ..Default::default()
++    };
++    let terms = ContractTerms { text: RicardianContract::default(), media: None };
++    let builder = ContractBuilder::with(Identity::default(), UniqueDigitalAsset::schema_rules(), chain_net)
++        .add_global_state("spec", spec)
++        .map_err(|e| Error::Internal { details: e.to_string() })?
++        .add_global_state("terms", terms)
++        .map_err(|e| Error::Internal { details: e.to_string() })?
++        .add_data(RGB_STATE_ASSET_OWNER, BuilderSeal::from(seal), Allocation::with(index, OwnedFraction::from(1u64)))
++        .map_err(|e| Error::Internal { details: e.to_string() })?
++        .add_global_state("tokens", token_data)
++        .map_err(|e| Error::Internal { details: e.to_string() })?;
++    builder.issue_contract_raw(timestamp).map_err(|e| Error::Internal { details: e.to_string() })
++}
++
++/// MASKED: the one output a newly minted NFT's contract gives it to (txid, vout), with its seal.
++pub(crate) fn uda_genesis_seal_full(genesis: &Genesis) -> Result<BlindSeal<RgbTxid>, Error> {
++    let bad = || Error::Internal { details: s!("the NFT's contract must give it to exactly one output") };
++    if genesis.assignments.len() != 1 {
++        return Err(bad());
++    }
++    match genesis.assignments.get(&OS_ASSET) {
++        Some(rgbstd::TypedAssigns::Structured(v)) if v.len() == 1 => match &v[0].seal {
++            BuilderSeal::Revealed(seal) => Ok(*seal),
++            BuilderSeal::Concealed(_) => Err(bad()),
++        },
++        _ => Err(bad()),
++    }
++}
++
++pub(crate) fn uda_genesis_seal(genesis: &Genesis) -> Result<(String, u32), Error> {
++    let seal = uda_genesis_seal_full(genesis)?;
++    Ok((seal.txid.to_string(), seal.vout.into_u32()))
++}
++
+ #[cfg(test)]
+ mod debug_tests {
+     use super::*;
 diff --git a/src/wallet/online.rs b/src/wallet/online.rs
-index ca96b4a..ad907ee 100644
+index ca96b4a..a35891b 100644
 --- a/src/wallet/online.rs
 +++ b/src/wallet/online.rs
 @@ -4,6 +4,12 @@
@@ -3498,7 +3839,7 @@ index ca96b4a..ad907ee 100644
          }
      }
  
-@@ -10024,6 +10624,231 @@ mod send_end_tests {
+@@ -10024,6 +10624,272 @@ mod send_end_tests {
          assert!(kept.signed_psbt.is_none());
      }
  
@@ -3551,6 +3892,47 @@ index ca96b4a..ad907ee 100644
 +        v.as_object_mut().unwrap().remove("lots");
 +        let info: InfoBatchTransfer = serde_json::from_value(v).unwrap();
 +        assert!(info.lots.is_empty());
++    }
++
++    /// A launchpad NFT minted by its claimer onto its claim's output: the launchpad's check accepts
++    /// exactly the recipe on exactly that output, and the claimer's wallet takes it in once the
++    /// output is known (with its picture), once.
++    #[test]
++    fn uda_minted_by_its_claimer() {
++        use crate::wallet::rust_only::{UdaRecipeIn, check_uda_genesis};
++        let (mut wallet, _) = setup();
++        wallet.wallet_data.supported_schemas = vec![AssetSchema::Nia, AssetSchema::Uda];
++        let picture = vec![0x89, b'P', b'N', b'G', 7, 7, 7];
++        let meta = br#"{"traits":{"Hat":"Cap"}}"#.to_vec();
++        let txid = "cd".repeat(32);
++        let recipe = || UdaRecipeIn { ticker: s!("RATS"), name: s!("RATS #7"), details: Some(s!("Hat: Cap")), precision: 0 };
++        let (asset_id, genesis) = wallet
++            .uda_genesis_for(s!("RATS"), s!("RATS #7"), Some(s!("Hat: Cap")), 0, Some((picture.clone(), s!("image/png"))), vec![(meta.clone(), s!("application/json"))], txid.clone(), 3)
++            .unwrap();
++        let net = wallet.bitcoin_network();
++        let media = || Some((picture.clone(), s!("image/png")));
++        let atts = || vec![(meta.clone(), s!("application/json"))];
++        // the launchpad's check: the recipe, on the claim's output
++        assert_eq!(check_uda_genesis(&genesis, net, recipe(), media(), atts(), &txid, 3).unwrap(), asset_id);
++        assert!(check_uda_genesis(&genesis, net, recipe(), media(), atts(), &txid, 2).is_err(), "another output");
++        assert!(check_uda_genesis(&genesis, net, recipe(), media(), atts(), &"ce".repeat(32), 3).is_err(), "another transaction");
++        assert!(check_uda_genesis(&genesis, net, UdaRecipeIn { name: s!("RATS #8"), ..recipe() }, media(), atts(), &txid, 3).is_err(), "another NFT's name");
++        assert!(check_uda_genesis(&genesis, net, recipe(), Some((vec![1, 2, 3], s!("image/png"))), atts(), &txid, 3).is_err(), "another picture");
++        assert!(check_uda_genesis(&genesis, net, recipe(), media(), vec![], &txid, 3).is_err(), "other traits");
++        // nothing in the wallet until it's taken in
++        assert!(wallet.list_assets(vec![AssetSchema::Uda]).unwrap().uda.unwrap().is_empty());
++        // the output isn't known yet: try again later
++        assert!(wallet.adopt_uda_genesis(genesis.clone(), vec![picture.clone(), meta.clone()]).is_err());
++        seed_txo(&wallet, &txid, 3);
++        let asset = wallet.adopt_uda_genesis(genesis.clone(), vec![picture.clone(), meta.clone(), vec![9, 9]]).unwrap();
++        assert_eq!(asset.asset_id, asset_id);
++        assert_eq!(asset.name, "RATS #7");
++        assert_eq!(asset.balance.settled, 1);
++        assert_eq!(wallet.media_file(&hex::encode(sha256_digest(&picture))), Some(picture.clone()));
++        assert_eq!(wallet.media_file(&hex::encode(sha256_digest(&[9, 9]))), None, "only the NFT's own files");
++        // once
++        assert_eq!(wallet.adopt_uda_genesis(genesis, vec![]).unwrap().asset_id, asset_id);
++        assert_eq!(wallet.list_assets(vec![AssetSchema::Uda]).unwrap().uda.unwrap().len(), 1);
 +    }
 +
 +    /// An NFT (UDA): issued with its picture, listed with the picture's digest, and its bytes kept
@@ -3730,7 +4112,7 @@ index ca96b4a..ad907ee 100644
      #[test]
      fn update_or_save_transfers_updates_outgoing_batch() {
          let (wallet, _) = setup();
-@@ -10051,6 +10876,7 @@ mod send_end_tests {
+@@ -10051,6 +10917,7 @@ mod send_end_tests {
                  info.extra_allocations.clone(),
                  info.change_utxo_idx,
                  None,
@@ -3738,7 +4120,7 @@ index ca96b4a..ad907ee 100644
                  TransferStatus::Initiated,
                  1,
                  None,
-@@ -12074,3 +12900,1370 @@ mod bfa_tests {
+@@ -12074,3 +12941,1370 @@ mod bfa_tests {
          assert!(options(&format!(r#","evm_chains":{{"mainnet":{chain}}}"#)).is_err());
      }
  }
@@ -5110,7 +5492,7 @@ index ca96b4a..ad907ee 100644
 +    }
 +}
 diff --git a/src/wallet/rust_only.rs b/src/wallet/rust_only.rs
-index 4e07a9c..7ea59f1 100644
+index 4e07a9c..cf52acc 100644
 --- a/src/wallet/rust_only.rs
 +++ b/src/wallet/rust_only.rs
 @@ -3,6 +3,7 @@
@@ -5360,7 +5742,7 @@ index 4e07a9c..7ea59f1 100644
          };
          let json = serde_json::to_string(&result_invalid).unwrap();
          let deserialized: ValidateConsignmentResult = serde_json::from_str(&json).unwrap();
-@@ -719,3 +868,1196 @@ mod tests {
+@@ -719,3 +868,1246 @@ mod tests {
          assert_eq!(IndexerProtocol::Esplora.to_string(), "Esplora");
      }
  }
@@ -5770,6 +6152,56 @@ index 4e07a9c..7ea59f1 100644
 +        return Err(bad_listing("the seller's input must be left for the seller to sign"));
 +    }
 +    Ok(tx.compute_txid().to_string())
++}
++
++/// A launchpad NFT's recipe, for [`check_uda_genesis`]: what the collection says this NFT is.
++#[derive(Debug, Clone, Default, Serialize, Deserialize)]
++#[cfg_attr(feature = "camel_case", serde(rename_all = "camelCase"))]
++pub struct UdaRecipeIn {
++    /// ticker (the collection's)
++    pub ticker: String,
++    /// name ("RATS #7")
++    pub name: String,
++    /// details, if any
++    pub details: Option<String>,
++    /// precision (0)
++    pub precision: u8,
++}
++
++/// MASKED: a launchpad's check of an NFT its claimer minted onto output `vout` of the claim
++/// transaction `txid`: the contract must be exactly the recipe's (same ticker, name, details,
++/// precision, picture and attachments), given to that output alone. Rebuilt from the recipe with the
++/// claimer's seal and time, it must have the same ID. Returns that ID (the NFT's asset ID).
++pub fn check_uda_genesis(
++    consignment: &[u8],
++    network: BitcoinNetwork,
++    recipe: UdaRecipeIn,
++    media: Option<(Vec<u8>, String)>,
++    attachments: Vec<(Vec<u8>, String)>,
++    txid: &str,
++    vout: u32,
++) -> Result<String, Error> {
++    use crate::wallet::offline::{UdaRecipe, build_uda_genesis, uda_genesis_seal_full};
++    let bad = |m: &str| Error::Internal { details: format!("the NFT doesn't match its collection: {m}") };
++    let contract = RgbConsignment::<false>::load(consignment).map_err(|e| bad(&format!("can't read its contract ({e})")))?;
++    if contract.transfer || !contract.bundles.is_empty() {
++        return Err(bad("not a newly minted NFT"));
++    }
++    let chain_net: ChainNet = network.into();
++    let genesis = contract.genesis();
++    if genesis.chain_net != chain_net {
++        return Err(bad("another network"));
++    }
++    let seal = uda_genesis_seal_full(genesis)?;
++    if seal.txid.to_string() != txid.to_lowercase() || seal.vout.into_u32() != vout {
++        return Err(bad("it isn't on the claim's output"));
++    }
++    let r = UdaRecipe { ticker: recipe.ticker, name: recipe.name, details: recipe.details, precision: recipe.precision, media, attachments };
++    let expected = build_uda_genesis(chain_net, &r, seal, genesis.timestamp)?;
++    if expected.contract_id() != contract.contract_id() {
++        return Err(bad("its name, picture or traits differ"));
++    }
++    Ok(contract.contract_id().to_string())
 +}
 +
 +/// [`psbt_extract_hex`] for a co-signed claim: every input finalized but the seller's (input 1), left empty.

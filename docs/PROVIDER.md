@@ -263,6 +263,17 @@ itself). The buyer's MASKED reads the listing's transfer, sees an NFT, and recei
 `alone` (on an output of its own: the listing is live at once, no move). NFTs can't be listed in lots or bought
 several at once (each one is its own asset).
 
+**Launchpad NFTs minted by the claimer *(2.32.1, Signet)*:** a launchpad can let each claimer's MASKED mint its NFT in
+the claim. `rgb.buyInstant({ offerId, network, offer: { amount: '1', priceSats }, listing: { mint }, nft: { name } })`
+with no asset ID, where `mint` is `{ recipe: { ticker, name, details, precision: 0 }, media: { mime, data }, attachments:
+[{ mime, data }], coin: { outpoint, sats, script }, payout: { script, sats }, back: { script, sats }, sealVout: 3,
+sealSats: 330 }` (files base64, scripts hex). MASKED builds the claim's transaction: its own coin as input 0, the
+launchpad's claim `coin` as input 1, then `[0]` an empty commitment, `[1]` `payout` (the price), `[2]` `back` (the claim
+coin's value), `[3]` an output of its own for the NFT, then its change. It mints the NFT onto output 3, signs every
+input but the claim coin and answers `{ txid, assetId, mint: { tx, genesis } }` without broadcasting. The launchpad
+checks the NFT is exactly its recipe on that output (`checkUdaGenesis`), signs the claim coin while the claim holds and
+broadcasts. MASKED takes the NFT in once it sees the transaction.
+
 How it works:
 
 - The seller's tokens must sit alone on one output (exactly the listed amount, nothing else), because whoever

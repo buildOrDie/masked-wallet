@@ -45,7 +45,9 @@ function swapParams(method, p) {
   const o = p.offer;
   if (!o || typeof o !== 'object') throw err(4000, 'offer is required: { assetId, amount, priceSats, state }.');
   const offer = { offerId: o.offerId == null ? undefined : String(o.offerId), assetId: optAssetId(o.assetId), amount: String(o.amount ?? ''), priceSats: String(o.priceSats ?? ''), state: o.state == null ? undefined : String(o.state).slice(0, 20) };
-  if (!offer.assetId || !/^\d{1,20}$/.test(offer.amount) || !/^\d{1,16}$/.test(offer.priceSats)) throw err(4000, 'offer needs assetId, amount and priceSats as whole numbers.');
+  // a launchpad claim this wallet mints (2.32.1) has no asset ID yet: it's minted in the claim
+  const minting = method === 'rgbInstantBuy' && p.listing && typeof p.listing === 'object' && p.listing.mint && typeof p.listing.mint === 'object';
+  if ((!offer.assetId && !minting) || !/^\d{1,20}$/.test(offer.amount) || !/^\d{1,16}$/.test(offer.priceSats)) throw err(4000, 'offer needs assetId, amount and priceSats as whole numbers.');
   const out = { offerId: id, offer, network: p.network == null ? undefined : String(p.network).slice(0, 20) };
   const str = (v, max, what) => { if (typeof v !== 'string' || !v || v.length > max) throw err(4000, `${what} is missing or too large.`); return v; };
   if (method === 'rgbBuyPrepare' && p.feeRate != null) { const f = Number(p.feeRate); if (!(f >= 1 && f <= 500)) throw err(4000, 'feeRate must be between 1 and 500 sat/vB.'); out.feeRate = f; }
@@ -99,7 +101,23 @@ function swapParams(method, p) {
   }
   if (method === 'rgbP2pSaleCommit') out.buyerSignedPsbtHex = hexOf(p.buyerSignedPsbtHex, 400_000, 'buyerSignedPsbtHex');
   if (method === 'rgbP2pBuyAccept') { const c = String(p.commitment ?? p.backendCommit ?? ''); if (!/^[0-9a-fA-F]{128}$/.test(c)) throw err(4000, 'commitment must be the seller\'s signature (hex).'); out.commitment = c.toLowerCase(); }
-  if (method === 'rgbInstantBuy') {
+  if (method === 'rgbInstantBuy' && minting) {
+    // the NFT's recipe and files, and the claim's outputs (the wallet checks them before signing)
+    const m = p.listing.mint, o = (x, what) => { if (!x || typeof x !== 'object') throw err(4000, `${what} is required.`); return x; };
+    const r = o(m.recipe, 'listing.mint.recipe'), md = o(m.media, 'listing.mint.media'), coin = o(m.coin, 'listing.mint.coin'), pay = o(m.payout, 'listing.mint.payout'), back = o(m.back, 'listing.mint.back');
+    if (!/^[0-9a-f]{64}:\d{1,5}$/.test(String(coin.outpoint || ''))) throw err(4000, 'listing.mint.coin.outpoint must be txid:vout.');
+    const atts = Array.isArray(m.attachments) ? m.attachments : [];
+    if (atts.length > 20) throw err(4000, 'listing.mint.attachments: too many files.');
+    out.listing = { mint: {
+      recipe: { ticker: str(r.ticker, 8, 'recipe.ticker'), name: str(r.name, 60, 'recipe.name'), details: r.details == null ? null : String(r.details).slice(0, 255), precision: 0 },
+      media: { mime: str(md.mime, 40, 'media.mime'), data: str(md.data, 3_000_000, 'media.data') },
+      attachments: atts.map((a) => ({ mime: str(a?.mime, 60, 'attachment.mime'), data: str(a?.data, 3_000_000, 'attachment.data') })),
+      coin: { outpoint: String(coin.outpoint), sats: Number(coin.sats), script: str(coin.script, 200, 'coin.script') },
+      payout: { script: str(pay.script, 200, 'payout.script'), sats: Number(pay.sats) },
+      back: { script: str(back.script, 200, 'back.script'), sats: Number(back.sats) },
+      sealVout: Number(m.sealVout), sealSats: Number(m.sealSats),
+    } };
+  } else if (method === 'rgbInstantBuy') {
     const l = p.listing;
     if (!l || typeof l !== 'object') throw err(4000, 'listing (the signed listing from the market) is required.');
     out.listing = { psbt: str(l.psbt, 20_000, 'listing.psbt'), consignment: str(l.consignment, 4_000_000, 'listing.consignment'), templateTxid: str(l.templateTxid, 64, 'listing.templateTxid') };
