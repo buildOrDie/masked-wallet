@@ -276,6 +276,51 @@ test('a launchpad claim minted by this wallet: built, minted and signed here, no
   assert.equal(b.mem[offer.offerId].genesis, undefined, 'its files and contract aren\'t kept twice');
 });
 
+test('a batch mint: several NFTs minted by this wallet in one claim, each on its own output; taken in one by one, going on after a refresh halfway', async () => {
+  const chain = fakeChain();
+  const coin = `${T('d')}:1`, claimCoin = `${T('e')}:1`;
+  chain.outs[coin] = { sats: 30000, script: '5120buy', tx: 'dd' };
+  chain.outs[claimCoin] = { sats: 1000, script: '5120' + 'cc'.repeat(32), tx: 'ee' };
+  const b = wallet({ name: 'claimer', lib: fakeLib(), chain, coins: [{ outpoint: coin, txout: { value: 30000 }, is_spent: false }] });
+  let built = null; const minted = [], adopted = []; let failOnce = true;
+  const make = b.w.lib.WasmWallet.newSwapPsbt;
+  b.w.lib.WasmWallet.newSwapPsbt = (ins, outs) => { built = { ins, outs }; return make(ins, outs); };
+  Object.assign(b.w.w, {
+    coloredAddress: () => 'tb1pdt26ymk4j6qf0lmhhsvcfru4ma83kefwecqqay3hmzsvuyfc3feq3efjan',
+    udaGenesisFor: (ticker, name, details, precision, media, mime, atts, txid, vout) => { minted.push([name, vout]); return { assetId: `rgb:${name.replace(/\W/g, '')}-aaaaaaaaaaaa`, consignment: new TextEncoder().encode(`genesis:${name}:${vout}`) }; },
+    adoptUdaGenesis: (g) => {
+      const t = new TextDecoder().decode(g);
+      // the second one isn't known yet the first time: a refresh goes on from there, without the first one again
+      if (t.endsWith(':4') && failOnce) { failOnce = false; throw new Error('the claim\'s output isn\'t in this wallet yet: try again after the next refresh'); }
+      adopted.push(t); return {};
+    },
+  });
+  const nft = (n, i) => ({ recipe: { ticker: 'NOGS', name: `Noggles #${n}`, details: null, precision: 0 }, media: { mime: 'image/png', data: b64(new Uint8Array([137, 80, 78, 71, n])) }, attachments: [], sealVout: 3 + i });
+  const nfts = [7, 21, 300].map(nft);
+  const listing = { mint: {
+    recipe: nfts[0].recipe, media: nfts[0].media, attachments: [], nfts,
+    coin: { outpoint: claimCoin, sats: 1000, script: '5120' + 'cc'.repeat(32) },
+    payout: { script: '5120' + 'aa'.repeat(32), sats: 6000 }, back: { script: '5120' + 'cc'.repeat(32), sats: 1000 }, sealVout: 3, sealSats: 330,
+  } };
+  const offer = { offerId: 'c0123456789ba', amount: '3', priceSats: '6000', state: 'OPEN' };
+  const r = await b.w.instantBuy({ offerId: offer.offerId, network: 'Signet', offer, listing, feeRate: 2 }, b.store);
+  assert.deepEqual(minted, [['Noggles #7', 3], ['Noggles #21', 4], ['Noggles #300', 5]]);
+  assert.equal(r.mint.geneses.length, 3); assert.equal(r.assetIds.length, 3);
+  assert.equal(r.mint.genesis, r.mint.geneses[0]);
+  // the price once, the coin back, three NFT outputs
+  assert.deepEqual(built.outs.slice(0, 5).map((o) => o.sats), [6000, 1000, 330, 330, 330]);
+  assert.equal(chain.posted.length, 0);
+  // the same NFT twice, or an output out of order: refused
+  await assert.rejects(b.w.instantBuy({ offerId: 'c0123456789bb', network: 'Signet', offer: { ...offer, offerId: 'c0123456789bb' }, listing: { mint: { ...listing.mint, nfts: [nfts[0], { ...nfts[0], sealVout: 4 }] } } }, b.store), /same NFT twice/);
+  await assert.rejects(b.w.instantBuy({ offerId: 'c0123456789bc', network: 'Signet', offer: { ...offer, offerId: 'c0123456789bc' }, listing: { mint: { ...listing.mint, nfts: [nfts[1], nfts[0]] } } }, b.store), /output MASKED doesn't make/);
+  chain.posted.push('the launchpad\'s broadcast'); chain.synced = true;
+  assert.equal(await b.w.instantPost(offer.offerId, b.store), false, 'the second NFT not known yet');
+  assert.equal(b.mem[offer.offerId].adopted, 1);
+  assert.equal(await b.w.instantPost(offer.offerId, b.store), true);
+  assert.deepEqual(adopted, ['genesis:Noggles #7:3', 'genesis:Noggles #21:4', 'genesis:Noggles #300:5']);
+  assert.equal(b.mem[offer.offerId].batch, undefined);
+});
+
 test('without the listing engine, Instant calls say MASKED needs an update', async () => {
   const w = new LiteWallet({ WasmWallet: {} }, { network: 'signet', indexerUrl: 'x', transportEndpoint: 'https://p', mnemonic: 'x', dataDir: 'd' });
   w.w = {}; w.online = {};

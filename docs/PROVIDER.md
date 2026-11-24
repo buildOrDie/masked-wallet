@@ -274,6 +274,13 @@ input but the claim coin and answers `{ txid, assetId, mint: { tx, genesis } }` 
 checks the NFT is exactly its recipe on that output (`checkUdaGenesis`), signs the claim coin while the claim holds and
 broadcasts. MASKED takes the NFT in once it sees the transaction.
 
+**Batch mints *(2.32.2)*:** `mint.nfts` (up to `rgb.mintBatchMax`, 10) mints several NFTs in the one claim: each item is
+`{ recipe, media, attachments, sealVout }` with `sealVout` 3, 4, 5… in order, `payout.sats` and `offer.priceSats` the
+total, and `offer.amount` the count. The top-level `recipe`, `media` and `attachments` repeat the first NFT. MASKED puts
+an output of its own for each NFT at 3, 4, 5…, mints each onto its output and answers `{ txid, assetId, assetIds, mint:
+{ tx, genesis, geneses } }`; the launchpad checks every genesis on its output. Wallets without `rgb.mintBatchMax` mint
+one NFT per claim.
+
 How it works:
 
 - The seller's tokens must sit alone on one output (exactly the listed amount, nothing else), because whoever

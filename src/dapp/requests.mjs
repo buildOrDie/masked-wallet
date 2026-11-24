@@ -117,6 +117,21 @@ function swapParams(method, p) {
       back: { script: str(back.script, 200, 'back.script'), sats: Number(back.sats) },
       sealVout: Number(m.sealVout), sealSats: Number(m.sealSats),
     } };
+    // a batch mint (2.32.2): each NFT's recipe and files, and its output
+    if (Array.isArray(m.nfts) && m.nfts.length) {
+      if (m.nfts.length > 10) throw err(4000, 'listing.mint.nfts: 10 NFTs at most.');
+      out.listing.mint.nfts = m.nfts.map((x, i) => {
+        const xr = o(x?.recipe, `listing.mint.nfts[${i}].recipe`), xm = o(x?.media, `listing.mint.nfts[${i}].media`);
+        const xa = Array.isArray(x.attachments) ? x.attachments : [];
+        if (xa.length > 20) throw err(4000, 'listing.mint.nfts: too many files.');
+        return {
+          recipe: { ticker: str(xr.ticker, 8, 'recipe.ticker'), name: str(xr.name, 60, 'recipe.name'), details: xr.details == null ? null : String(xr.details).slice(0, 255), precision: 0 },
+          media: { mime: str(xm.mime, 40, 'media.mime'), data: str(xm.data, 3_000_000, 'media.data') },
+          attachments: xa.map((y) => ({ mime: str(y?.mime, 60, 'attachment.mime'), data: str(y?.data, 3_000_000, 'attachment.data') })),
+          sealVout: Number(x.sealVout),
+        };
+      });
+    }
   } else if (method === 'rgbInstantBuy') {
     const l = p.listing;
     if (!l || typeof l !== 'object') throw err(4000, 'listing (the signed listing from the market) is required.');

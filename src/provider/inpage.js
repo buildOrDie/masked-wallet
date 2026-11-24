@@ -108,6 +108,8 @@
       listInstantLots: (o = {}) => request('rgbInstantListLots', o),
       /** buyer: { offerId, network, offer, listing, feeRate? } → { txid } (broadcast) */
       buyInstant: (o = {}) => request('rgbInstantBuy', o),
+      /** a launchpad claim minted by this wallet takes up to this many NFTs in one transaction (a batch mint, 2.32.2) */
+      mintBatchMax: 10,
       /** buyer, several at once: { items: [{ offerId, offer, listing }], network, feeRate? } → { results: [{ offerId, txid } | { offerId, error }] }. One approval, cheapest first; from 2.30 up to 10 in one transaction (they share its txid) */
       buyInstantMany: (o = {}) => request('rgbInstantBuyMany', o),
       /** seller: { offerId, offer, feeRate? } → { stage, txid } (moves the signed output: an on-chain transaction) */

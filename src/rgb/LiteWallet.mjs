@@ -85,6 +85,8 @@ export function nftTraits(json) {
   return traits.length || out.rarity || out.description ? out : null;
 }
 const IMAGE_MIME = /^image\/(png|jpeg|gif|webp)$/;
+/** Most NFTs one launchpad claim mints (a batch mint, 2.32.2): each one an output of the one transaction. */
+export const MINT_BATCH_MAX = 10;
 
 const hostOf = (u) => { try { return new URL(String(u)).host; } catch { return 'the block server'; } };
 
@@ -2506,18 +2508,26 @@ export class LiteWallet {
     const done = store.get(id);
     if (done?.mint && done.txid && !done.failed) {
       if (await this.knowsTx(done.txid)) return { txid: done.txid };
-      if (done.partialHex && Date.now() - Number(done.at || 0) < 10 * 60_000) return { txid: done.txid, mint: { tx: done.partialHex, genesis: done.genesis } };
+      if (done.partialHex && Date.now() - Number(done.at || 0) < 10 * 60_000) return { txid: done.txid, mint: { tx: done.partialHex, genesis: done.genesis || done.batch?.[0]?.genesis, ...(done.batch ? { geneses: done.batch.map((x) => x.genesis) } : {}) } };
       store.del?.(id);
     }
     const m = listing.mint;
-    const r = m.recipe || {};
-    if (!/^[A-Z0-9]{1,8}$/.test(String(r.ticker || '')) || !String(r.name || '') || String(r.name).length > 60) throw new Error('The claim\'s NFT has no valid name or ticker.');
-    if (!IMAGE_MIME.test(String(m.media?.mime || ''))) throw new Error('The claim\'s picture isn\'t an image.');
-    const media = unb64(String(m.media.data || ''));
-    if (!media.length || media.length > 2_000_000) throw new Error('The claim\'s picture is missing or too large.');
-    const atts = (m.attachments || []).map((a) => ({ bytes: unb64(String(a.data || '')), mime: String(a.mime || '') }));
-    if (atts.length > 20 || atts.some((a) => !a.bytes.length || a.bytes.length > 2_000_000 || !/^[a-z]+\/[a-z0-9.+-]+$/.test(a.mime))) throw new Error('The claim\'s files are not valid.');
-    if (Number(m.sealVout) !== 3 || !(Number(m.sealSats) >= 330)) throw new Error('The claim asks for an output MASKED doesn\'t make.');
+    // one NFT, or a batch (2.32.2): several NFTs, each on its own output (3, 4, 5…) of the one transaction
+    const list = Array.isArray(m.nfts) && m.nfts.length ? m.nfts : [{ recipe: m.recipe, media: m.media, attachments: m.attachments, sealVout: m.sealVout }];
+    if (list.length > MINT_BATCH_MAX) throw new Error(`A claim mints ${MINT_BATCH_MAX} NFTs at most.`);
+    const nfts = list.map((x, i) => {
+      const r = x.recipe || {};
+      if (!/^[A-Z0-9]{1,8}$/.test(String(r.ticker || '')) || !String(r.name || '') || String(r.name).length > 60) throw new Error('The claim\'s NFT has no valid name or ticker.');
+      if (!IMAGE_MIME.test(String(x.media?.mime || ''))) throw new Error('The claim\'s picture isn\'t an image.');
+      const media = unb64(String(x.media.data || ''));
+      if (!media.length || media.length > 2_000_000) throw new Error('The claim\'s picture is missing or too large.');
+      const atts = (x.attachments || []).map((a) => ({ bytes: unb64(String(a.data || '')), mime: String(a.mime || '') }));
+      if (atts.length > 20 || atts.some((a) => !a.bytes.length || a.bytes.length > 2_000_000 || !/^[a-z]+\/[a-z0-9.+-]+$/.test(a.mime))) throw new Error('The claim\'s files are not valid.');
+      if (Number(x.sealVout) !== 3 + i) throw new Error('The claim asks for an output MASKED doesn\'t make.');
+      return { r, media, mime: String(x.media.mime), atts };
+    });
+    if (new Set(nfts.map((x) => x.r.name)).size !== nfts.length) throw new Error('The claim has the same NFT twice.');
+    if (!(Number(m.sealSats) >= 330)) throw new Error('The claim asks for an output MASKED doesn\'t make.');
     if (BigInt(m.payout?.sats ?? -1) !== price) throw new Error('The claim pays another amount than its price.');
     if (!/^[0-9a-f]{4,200}$/.test(String(m.payout?.script || '')) || !/^[0-9a-f]{4,200}$/.test(String(m.back?.script || ''))) throw new Error('The claim\'s outputs are not valid.');
     onStep(`Checking the claim on ${hostOf(this.indexer)}…`);
@@ -2527,9 +2537,10 @@ export class LiteWallet {
     const online = this.requireOnline();
     const seal = BigInt(m.sealSats);
     const rate = Math.max(BUY_FEE_MIN, Number(feeRate) || 1);
-    const feeFor = (ins, change = true) => BigInt(Math.ceil(rate * txVbytes([...ins, ci.script], [OPRET_SCRIPT, m.payout.script, m.back.script, P2TR_SCRIPT, ...(change ? [P2TR_SCRIPT] : [])])));
+    const seals = nfts.map(() => P2TR_SCRIPT);
+    const feeFor = (ins, change = true) => BigInt(Math.ceil(rate * txVbytes([...ins, ci.script], [OPRET_SCRIPT, m.payout.script, m.back.script, ...seals, ...(change ? [P2TR_SCRIPT] : [])])));
     const perInput = feeFor([P2TR_SCRIPT, P2TR_SCRIPT]) - feeFor([P2TR_SCRIPT]);
-    const base = price + seal;
+    const base = price + seal * BigInt(nfts.length);
     let { all, confirmed } = await this.btcCoins({ skipSync: true });
     let pay = payCoinsFor(confirmed, all, base + feeFor([P2TR_SCRIPT]), perInput);
     const unspent = async (p) => !!p && (await Promise.all(p.coins.map((c) => { const [t, v] = String(c.outpoint).split(':'); return this.outspend(t, v).then((x) => !x?.spent).catch(() => false); }))).every(Boolean);
@@ -2550,18 +2561,25 @@ export class LiteWallet {
     // inputs: one coin of this wallet, then the launchpad's claim coin (input 1, signed by the launchpad last), then the rest
     const mine = pay.coins.map((c, k) => ({ outpoint: c.outpoint, sats: bis[k].sats, script: bis[k].script, tx: bis[k].tx }));
     const inputs = [mine[0], { outpoint: String(m.coin.outpoint), sats: ci.sats, script: ci.script, tx: ci.tx }, ...mine.slice(1)];
-    const outs = [{ script: m.payout.script, sats: Number(price) }, { script: m.back.script, sats: Number(m.back.sats) }, { script: sealScript, sats: Number(seal) }, ...(change > 0n ? [{ script: await this.ownScript(), sats: Number(change) }] : [])];
+    const outs = [{ script: m.payout.script, sats: Number(price) }, { script: m.back.script, sats: Number(m.back.sats) }, ...nfts.map(() => ({ script: sealScript, sats: Number(seal) })), ...(change > 0n ? [{ script: await this.ownScript(), sats: Number(change) }] : [])];
     const unsigned = this.lib.WasmWallet.newSwapPsbt(inputs, outs);
     const txid = String(this.lib.WasmWallet.psbtTxid(unsigned));
-    onStep('Minting your NFT…');
-    const g = this.wallet.udaGenesisFor(String(r.ticker), String(r.name), r.details == null || r.details === '' ? undefined : String(r.details), Number(r.precision) || 0, media, String(m.media.mime), atts, txid, 3);
+    onStep(nfts.length > 1 ? `Minting your ${nfts.length} NFTs…` : 'Minting your NFT…');
+    const minted = nfts.map(({ r, media, mime, atts }, i) => {
+      const g = this.wallet.udaGenesisFor(String(r.ticker), String(r.name), r.details == null || r.details === '' ? undefined : String(r.details), Number(r.precision) || 0, media, mime, atts, txid, 3 + i);
+      return { assetId: String(g.assetId), genesis: b64(g.consignment), files: [b64(media), ...atts.map((a) => b64(a.bytes))] };
+    });
     const partialHex = this.lib.WasmWallet.psbtExtractHexCosigned(this.sign(unsigned));
-    const genesis = b64(g.consignment);
-    store.set(id, { role: 'buyer', mint: true, assetId: String(g.assetId), amount: '1', priceSats: String(price), txid, partialHex, genesis, files: [b64(media), ...atts.map((a) => b64(a.bytes))], posted: false, at: Date.now() });
+    const [first] = minted;
+    store.set(id, {
+      role: 'buyer', mint: true, assetId: first.assetId, amount: String(minted.length), priceSats: String(price), txid, partialHex,
+      ...(minted.length > 1 ? { batch: minted, assetIds: minted.map((x) => x.assetId) } : { genesis: first.genesis, files: first.files }),
+      posted: false, at: Date.now(),
+    });
     // its coins are taken: a second claim right after pays with others
     this.spentNow(pay.coins.map((c) => c.outpoint));
     await this.save();
-    return { txid, assetId: String(g.assetId), mint: { tx: partialHex, genesis } };
+    return { txid, assetId: first.assetId, ...(minted.length > 1 ? { assetIds: minted.map((x) => x.assetId) } : {}), mint: { tx: partialHex, genesis: first.genesis, ...(minted.length > 1 ? { geneses: minted.map((x) => x.genesis) } : {}) } };
   }
   /** Can this RGB engine complete co-signed launchpad claims (the seller signs last; 2.32)? */
   get canCosign() { return this.canPresign && ['cosignedListingInfo', 'psbtExtractHexCosigned', 'checkCosignedPartial'].every((f) => typeof this.lib.WasmWallet?.[f] === 'function'); }
@@ -2660,17 +2678,23 @@ export class LiteWallet {
       // an NFT this wallet minted in a launchpad claim: once the launchpad sent the claim, it's taken in (its output
       // must be known to the wallet: after the next sync)
       if (!(await this.knowsTx(e.txid))) {
-        if (Date.now() - Number(e.at || 0) > 30 * 60_000) store.set(String(offerId), { ...e, failed: 'The launchpad never completed this claim: nothing was paid.', partialHex: undefined, genesis: undefined, files: undefined, at: Date.now() });
+        if (Date.now() - Number(e.at || 0) > 30 * 60_000) store.set(String(offerId), { ...e, failed: 'The launchpad never completed this claim: nothing was paid.', partialHex: undefined, genesis: undefined, files: undefined, batch: undefined, at: Date.now() });
         return false;
       }
+      // a batch: each NFT taken in once, in order (how many are in is kept, so a refresh halfway goes on from there)
+      const parts = e.batch || [{ genesis: e.genesis, files: e.files }];
       try {
         try { await this.wallet.sync(this.requireOnline()); } catch { /* the adoption says if the output isn't known yet */ }
-        this.wallet.adoptUdaGenesis(unb64(String(e.genesis)), (e.files || []).map((f) => unb64(String(f))));
+        for (let k = Number(e.adopted || 0); k < parts.length; k++) {
+          this.wallet.adoptUdaGenesis(unb64(String(parts[k].genesis)), (parts[k].files || []).map((f) => unb64(String(f))));
+          e = { ...e, adopted: k + 1 };
+          store.set(String(offerId), e);
+        }
       } catch (err) {
-        if (/isn't in this wallet yet/.test(String(err?.message || err))) return false;
+        if (/isn't in this wallet yet/.test(String(err?.message || err))) { await this.save(); return false; }
         throw err;
       }
-      store.set(String(offerId), { ...e, posted: true, partialHex: undefined, genesis: undefined, files: undefined });
+      store.set(String(offerId), { ...e, posted: true, partialHex: undefined, genesis: undefined, files: undefined, batch: undefined });
       await this.keepMedia?.();
       await this.save();
       return true;
