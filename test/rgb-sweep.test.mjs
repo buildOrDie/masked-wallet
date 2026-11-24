@@ -170,3 +170,21 @@ test('getAssets: a site allowed to see the token list gets it at once; otherwise
   assert.equal((await h(SITE, 'rgbListAssets', {}))[0].asked, true, 'nothing kept (browser restarted, locked): asked');
   assert.equal(opened.length, 3);
 });
+
+test('NFTs (2.32.4): several different NFTs bought with one approval, and several listed with one approval', async () => {
+  const { handle, opened } = handler();
+  const B = 'rgb:secondNftAssetId123456789012', C = 'rgb:thirdNftAssetId1234567890123';
+  // buying: different assets are fine for NFTs, the same NFT twice is not
+  await handle(SITE, 'rgbInstantBuyMany', { items: [item('a', '1', '100000', A), item('b', '1', '200000', B)], network: 'signet', nft: true });
+  assert.equal(opened[0].params.nft, true); assert.equal(opened[0].params.items.length, 2);
+  await assert.rejects(handle(SITE, 'rgbInstantBuyMany', { items: [item('a', '1', '1000', A), item('b', '1', '1000', A)], nft: true }), /same NFT/);
+  // listing several at once
+  const li = (id, assetId, price) => ({ offerId: id, offer: { assetId, amount: '1', priceSats: price }, token: 'ab'.repeat(24), nft: { name: `Noggles ${id}` } });
+  await handle(SITE, 'rgbInstantListMany', { items: [li('x1', A, '100000'), li('x2', B, '200000'), li('x3', C, '300000')], market: 'https://rgb-signet.maskedwallet.com', network: 'signet' });
+  const p = opened[1].params;
+  assert.equal(opened[1].method, 'rgbInstantListMany');
+  assert.equal(p.items.length, 3); assert.equal(p.market, 'https://rgb-signet.maskedwallet.com'); assert.equal(p.items[1].nft.name, 'Noggles x2');
+  await assert.rejects(handle(SITE, 'rgbInstantListMany', { items: [li('x1', A, '1000'), li('x2', A, '1000')], market: 'https://m.example' }), /same NFT/);
+  await assert.rejects(handle(SITE, 'rgbInstantListMany', { items: [{ ...li('x1', A, '1000'), offer: { assetId: A, amount: '2', priceSats: '1000' } }], market: 'https://m.example' }), /whole/);
+  await assert.rejects(handle(SITE, 'rgbInstantListMany', { items: [li('x1', A, '1000')], market: 'http://plain.example' }), /https/);
+});

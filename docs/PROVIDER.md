@@ -274,6 +274,12 @@ input but the claim coin and answers `{ txid, assetId, mint: { tx, genesis } }` 
 checks the NFT is exactly its recipe on that output (`checkUdaGenesis`), signs the claim coin while the claim holds and
 broadcasts. MASKED takes the NFT in once it sees the transaction.
 
+**Several NFTs at once *(2.32.4)*:** `rgb.buyInstantMany({ items, network, nft: true })` buys different NFTs (each its own
+asset) with one approval, one transaction each; `rgb.listInstantMany({ items: [{ offerId, offer: { assetId, amount: '1',
+priceSats }, token, nft: { name } }], market, network })` lists up to 20 NFTs with one approval and answers `{ results: [{
+offerId, stage, psbt, consignment, templateTxid, sellerOutpoint, media } | { offerId, error }] }`: each result is what
+`listInstant` answers for that NFT.
+
 **Batch mints *(2.32.2)*:** `mint.nfts` (up to `rgb.mintBatchMax`, 10) mints several NFTs in the one claim: each item is
 `{ recipe, media, attachments, sealVout }` with `sealVout` 3, 4, 5… in order, `payout.sats` and `offer.priceSats` the
 total, and `offer.amount` the count. The top-level `recipe`, `media` and `attachments` repeat the first NFT. MASKED puts
