@@ -9,9 +9,11 @@ import { Keyring } from '../../wallet/Keyring.mjs';
 import { View } from '../View.mjs';
 import { I, copyBtn, rowKV } from '../html.mjs';
 import { DEV_X, REPO_URL } from './HomeView.mjs';
+import { APP_VERSION } from '../../app/AppUpdate.mjs';
 
 const { n2b } = sp.util;
-const VERSION_LABEL = '2.3.3';
+// the build's own version (package.json, set at build time), else the extension's manifest
+const VERSION_LABEL = APP_VERSION || (() => { try { return /** @type {any} */ (globalThis).chrome?.runtime?.getManifest?.().version || ''; } catch { return ''; } })();
 
 export class SettingsView extends View {
   /** One input of the Shielded output calculator (Advanced). */
