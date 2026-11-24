@@ -14,13 +14,13 @@ import { toBase, fromBase } from '../rgb/config.mjs';
 import { rgbFundParts, proxyUrl, rgbError, RGB_CONFLICT_MSG } from '../rgb/WalletRgb.mjs';
 
 /** Methods whose approve button waits for a prepared transaction. */
-export const NEEDS_PREP = ['sendBitcoin', 'inscribeTransfer', 'shareTrade', 'fundTrade', 'moveToTrade', 'returnToShielded', 'cancelShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbInvoice', 'rgbPay', 'rgbSwapAvailable', 'rgbListAssets', 'rgbOutputs', 'rgbFreeSpare', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantListLots', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel', 'rgbP2pList', 'rgbP2pBuyPrepare', 'rgbP2pSaleSign', 'rgbP2pBuySign', 'rgbP2pSaleCommit', 'rgbP2pBuyAccept', 'rgbP2pSaleFinish', 'rgbP2pCancel', 'rgbReleaseTrade'];
-const SWAP_METHODS = ['rgbSwapAvailable', 'rgbListAssets', 'rgbOutputs', 'rgbFreeSpare', 'rgbOutputs', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantListLots', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel', 'rgbP2pList', 'rgbP2pBuyPrepare', 'rgbP2pSaleSign', 'rgbP2pBuySign', 'rgbP2pSaleCommit', 'rgbP2pBuyAccept', 'rgbP2pSaleFinish', 'rgbP2pCancel', 'rgbReleaseTrade'];
+export const NEEDS_PREP = ['sendBitcoin', 'inscribeTransfer', 'shareTrade', 'fundTrade', 'moveToTrade', 'returnToShielded', 'cancelShielded', 'cashuPay', 'cashuPayRequest', 'cashuReceive', 'rgbInvoice', 'rgbPay', 'rgbSwapAvailable', 'rgbListAssets', 'rgbOutputs', 'rgbFreeSpare', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantListLots', 'rgbInstantListMany', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel', 'rgbP2pList', 'rgbP2pBuyPrepare', 'rgbP2pSaleSign', 'rgbP2pBuySign', 'rgbP2pSaleCommit', 'rgbP2pBuyAccept', 'rgbP2pSaleFinish', 'rgbP2pCancel', 'rgbReleaseTrade'];
+const SWAP_METHODS = ['rgbSwapAvailable', 'rgbListAssets', 'rgbOutputs', 'rgbFreeSpare', 'rgbOutputs', 'rgbBuyPrepare', 'rgbSalePrepare', 'rgbBuySign', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantListLots', 'rgbInstantListMany', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel', 'rgbP2pList', 'rgbP2pBuyPrepare', 'rgbP2pSaleSign', 'rgbP2pBuySign', 'rgbP2pSaleCommit', 'rgbP2pBuyAccept', 'rgbP2pSaleFinish', 'rgbP2pCancel', 'rgbReleaseTrade'];
 const RGB_METHODS = ['rgbInvoice', 'rgbPay', ...SWAP_METHODS];
 const SWAP_SIZE_VB = 320;
 /** Steps that move this wallet's tokens: stopped while another copy of this wallet saved newer RGB data. */
 // (receiving and buying too: tokens taken in here would be missing from the newer copy, and this copy couldn't back them up)
-const MOVES_TOKENS = ['rgbFreeSpare', 'rgbInvoice', 'rgbPay', 'rgbBuyPrepare', 'rgbBuySign', 'rgbSalePrepare', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantListLots', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel', 'rgbP2pBuyPrepare', 'rgbP2pSaleSign', 'rgbP2pBuySign', 'rgbP2pSaleCommit', 'rgbP2pBuyAccept', 'rgbP2pSaleFinish', 'rgbP2pCancel'];
+const MOVES_TOKENS = ['rgbFreeSpare', 'rgbInvoice', 'rgbPay', 'rgbBuyPrepare', 'rgbBuySign', 'rgbSalePrepare', 'rgbSaleComplete', 'rgbInstantList', 'rgbInstantListLots', 'rgbInstantListMany', 'rgbInstantBuy', 'rgbInstantBuyMany', 'rgbInstantCancel', 'rgbP2pBuyPrepare', 'rgbP2pSaleSign', 'rgbP2pBuySign', 'rgbP2pSaleCommit', 'rgbP2pBuyAccept', 'rgbP2pSaleFinish', 'rgbP2pCancel'];
 /** P2P swap steps that already follow from one you approved (UniSat's flow): they run as soon as they're ready, no button. */
 export const AUTO_RUN = ['rgbP2pSaleCommit', 'rgbP2pBuyAccept', 'rgbP2pSaleFinish', 'rgbP2pCancel', 'rgbReleaseTrade'];
 /** Kept on top of a purchase's own cost when topping up the RGB balance (the exact fee depends on the coins). */
@@ -307,6 +307,20 @@ export class ApprovalController {
         const same = each.every((x) => x.shown === each[0].shown && x.price === each[0].price);
         return { asset, assetId: P.assetId, shown: `${r.amount(asset, total)} ${asset.ticker}`, price, n: lots.length, each, same, market: host, rate, vb, fee: Math.ceil(rate * vb), seal: INSTANT_SEAL_SATS * lots.length, atOnce, oneTx };
       }
+      if (m === 'rgbInstantListMany') {
+        if (!r.service.canPresign) throw new Error('This MASKED version can\'t do Instant listings yet. Update MASKED.');
+        const net = r.isMain ? 'mainnet' : 'signet';
+        if (P.network && !String(P.network).toLowerCase().startsWith(net)) throw new Error(`The site is on ${P.network}, your RGB wallet is on ${r.profile.label}.`);
+        const items = P.items || [];
+        for (const x of items) {
+          const asset = r.find(x.offer.assetId);
+          if (!asset || sellable(r, asset) < 1) throw new Error(`You don't hold ${x.nft?.name || 'one of these NFTs'} in RGB (or it's already listed).`);
+        }
+        let host = ''; try { host = new URL(P.market).host; } catch { throw new Error('The market address is not valid.'); }
+        const rate = rgbRate(P, r);
+        const vb = instantMoveVbytes(1);
+        return { nft: true, n: items.length, shown: `${items.length} NFT${items.length === 1 ? '' : 's'}`, price: items.reduce((t, x) => t + Number(x.offer.priceSats), 0), each: items.map((x) => ({ name: x.nft?.name || '', price: Number(x.offer.priceSats) })), market: host, rate, vb, fee: Math.ceil(rate * vb) };
+      }
       if (m === 'rgbInstantBuyMany') {
         if (!r.service.canPresign) throw new Error('This MASKED version can\'t do Instant listings yet. Update MASKED.');
         const items = P.items || [], first = items[0]?.offer || {};
@@ -318,13 +332,14 @@ export class ApprovalController {
         const units = items.map((x) => Number(x.offer.priceSats) / (Number(x.offer.amount) / 10 ** (asset?.precision || 0))); // sats per whole token
         const rate = rgbRate(P, r);
         // combined (2.30): one transaction per COMBINED_MAX listings, one seal each; else one purchase per listing
-        const combined = !!r.service.canCombine && items.length >= 2;
+        // NFTs: each is its own asset, so one purchase each (a combined purchase is for one token)
+        const combined = !P.nft && !!r.service.canCombine && items.length >= 2;
         const sizes = combined ? combinedChunks(items.length) : Array(items.length).fill(1);
         const vb = sizes.reduce((t, k) => t + (k >= 2 ? combinedBuyVbytes(k) : instantBuyVbytes(1, true)), 0);
         const fee = sizes.reduce((t, k) => t + Math.ceil(rate * (k >= 2 ? combinedBuyVbytes(k) : instantBuyVbytes(1, true))), 0), seal = INSTANT_SEAL_SATS * sizes.length;
         const oneByOne = Math.ceil(rate * instantBuyVbytes(1, true)) * items.length;
-        const shown = asset ? `${r.amount(asset, total)} ${asset.ticker}` : `${total.toLocaleString('en-US')} units`;
-        return { asset, assetId: first.assetId, shown, price, newToken: !asset, fee, rate, vb, seal, n: items.length, txs: sizes.length, combined, saved: combined ? Math.max(0, oneByOne + INSTANT_SEAL_SATS * items.length - fee - seal) : 0, lo: Math.min(...units), hi: Math.max(...units), topUp: topUpFor(r, price + fee + seal) };
+        const shown = P.nft ? `${items.length} NFT${items.length === 1 ? '' : 's'}` : asset ? `${r.amount(asset, total)} ${asset.ticker}` : `${total.toLocaleString('en-US')} units`;
+        return { ...(P.nft ? { nft: true, each: items.map((x) => ({ name: x.nft?.name || '', price: Number(x.offer.priceSats) })) } : {}), asset, assetId: first.assetId, shown, price, newToken: !asset && !P.nft, fee, rate, vb, seal, n: items.length, txs: sizes.length, combined, saved: combined ? Math.max(0, oneByOne + INSTANT_SEAL_SATS * items.length - fee - seal) : 0, lo: Math.min(...units), hi: Math.max(...units), topUp: topUpFor(r, price + fee + seal) };
       }
       const o = P.offer || {};
       const net = r.isMain ? 'mainnet' : 'signet';
@@ -685,6 +700,23 @@ export class ApprovalController {
         later(r);
         return out;
       });
+      // several NFTs listed at once (2.32.4): each signed (or moved to an output of its own first) like a single listing
+      case 'rgbInstantListMany': step('Waiting for RGB…'); return this.rgbBusy(async () => {
+        prepared(''); const r = app.rgb, P = a.params, n = P.items.length;
+        await this.rgbBackedUp(r);
+        const results = [];
+        for (let k = 0; k < n; k++) {
+          const x = P.items[k], o = x.offer;
+          try {
+            const out = await r.service.instantList({ offerId: x.offerId, assetId: o.assetId, amount: o.amount, priceSats: o.priceSats, feeRate: rgbRate(P, r), market: P.market, token: x.token, onStep: (t) => step(`${k + 1} of ${n}: ${t}`) });
+            results.push({ offerId: x.offerId, ...out });
+          } catch (e) { results.push({ offerId: x.offerId, error: rgbError(e, r.profile) }); }
+        }
+        await this.rgbBackedUp(r).catch(() => {});
+        later(r);
+        if (!results.some((x) => !x.error)) throw new Error(results[0]?.error || 'Nothing was listed.');
+        return { results };
+      });
       case 'rgbInstantBuy': step('Waiting for RGB…'); return this.rgbBusy(async () => {
         prepared(''); const r = app.rgb, P = a.params;
         const out = await r.service.instantBuy({ ...P, feeRate: rgbRate(P, r), quick: true, onStep: step });
@@ -697,7 +729,7 @@ export class ApprovalController {
         const results = [];
         // 2.30: up to COMBINED_MAX listings in one transaction (about 100 vB per extra listing instead of a whole
         // purchase each); when they can't be combined (one coin only, a listing gone…), one after another
-        const sizes = r.service.canCombine && n >= 2 ? combinedChunks(n) : Array(n).fill(1);
+        const sizes = !P.nft && r.service.canCombine && n >= 2 ? combinedChunks(n) : Array(n).fill(1);
         const ranOut = 'Not bought: the RGB balance ran out.';
         let from = 0, stop = false;
         for (const size of sizes) {

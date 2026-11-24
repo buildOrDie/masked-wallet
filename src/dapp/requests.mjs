@@ -177,9 +177,28 @@ function sweepParams(p) {
   const out = items.map((x) => swapParams('rgbInstantBuy', { ...(x || {}), network: p.network }));
   const ids = new Set(out.map((x) => x.offerId));
   if (ids.size !== out.length) throw err(4000, 'The same listing is in the list twice.');
-  if (new Set(out.map((x) => x.offer.assetId)).size !== 1) throw err(4000, 'A sweep buys one token: every listing must be for the same asset.');
-  const res = { items: out.map(({ network: _n, ...x }) => x), network: p.network == null ? undefined : String(p.network).slice(0, 20) };
+  // NFTs (2.32.4): several different NFTs at once, each its own asset, bought one after another
+  const nft = p.nft === true;
+  if (!nft && new Set(out.map((x) => x.offer.assetId)).size !== 1) throw err(4000, 'A sweep buys one token: every listing must be for the same asset.');
+  if (nft && new Set(out.map((x) => x.offer.assetId)).size !== out.length) throw err(4000, 'The same NFT is in the list twice.');
+  /** @type {any} */
+  const res = { items: out.map(({ network: _n, ...x }) => x), network: p.network == null ? undefined : String(p.network).slice(0, 20), ...(nft ? { nft: true } : {}) };
   if (p.feeRate != null) { const f = Number(p.feeRate); if (!(f >= BUY_FEE_MIN && f <= 500)) throw err(4000, `feeRate must be between ${BUY_FEE_MIN} and 500 sat/vB.`); res.feeRate = f; }
+  return res;
+}
+/** Several NFTs listed at once (2.32.4): each { offerId, offer: { assetId, amount: '1', priceSats }, token, nft: { name } }, one market. */
+export const MAX_LIST_MANY = 20;
+export function listManyParams(p) {
+  const items = Array.isArray(p.items) ? p.items : null;
+  if (!items || !items.length) throw err(4000, 'items (the NFTs to list) is required.');
+  if (items.length > MAX_LIST_MANY) throw err(4000, `At most ${MAX_LIST_MANY} NFTs at once.`);
+  const out = items.map((x) => swapParams('rgbInstantList', { ...(x || {}), market: p.market, network: p.network }));
+  if (new Set(out.map((x) => x.offerId)).size !== out.length) throw err(4000, 'The same listing is in the list twice.');
+  if (new Set(out.map((x) => x.offer.assetId)).size !== out.length) throw err(4000, 'The same NFT is in the list twice.');
+  if (out.some((x) => x.offer.amount !== '1')) throw err(4000, 'Each NFT is listed whole: amount 1.');
+  /** @type {any} */
+  const res = { items: out.map(({ network: _n, market: _m, ...x }) => x), market: out[0].market, network: p.network == null ? undefined : String(p.network).slice(0, 20) };
+  if (p.feeRate != null) { const f = Number(p.feeRate); if (!(f >= 1 && f <= 500)) throw err(4000, 'feeRate must be between 1 and 500 sat/vB.'); res.feeRate = f; }
   return res;
 }
 const checkAmount = (a) => { if (!/^\d+(\.\d+)?$/.test(String(a || '')) || /^0+(\.0+)?$/.test(String(a))) throw err(4000, 'amount must be a positive number.'); return String(a); };
@@ -394,6 +413,11 @@ export function makeHandler({ getPublic, getTrade, getSites, setSites, openAppro
       case 'rgbInstantListLots': {
         needConnected();
         return openApproval(origin, method, lotsParams(params));
+      }
+      // several NFTs listed at once, one approval (2.32.4)
+      case 'rgbInstantListMany': {
+        needConnected();
+        return openApproval(origin, method, listManyParams(params));
       }
       // several Instant listings of one token, one approval (a sweep): bought one after another
       case 'rgbInstantBuyMany': {
