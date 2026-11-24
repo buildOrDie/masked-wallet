@@ -166,7 +166,8 @@ export class ApproveView extends View {
   swapBody(a, P, b) {
     const sats = (n) => `${Number(n).toLocaleString('en-US')} sats`;
     const unitTxt = (n) => Number(Number(n).toPrecision(4)).toLocaleString('en-US');
-    const tok = P.listing?.mint ? `${esc(String(P.listing.mint.recipe?.ticker || ''))} <span class="muted small">NFT, minted in this claim</span>` : b ? (b.asset ? `${esc(b.asset.ticker)} <span class="mono">${esc(short(b.assetId, 8))}</span>` : `<span class="mono">${esc(short(b.assetId || P.assetId || '', 8))}</span>`) : '…';
+    const nMint = P.listing?.mint?.nfts?.length || 1;
+    const tok = P.listing?.mint ? `${nMint > 1 ? `${nMint} × ` : ''}${esc(String(P.listing.mint.recipe?.ticker || ''))} <span class="muted small">${nMint > 1 ? 'NFTs, minted' : 'NFT, minted'} in this claim</span>` : b ? (b.asset ? `${esc(b.asset.ticker)} <span class="mono">${esc(short(b.assetId, 8))}</span>` : `<span class="mono">${esc(short(b.assetId || P.assetId || '', 8))}</span>`) : '…';
     if (a.method === 'rgbListAssets') {
       const list = b?.list || [];
       return `<div class="kv">${rowKV('Tokens', b ? (list.length ? list.map((x) => esc(x.ticker || short(x.assetId, 6))).join(', ') : 'none yet') : '…')}${rowKV('Network', esc(this.app.rgb.profile.label))}</div>
@@ -228,7 +229,10 @@ export class ApproveView extends View {
     }[m];
     // a launchpad claim this wallet mints (2.32.1)
     const minting = m === 'rgbInstantBuy' && !!P.listing?.mint;
-    const nextTxt = minting ? 'A launchpad claim: MASKED mints this NFT from the collection\'s files onto an output of yours in the payment transaction and signs its part. The launchpad checks the NFT and sends the transaction while your claim holds. The NFT shows after one confirmation. If the claim isn\'t completed in time, it never goes through: nothing is paid.' : next;
+    const batch = (P.listing?.mint?.nfts?.length || 1) > 1;
+    const nextTxt = minting ? (batch
+      ? `A launchpad claim for ${P.listing.mint.nfts.length} NFTs: MASKED mints each one from the collection's files onto its own output of yours, all in the one payment transaction, and signs its part. The launchpad checks every NFT and sends the transaction while your claim holds. They show after one confirmation. If the claim isn't completed in time, it never goes through: nothing is paid.`
+      : 'A launchpad claim: MASKED mints this NFT from the collection\'s files onto an output of yours in the payment transaction and signs its part. The launchpad checks the NFT and sends the transaction while your claim holds. The NFT shows after one confirmation. If the claim isn\'t completed in time, it never goes through: nothing is paid.') : next;
     const top = buying && b?.topUp ? `<div class="info warn"><b>Your RGB balance is too low for this.</b> Buying RGB tokens is paid from your RGB balance (${sats(b.topUp.have || 0)} there now, confirmed or not). Add ${sats(b.topUp.sats)} from your Bitcoin balance: one transaction, ready after one block (about 10 minutes). Then come back and buy.</div>
       <button class="btn ghost wide" data-ap-topup ${b.topUp.sent || this.state.busy ? 'disabled' : ''}>${b.topUp.sent ? 'Added. Ready after one block' : `Add ${sats(b.topUp.sats)} to RGB balance`}</button>` : '';
     return `${hero}<div class="kv">${rowKV('Token', tok)}${rows}${rowKV('Network', esc(this.app.rgb.profile.label))}</div>${top}
