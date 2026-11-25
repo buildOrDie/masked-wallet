@@ -298,7 +298,63 @@ export class LiteWallet {
     await this.wallet.sync(online);
     await this.save();
   }
-  async refreshWallet() { const r = await this.wallet.refresh(this.requireOnline(), null, [], false); await this.save(); return plain(r); }
+  /**
+   * Ask the transfer servers about waiting transfers. Each waiting receive costs a call on every refresh, and a wallet
+   * that made many invoices (launchpad claims, test sends) kept dozens waiting for data that never comes: refreshes
+   * took long. Receives waiting longer than STALE_RECEIVE_MS are asked about once an hour (`all`), not every time.
+   * Nothing is given up: they're only checked less often.
+   * @param {{ all?: boolean }} [o] all: every waiting transfer, the old ones too
+   */
+  async refreshWallet({ all = true } = {}) {
+    if (typeof this.wallet.setRefreshSkip === 'function') {
+      try { this.wallet.setRefreshSkip(all ? [] : this.staleReceives()); } catch { /* refreshes them all */ }
+    }
+    const r = await this.wallet.refresh(this.requireOnline(), null, [], false);
+    await this.save();
+    return plain(r);
+  }
+  /**
+   * Why `amount` (base units) of a token can't be sent right now, or '' when it can: only tokens on settled outputs
+   * no listing holds can go. The rest is in listings, or on outputs whose transaction (a cancel, a move, a receive)
+   * hasn't confirmed yet. Before, the engine's "Insufficient total assignments" was all people saw.
+   */
+  sendBlocker(assetId, amount) {
+    let h;
+    try { h = heldBreakdown(plain(this.wallet.listUnspents(false)) || [], String(assetId), this.reserved); } catch { return ''; }
+    const want = BigInt(amount || 0), free = BigInt(h.free);
+    if (want <= free) return '';
+    let a = null;
+    try { const r = plain(this.wallet.listAssets([]) || {}) || {}; a = [...(r.nia || []), ...(r.ifa || [])].find((x) => x?.assetId === assetId) || null; } catch { a = null; }
+    const p = Number(a?.precision || 0), tick = a?.ticker || 'tokens';
+    const show = (v) => { const n = BigInt(v), d = 10n ** BigInt(p); const w = (n / d).toLocaleString('en-US'); const f = p ? String(n % d).padStart(p, '0').replace(/0+$/, '') : ''; return f ? `${w}.${f}` : w; };
+    const parts = [];
+    if (BigInt(h.waiting) > 0n) parts.push(`${show(h.waiting)} is waiting for its block (a cancel, move or receive not confirmed yet, usually about 10 minutes)`);
+    if (BigInt(h.listed) > 0n) parts.push(`${show(h.listed)} is in your listings`);
+    if (BigInt(h.other) > 0n) parts.push(`${show(h.other)} is held by an unfinished transfer`);
+    const rest = parts.length ? ` ${parts.join(', and ')}.` : '';
+    return free > 0n
+      ? `Only ${show(h.free)} ${tick} can be sent right now.${rest} Send ${show(h.free)} or less, or try again after the next block. Nothing was sent.`
+      : `None of your ${tick} can be sent right now.${rest} Try again after the next block. Nothing was sent.`;
+  }
+  /** Receives older than this, still waiting for their transfer data, are checked hourly instead of every refresh. */
+  static STALE_RECEIVE_MS = 24 * 3600_000;
+  /** Batch indexes of receives waiting for transfer data since before STALE_RECEIVE_MS ago. */
+  staleReceives(now = Date.now()) {
+    const ids = [null];
+    try { const r = plain(this.wallet.listAssets([]) || {}) || {}; for (const k of ['nia', 'ifa', 'uda', 'cfa']) for (const x of r[k] || []) if (x?.assetId) ids.push(String(x.assetId)); } catch { /* the receives with no asset yet */ }
+    const sec = (v) => Number(v || 0) * (Number(v) < 1e12 ? 1000 : 1);
+    const out = new Set();
+    for (const id of ids) {
+      let list = [];
+      try { list = plain(this.engineTransfers(id)) || []; } catch { list = []; }
+      for (const t of list) {
+        if (!/^Receive/.test(String(t?.kind || '')) || String(t.status) !== 'WaitingCounterparty' || t.batchTransferIdx == null) continue;
+        const made = sec(t.createdAt);
+        if (made > 0 && now - made > LiteWallet.STALE_RECEIVE_MS) out.add(Number(t.batchTransferIdx));
+      }
+    }
+    return [...out];
+  }
   async getAddress() { return this.wallet.getAddress(); }
   /** Coins that hold RGB tokens but can't be spent now: a pending send uses them, or an open invoice reserves them. */
   async lockedCoins() {
@@ -599,6 +655,8 @@ export class LiteWallet {
   async onchainSend({ invoice, assetId, amount, feeRate, endpoint = '', nft: isNft = false }) {
     if (isNft && !this.canNft) throw new Error('This MASKED build can\'t send NFTs. Update MASKED.');
     if (assetId) { try { await this.wallet.sync(this.requireOnline()); } catch { /* checked below with the last known state */ } await this.requireInSync(assetId); }
+    // more than is free right now: say where the rest is, before the engine refuses with "Insufficient total assignments"
+    if (assetId && !isNft) { const why = this.sendBlocker(assetId, amount); if (why) throw new Error(why); }
     if (this.engineV1) return this.onchainSendNative({ invoice, assetId, amount, feeRate, isNft });
     if (isInvoiceV1(invoice)) { if (isNft) throw new Error('MASKED can\'t send an NFT to this kind of invoice yet.'); return this.onchainSendV1({ invoice, assetId, amount, feeRate }); }
     const online = this.requireOnline();

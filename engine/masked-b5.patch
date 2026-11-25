@@ -11,7 +11,7 @@ index 884d686..e2896b5 100644
  rgb-strict-encoding = { version = "=1.0.5", default-features = false, features = [
      "bitcoin",
 diff --git a/bindings/wasm/src/lib.rs b/bindings/wasm/src/lib.rs
-index 51b6efd..309d4ac 100644
+index 51b6efd..3d3e932 100644
 --- a/bindings/wasm/src/lib.rs
 +++ b/bindings/wasm/src/lib.rs
 @@ -77,6 +77,27 @@ pub fn init() {
@@ -220,7 +220,7 @@ index 51b6efd..309d4ac 100644
      #[wasm_bindgen(js_name = "getAddress")]
      pub fn get_address(&self) -> Result<String, JsValue> {
          self.inner
-@@ -635,6 +820,411 @@ impl WasmWallet {
+@@ -635,6 +820,422 @@ impl WasmWallet {
          to_js(&result)
      }
  
@@ -383,6 +383,17 @@ index 51b6efd..309d4ac 100644
 +            serde_wasm_bindgen::from_value(lots_js).map_err(|e| JsValue::from_str(&format!("Invalid lots: {e}")))?
 +        };
 +        self.inner.borrow_mut().set_swap_lots(lots.into_iter().map(|l| (l.vout, l.amount)).collect());
++        Ok(())
++    }
++
++    /// MASKED: batch transfers (`batchTransferIdx`) the next refreshes skip, until set again; `[]` refreshes them all.
++    /// For receives waiting for transfer data for days: each costs a transfer server call on every refresh.
++    #[wasm_bindgen(js_name = "setRefreshSkip")]
++    pub fn set_refresh_skip(&self, idx_js: JsValue) -> Result<(), JsValue> {
++        let idx: Vec<i32> = if idx_js.is_null() || idx_js.is_undefined() { vec![] } else {
++            serde_wasm_bindgen::from_value(idx_js).map_err(|e| JsValue::from_str(&format!("Invalid list: {e}")))?
++        };
++        self.inner.borrow_mut().set_refresh_skip(idx);
 +        Ok(())
 +    }
 +
@@ -632,7 +643,7 @@ index 51b6efd..309d4ac 100644
      /// Send RGB assets (end): broadcast a signed PSBT. Returns an OperationResult JS object.
      #[wasm_bindgen(js_name = "sendEnd")]
      pub async fn send_end(
-@@ -763,6 +1353,56 @@ impl WasmWallet {
+@@ -763,6 +1364,56 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -689,7 +700,7 @@ index 51b6efd..309d4ac 100644
      /// Drain all wallet funds (end): broadcast a signed PSBT. Returns the txid string.
      #[wasm_bindgen(js_name = "drainToEnd")]
      pub async fn drain_to_end(
-@@ -1074,6 +1714,22 @@ impl WasmWallet {
+@@ -1074,6 +1725,22 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -712,7 +723,7 @@ index 51b6efd..309d4ac 100644
      /// Check if the wallet needs a backup. Returns true if modified since last backup.
      #[wasm_bindgen(js_name = "backupInfo")]
      pub fn backup_info(&self) -> Result<bool, JsValue> {
-@@ -1217,7 +1873,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
+@@ -1217,7 +1884,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
  /// Works before the witness transaction is broadcast. Takes the raw consignment
  /// bytes (strict-encoded, not base64), the witness transaction ID, and the Bitcoin network.
  ///
@@ -722,7 +733,7 @@ index 51b6efd..309d4ac 100644
  #[wasm_bindgen(js_name = "validateConsignmentOffchain")]
  pub fn validate_consignment_offchain(
      consignment_bytes: &[u8],
-@@ -1235,3 +1892,43 @@ pub fn validate_consignment_offchain(
+@@ -1235,3 +1903,43 @@ pub fn validate_consignment_offchain(
      .map_err(|e| JsValue::from_str(&e.to_string()))?;
      to_js(&result)
  }
@@ -744,7 +755,7 @@ index 51b6efd..309d4ac 100644
 +/// MASKED: the features of this engine build.
 +#[wasm_bindgen(js_name = "engineFeatures")]
 +pub fn engine_features() -> Vec<String> {
-+    vec!["swap".into(), "presign".into(), "proxy-v1".into(), "p2p-swap".into(), "output-locks".into(), "uda".into(), "cosign".into(), "uda-claim".into(), "legacy-migration".into(), "legacy-consignments".into(), "legacy-backup".into(), "reopen-purchase".into()]
++    vec!["swap".into(), "presign".into(), "proxy-v1".into(), "p2p-swap".into(), "output-locks".into(), "uda".into(), "cosign".into(), "uda-claim".into(), "legacy-migration".into(), "legacy-consignments".into(), "legacy-backup".into(), "reopen-purchase".into(), "refresh-skip".into()]
 +}
 +
 +#[wasm_bindgen(js_name = "inspectSwapConsignment")]
@@ -1729,7 +1740,7 @@ index c5c45b2..d793073 100644
  pub(crate) mod offline;
  #[cfg(feature = "esplora")]
 diff --git a/src/wallet/offline.rs b/src/wallet/offline.rs
-index a3a9f46..9cff31a 100644
+index a3a9f46..f50b1ee 100644
 --- a/src/wallet/offline.rs
 +++ b/src/wallet/offline.rs
 @@ -37,7 +37,13 @@ pub(crate) const CONFIRMATION_MARGIN_SECS: u32 = 86400;
@@ -1883,7 +1894,7 @@ index a3a9f46..9cff31a 100644
      /// Proxy data of each received consignment. Key: recipient_id
      #[cfg(feature = "esplora")]
      pub(crate) received_consignment_meta: HashMap<String, ReceivedConsignmentMeta>,
-@@ -1312,9 +1419,69 @@ pub struct Wallet {
+@@ -1312,9 +1419,72 @@ pub struct Wallet {
      pub(crate) rgb_stock: std::rc::Rc<std::cell::RefCell<Option<crate::utils::MemStock>>>,
      pub(crate) vss_client: Option<super::vss::VssBackupClient>,
      pub(crate) last_vss_backup_error: std::cell::RefCell<Option<String>>,
@@ -1905,6 +1916,9 @@ index a3a9f46..9cff31a 100644
 +    /// MASKED: the next `color_swap` also puts these amounts of the asset on these outputs of its PSBT, this
 +    /// wallet's own (`set_swap_lots`): one transaction makes every lot of a listing in lots.
 +    pub(crate) swap_lots: Vec<(u32, u64)>,
++    /// MASKED: batch transfers `refresh` leaves alone this time (`set_refresh_skip`): receives waiting for transfer
++    /// data for days, asked about on every refresh though nothing comes. The wallet clears it now and then.
++    pub(crate) refresh_skip: HashSet<i32>,
 +    /// MASKED: the lots of the colouring under way, from `color_swap` to `_prepare_rgb_psbt_wasm`.
 +    pub(crate) lots_now: Vec<crate::wallet::online::LotOut>,
 +    /// MASKED: receives (recipient IDs) of P2P swap buys whose consignment is checked but not ACKed until the
@@ -1953,7 +1967,7 @@ index a3a9f46..9cff31a 100644
      /// Create a wallet and restore its latest durable IndexedDB snapshot, if one exists.
      ///
      /// The returned wallet is ready for use only after the IndexedDB read and snapshot
-@@ -1325,6 +1492,31 @@ impl Wallet {
+@@ -1325,6 +1495,31 @@ impl Wallet {
          let snapshot = super::idb_store::load_snapshot(&wallet.idb_key())
              .await
              .map_err(|details| Error::Persistence { details })?;
@@ -1985,7 +1999,7 @@ index a3a9f46..9cff31a 100644
          if let Some(snapshot) = snapshot {
              wallet.idb_loaded = Some((snapshot.writer, snapshot.sequence));
              wallet
-@@ -1460,6 +1652,7 @@ impl Wallet {
+@@ -1460,6 +1655,7 @@ impl Wallet {
              transfer_artifacts: HashMap::new(),
              #[cfg(feature = "esplora")]
              received_consignments: HashMap::new(),
@@ -1993,7 +2007,7 @@ index a3a9f46..9cff31a 100644
              #[cfg(feature = "esplora")]
              received_consignment_meta: HashMap::new(),
              #[cfg(feature = "esplora")]
-@@ -1475,6 +1668,18 @@ impl Wallet {
+@@ -1475,6 +1671,19 @@ impl Wallet {
              },
              vss_client: None,
              last_vss_backup_error: std::cell::RefCell::new(None),
@@ -2005,6 +2019,7 @@ index a3a9f46..9cff31a 100644
 +            own_unconfirmed: HashSet::new(),
 +            swap_change_vout: None,
 +            swap_lots: vec![],
++            refresh_skip: HashSet::new(),
 +            lots_now: vec![],
 +            swap_holds: HashSet::new(),
 +            swap_releases: HashMap::new(),
@@ -2012,7 +2027,7 @@ index a3a9f46..9cff31a 100644
          })
      }
  
-@@ -1542,6 +1747,18 @@ impl Wallet {
+@@ -1542,6 +1751,18 @@ impl Wallet {
          self.wallet_data.supported_schemas.contains(asset_schema)
      }
  
@@ -2031,7 +2046,7 @@ index a3a9f46..9cff31a 100644
      pub(crate) fn check_schema_support(&self, asset_schema: &AssetSchema) -> Result<(), Error> {
          if !self.supports_schema(asset_schema) {
              return Err(Error::UnsupportedSchema {
-@@ -1690,8 +1907,10 @@ impl Wallet {
+@@ -1690,8 +1911,10 @@ impl Wallet {
              None => rgb_allocations.as_deref().unwrap(),
          };
  
@@ -2043,7 +2058,7 @@ index a3a9f46..9cff31a 100644
          allocatable.sort_by_key(|t| t.rgb_allocations.len() + t.pending_blinded as usize);
          match allocatable.first() {
              Some(mut selected) => {
-@@ -2597,6 +2816,410 @@ impl Wallet {
+@@ -2597,6 +2820,410 @@ impl Wallet {
          Ok(asset)
      }
  
@@ -2454,7 +2469,7 @@ index a3a9f46..9cff31a 100644
      /// Finalize a PSBT, optionally providing BDK sign options to tweak the behavior of the
      /// finalizer.
      pub fn finalize_psbt(
-@@ -2618,7 +3241,7 @@ impl Wallet {
+@@ -2618,7 +3245,7 @@ impl Wallet {
          Ok(psbt.to_string())
      }
  
@@ -2463,7 +2478,7 @@ index a3a9f46..9cff31a 100644
          let sign_options = sign_options.unwrap_or_default();
          let [colored, vanilla] = &self.signers;
          self.bdk_wallet
-@@ -2877,6 +3500,7 @@ impl Wallet {
+@@ -2877,6 +3504,7 @@ impl Wallet {
  
          let assets = self.database.iter_assets()?;
          let mut nia = None;
@@ -2471,7 +2486,7 @@ index a3a9f46..9cff31a 100644
          let mut ifa = None;
          let mut bfa = None;
          for schema in filter_asset_schemas {
-@@ -2901,6 +3525,26 @@ impl Wallet {
+@@ -2901,6 +3529,26 @@ impl Wallet {
                              .collect::<Result<Vec<AssetNIA>, Error>>()?,
                      );
                  }
@@ -2498,7 +2513,7 @@ index a3a9f46..9cff31a 100644
                  AssetSchema::Ifa => {
                      ifa = Some(
                          assets
-@@ -2945,7 +3589,7 @@ impl Wallet {
+@@ -2945,7 +3593,7 @@ impl Wallet {
          }
  
          info!(self.logger, "List assets completed");
@@ -2507,7 +2522,7 @@ index a3a9f46..9cff31a 100644
      }
  
      pub(crate) fn sync_if_requested(
-@@ -3877,6 +4521,17 @@ impl Wallet {
+@@ -3877,6 +4525,17 @@ impl Wallet {
          Ok(address.to_string())
      }
  
@@ -2525,7 +2540,7 @@ index a3a9f46..9cff31a 100644
      /// Rotate the pinned address for the given keychain.
      ///
      /// Only meaningful when `reuse_addresses` is `true`. Increments the pinned derivation
-@@ -4019,6 +4674,7 @@ impl Wallet {
+@@ -4019,6 +4678,7 @@ impl Wallet {
              bdk_changeset: self.bdk_database.get_data().clone(),
              transfer_artifacts: self.transfer_artifacts.clone(),
              received_consignments: self.received_consignments.clone(),
@@ -2533,7 +2548,7 @@ index a3a9f46..9cff31a 100644
              received_consignment_meta: self.received_consignment_meta.clone(),
              received_signed_txs: self.received_signed_txs.clone(),
              received_mints: self.received_mints.clone(),
-@@ -4116,6 +4772,7 @@ impl Wallet {
+@@ -4116,6 +4776,7 @@ impl Wallet {
  
          // Restore received consignments
          self.received_consignments = snapshot.received_consignments;
@@ -2541,7 +2556,7 @@ index a3a9f46..9cff31a 100644
          self.received_consignment_meta = snapshot.received_consignment_meta;
          self.received_signed_txs = snapshot.received_signed_txs;
          self.received_mints = snapshot.received_mints;
-@@ -4125,7 +4782,11 @@ impl Wallet {
+@@ -4125,7 +4786,11 @@ impl Wallet {
  
          *self.rgb_stock.borrow_mut() = Some(stock);
  
@@ -2554,7 +2569,7 @@ index a3a9f46..9cff31a 100644
      }
  }
  
-@@ -4203,6 +4864,7 @@ pub(crate) mod address_reuse_tests {
+@@ -4203,6 +4868,7 @@ pub(crate) mod address_reuse_tests {
              transfer_artifacts: HashMap::new(),
              #[cfg(feature = "esplora")]
              received_consignments: HashMap::new(),
@@ -2562,7 +2577,7 @@ index a3a9f46..9cff31a 100644
              #[cfg(feature = "esplora")]
              received_consignment_meta: HashMap::new(),
              #[cfg(feature = "esplora")]
-@@ -4215,6 +4877,18 @@ pub(crate) mod address_reuse_tests {
+@@ -4215,6 +4881,19 @@ pub(crate) mod address_reuse_tests {
              rgb_stock: std::rc::Rc::new(std::cell::RefCell::new(None)),
              vss_client: None,
              last_vss_backup_error: std::cell::RefCell::new(None),
@@ -2574,6 +2589,7 @@ index a3a9f46..9cff31a 100644
 +            own_unconfirmed: HashSet::new(),
 +            swap_change_vout: None,
 +            swap_lots: vec![],
++            refresh_skip: HashSet::new(),
 +            lots_now: vec![],
 +            swap_holds: HashSet::new(),
 +            swap_releases: HashMap::new(),
@@ -2581,7 +2597,7 @@ index a3a9f46..9cff31a 100644
          }
      }
  
-@@ -4271,6 +4945,102 @@ pub(crate) mod address_reuse_tests {
+@@ -4271,6 +4950,102 @@ pub(crate) mod address_reuse_tests {
      }
  }
  
@@ -2685,7 +2701,7 @@ index a3a9f46..9cff31a 100644
  mod debug_tests {
      use super::*;
 diff --git a/src/wallet/online.rs b/src/wallet/online.rs
-index ca96b4a..05ee256 100644
+index ca96b4a..9e0115d 100644
 --- a/src/wallet/online.rs
 +++ b/src/wallet/online.rs
 @@ -4,6 +4,12 @@
@@ -3403,7 +3419,19 @@ index ca96b4a..05ee256 100644
                  let txo = self.database.get_txo(&outpoint)?.expect("txo must exist");
                  let mut txo: DbTxoActMod = txo.into();
                  txo.pending_witness = ActiveValue::Set(false);
-@@ -6446,7 +6741,7 @@ impl Wallet {
+@@ -6147,6 +6442,11 @@ impl Wallet {
+                 .retain(|t| batch_transfers_ids.contains(&t.idx));
+         };
+         db_data.batch_transfers.retain(|t| t.waiting());
++        // MASKED: receives the wallet asked to leave alone this time (waiting for data for days)
++        if !self.refresh_skip.is_empty() {
++            let skip = self.refresh_skip.clone();
++            db_data.batch_transfers.retain(|t| !skip.contains(&t.idx));
++        }
+ 
+         let mut refresh_result = HashMap::new();
+         for transfer in db_data.batch_transfers.clone().into_iter() {
+@@ -6446,7 +6746,7 @@ impl Wallet {
          skip_sync: bool,
      ) -> Result<bool, Error> {
          if !skip_sync {
@@ -3412,7 +3440,7 @@ index ca96b4a..05ee256 100644
          }
  
          let mut db_data = self.database.get_db_data(false)?;
-@@ -6593,6 +6888,7 @@ impl Wallet {
+@@ -6593,6 +6893,7 @@ impl Wallet {
                  }
              }
              (Assignment::LinkRight, AssetSchema::Ifa | AssetSchema::Bfa) => {}
@@ -3420,7 +3448,7 @@ index ca96b4a..05ee256 100644
              _ => {
                  return Err(Error::InvalidAssignment);
              }
-@@ -7044,6 +7340,7 @@ impl Wallet {
+@@ -7044,6 +7345,7 @@ impl Wallet {
      #[allow(clippy::too_many_arguments)]
      async fn post_transfer_data(
          &self,
@@ -3428,7 +3456,7 @@ index ca96b4a..05ee256 100644
          recipients: &mut [LocalRecipient],
          consignment: &[u8],
          sender_sk: &SigningKey,
-@@ -7052,7 +7349,14 @@ impl Wallet {
+@@ -7052,7 +7354,14 @@ impl Wallet {
          consignment_hash: &str,
          batch: bool,
      ) -> Result<(), Error> {
@@ -3443,7 +3471,7 @@ index ca96b4a..05ee256 100644
              let recipient_id = &recipient.recipient_id;
              let recipient_vk = verifying_key_from_bytes(&recipient.public_key)?;
              let derived = derive_shared(sender_sk, &recipient_vk)?;
-@@ -7130,6 +7434,29 @@ impl Wallet {
+@@ -7130,6 +7439,29 @@ impl Wallet {
                      Err(_) => continue,
                  }
  
@@ -3473,7 +3501,7 @@ index ca96b4a..05ee256 100644
                  transport_endpoint.used = true;
                  found_valid = true;
                  break;
-@@ -7142,6 +7469,41 @@ impl Wallet {
+@@ -7142,6 +7474,41 @@ impl Wallet {
          Ok(())
      }
  
@@ -3515,7 +3543,7 @@ index ca96b4a..05ee256 100644
      /// Complete the send operation (wasm32 async).
      ///
      /// See native [`send_end`](Wallet::send_end) for full documentation.
-@@ -7321,6 +7683,7 @@ impl Wallet {
+@@ -7321,6 +7688,7 @@ impl Wallet {
              for (asset_id, info_contents_asset) in asset_infos.iter_mut() {
                  post_result = self
                      .post_transfer_data(
@@ -3523,7 +3551,7 @@ index ca96b4a..05ee256 100644
                          &mut info_contents_asset.recipients,
                          &consignment_bytes[asset_id],
                          &sender_sk,
-@@ -7590,32 +7953,272 @@ impl Wallet {
+@@ -7590,31 +7958,271 @@ impl Wallet {
          Ok(tx.compute_txid().to_string())
      }
  
@@ -3736,7 +3764,6 @@ index ca96b4a..05ee256 100644
  
 -        let known_circulating_supply = asset
 -            .known_circulating_supply
--            .unwrap()
 +        // the fee of one output first, then each extra output's share
 +        let build = |wallet: &mut Self, shares: &[(ScriptBuf, u64)], change: ScriptBuf| -> Result<Psbt, Error> {
 +            let mut tx_builder = wallet.bdk_wallet.build_tx();
@@ -3810,11 +3837,10 @@ index ca96b4a..05ee256 100644
 +
 +        let known_circulating_supply = asset
 +            .known_circulating_supply
-+            .unwrap()
+             .unwrap()
              .parse::<u64>()
              .unwrap();
-         let inflation =
-@@ -7782,6 +8385,7 @@ impl Wallet {
+@@ -7782,6 +8390,7 @@ impl Wallet {
              info_contents.extra_allocations,
              info_contents.change_utxo_idx,
              info_contents.btc_change,
@@ -3822,7 +3848,7 @@ index ca96b4a..05ee256 100644
              TransferStatus::WaitingConfirmations,
              info_contents.min_confirmations,
              info_contents.expiration_timestamp,
-@@ -8119,6 +8723,7 @@ impl Wallet {
+@@ -8119,6 +8728,7 @@ impl Wallet {
                  info_contents.extra_allocations,
                  info_contents.change_utxo_idx,
                  info_contents.btc_change,
@@ -3830,7 +3856,7 @@ index ca96b4a..05ee256 100644
                  TransferStatus::WaitingConfirmations,
                  info_contents.min_confirmations,
                  None,
-@@ -8605,6 +9210,7 @@ impl Wallet {
+@@ -8605,6 +9215,7 @@ impl Wallet {
          // follows, as the TX is signed only after the lock
          let post_result = self
              .post_transfer_data(
@@ -3838,7 +3864,7 @@ index ca96b4a..05ee256 100644
                  &mut asset_infos
                      .get_mut(&asset_id)
                      .expect("saved by _prepare_transfer_psbt_wasm")
-@@ -8838,7 +9444,7 @@ impl Wallet {
+@@ -8838,7 +9449,7 @@ impl Wallet {
          self.check_online(online)?;
  
          if !skip_sync {
@@ -3847,7 +3873,7 @@ index ca96b4a..05ee256 100644
              self.flush().await?;
          }
  
-@@ -9321,6 +9927,7 @@ mod send_end_tests {
+@@ -9321,6 +9932,7 @@ mod send_end_tests {
              entropy: 0,
              operation_secret_key: Some(OPERATION_SEED.to_vec()),
              sender_transport_endpoint: None,
@@ -3855,7 +3881,7 @@ index ca96b4a..05ee256 100644
          };
          let db = DbBatchTransfer {
              idx: 1,
-@@ -9427,6 +10034,7 @@ mod send_end_tests {
+@@ -9427,6 +10039,7 @@ mod send_end_tests {
              entropy: 0,
              operation_secret_key: Some(OPERATION_SEED.to_vec()),
              sender_transport_endpoint: Some(s!("rpc://127.0.0.1:1")),
@@ -3863,7 +3889,7 @@ index ca96b4a..05ee256 100644
          }
      }
  
-@@ -10024,6 +10632,272 @@ mod send_end_tests {
+@@ -10024,6 +10637,272 @@ mod send_end_tests {
          assert!(kept.signed_psbt.is_none());
      }
  
@@ -4136,7 +4162,7 @@ index ca96b4a..05ee256 100644
      #[test]
      fn update_or_save_transfers_updates_outgoing_batch() {
          let (wallet, _) = setup();
-@@ -10051,6 +10925,7 @@ mod send_end_tests {
+@@ -10051,6 +10930,7 @@ mod send_end_tests {
                  info.extra_allocations.clone(),
                  info.change_utxo_idx,
                  None,
@@ -4144,7 +4170,7 @@ index ca96b4a..05ee256 100644
                  TransferStatus::Initiated,
                  1,
                  None,
-@@ -12074,3 +12949,1453 @@ mod bfa_tests {
+@@ -12074,3 +12954,1458 @@ mod bfa_tests {
          assert!(options(&format!(r#","evm_chains":{{"mainnet":{chain}}}"#)).is_err());
      }
  }
@@ -4377,6 +4403,11 @@ index ca96b4a..05ee256 100644
 +    /// gets the first, these the others, the change output the rest. Empty clears it.
 +    pub fn set_swap_lots(&mut self, lots: Vec<(u32, u64)>) {
 +        self.swap_lots = lots;
++    }
++
++    /// MASKED: batch transfers (by index) that `refresh` skips until this is set again; empty refreshes them all.
++    pub fn set_refresh_skip(&mut self, idx: Vec<i32>) {
++        self.refresh_skip = idx.into_iter().collect();
 +    }
 +
 +    /// Colour `psbt` for `amount` of `asset_id` to `recipient`, a witness seal (shared by `color_swap` and

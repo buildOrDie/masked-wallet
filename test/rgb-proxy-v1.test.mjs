@@ -213,7 +213,7 @@ test('wallet: pays a 1.0 invoice as a donation — blinding from the keys, no 0.
   assert.deepEqual(built.slice(0, 2), [`${T('b')}:2`, `${T('a')}:0`], 'both token outputs, largest first; never the unsettled one');
   assert.equal(colored.amount, '600');
   // more than is settled: says how much is
-  await assert.rejects(w.onchainSend({ invoice, assetId: ASSET, amount: 800, feeRate: 1 }), /Only 700 of this token is settled/);
+  await assert.rejects(w.onchainSend({ invoice, assetId: ASSET, amount: 800, feeRate: 1 }), /Only 700 tokens can be sent right now\. 900 is waiting for its block/);
   // an engine without the blinding argument is refused before anything happens
   w.w.colorSwap = async (a, b, c, d, e, f, g, h, i) => i;
   assert.equal(w.canProxyV1, false);

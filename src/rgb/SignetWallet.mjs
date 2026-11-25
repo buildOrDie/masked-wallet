@@ -161,7 +161,10 @@ export class SignetWallet {
           if (n) console.info('[MASKED] Refused NFT purchases opened again', n);
         } catch (e) { console.warn('[MASKED] Refused NFT purchases', e); }
       }
-      const refreshed = await wallet.refreshWallet() || {};
+      // receives waiting for data for over a day: asked about hourly (and on a full refresh), not every time
+      const all = full || Date.now() - (this.staleAt || 0) > 3600_000;
+      if (all) this.staleAt = Date.now();
+      const refreshed = await wallet.refreshWallet({ all }) || {};
       took.transfers = Date.now() - t1;
       const stranded = Object.entries(refreshed).filter(([, r]) => /signed PSBT not found/i.test(JSON.stringify(r?.failure ?? ''))).map(([idx]) => Number(idx));
       // Sequential: the WASM wallet has a shared RefCell and does not support overlapping calls.
