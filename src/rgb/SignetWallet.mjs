@@ -22,13 +22,27 @@ export class SignetWallet {
   get backupRequired() { return this.storage.getItem(this.dirtyKey) === '1'; }
   /** A backup file has been saved at least once (it holds the RGB keys; later backups add the latest tokens). */
   get everBackedUp() { return this.storage.getItem(`${this.vaultKey}.backed-up`) === '1'; }
+  /**
+   * One RGB operation at a time (the engine keeps its state across awaits). An operation asked for while another runs
+   * waits its turn, up to EXCLUSIVE_WAIT_MS, instead of failing at once: a buy approved while the wallet was syncing
+   * said "Wait for the current RGB operation." and only worked after closing the wallet.
+   */
   async exclusive(fn) {
-    if (this.busy) throw new Error('Wait for the current RGB operation.');
+    const before = this.tail || Promise.resolve();
+    let release = () => {};
+    const mine = new Promise((r) => { release = r; });
+    this.tail = before.then(() => mine);
+    let timer;
+    const late = new Promise((_, no) => { timer = setTimeout(() => no(new Error('Wait for the current RGB operation.')), SignetWallet.EXCLUSIVE_WAIT_MS); });
+    // gave up waiting: its turn is passed on once the one before it ends
+    try { await Promise.race([before, late]); } catch (e) { before.then(release); throw e; } finally { clearTimeout(timer); }
     this.busy = true;
     // the engine is mid-call (it holds its state across awaits): an NFT picture read meanwhile waits (nftImage)
     if (this.wallet) this.wallet.engineBusy = true;
-    try { return await fn(); } finally { this.busy = false; if (this.wallet) this.wallet.engineBusy = false; }
+    try { return await fn(); } finally { this.busy = false; if (this.wallet) this.wallet.engineBusy = false; release(); }
   }
+  /** How long an RGB operation waits for the one running (a refresh takes a few seconds, a full one longer). */
+  static EXCLUSIVE_WAIT_MS = 120_000;
   /**
    * `replace`: load `backup` over this browser's RGB (the same keys: another copy of this wallet saved newer data).
    * This browser's own state is kept first (the last few, see `beforeLoads`), so a load can be undone.

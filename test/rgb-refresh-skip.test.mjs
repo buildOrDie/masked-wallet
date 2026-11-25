@@ -75,3 +75,43 @@ test('NFT pictures: the engine copy is not read while a refresh holds the engine
   assert.equal(reads, 1, 'read once the engine was free');
   assert.match(String(src), /^data:image\/png;base64,/);
 });
+
+test('RGB operations queue: a buy asked for during a sync waits for it, instead of "Wait for the current RGB operation."', async () => {
+  const { SignetWallet } = await import('../src/rgb/SignetWallet.mjs');
+  const w = Object.create(SignetWallet.prototype);
+  w.busy = false;
+  const order = [];
+  const sync = w.exclusive(async () => { order.push('sync start'); await new Promise((r) => setTimeout(r, 80)); order.push('sync end'); });
+  const buy = w.exclusive(async () => { order.push('buy'); return 'bought'; });
+  const send = w.exclusive(async () => { order.push('send'); throw new Error('send failed'); });
+  const after = w.exclusive(async () => { order.push('after'); return 1; });
+  assert.equal(await buy, 'bought');
+  await assert.rejects(send, /send failed/);
+  assert.equal(await after, 1, 'a failure frees the next one');
+  await sync;
+  assert.deepEqual(order, ['sync start', 'sync end', 'buy', 'send', 'after']);
+  // one waiting too long gives up, and the ones after it still run
+  const old = SignetWallet.EXCLUSIVE_WAIT_MS; SignetWallet.EXCLUSIVE_WAIT_MS = 30;
+  const long = w.exclusive(() => new Promise((r) => setTimeout(r, 120)));
+  await assert.rejects(w.exclusive(async () => 'never'), /Wait for the current RGB operation/);
+  SignetWallet.EXCLUSIVE_WAIT_MS = 1000;
+  assert.equal(await w.exclusive(async () => 'later'), 'later');
+  await long; SignetWallet.EXCLUSIVE_WAIT_MS = old;
+});
+
+test('approvals: approved while still preparing (wallet syncing) waits for it, instead of "Still preparing."', async () => {
+  const { ApprovalController } = await import('../src/dapp/ApprovalController.mjs');
+  const c = Object.create(ApprovalController.prototype);
+  const a = { method: 'rgbInstantListMany', prepBusy: true };
+  const shown = [];
+  c.app = { render: () => {}, rgb: null, state: { busy: false, status: {} } };
+  c.active = a;
+  c.prepare = () => {};
+  let finished = null;
+  c.finish = (x) => { finished = x; };
+  c.run = async (x) => { shown.push(c.state.status.approve?.[0]); if (!x.prep) throw new Error('Still preparing.'); return 'listed'; };
+  setTimeout(() => { a.prep = { ok: true }; a.prepBusy = false; }, 300);
+  await c.approve();
+  assert.deepEqual(finished, { result: 'listed' });
+  assert.equal(c.state.status.approve?.[1] === 'err', false);
+});

@@ -100,10 +100,15 @@ for (const [label, decoded] of [
   await assert.rejects(() => f.service.send({ invoice: 'rgb:test', assetId: 'asset', amount: '100', fee: '2' }));
   assert.equal(f.calls.some(c => c[0] === 'send'), false);
 });
-test('overlapping WASM operations are rejected and closing clears in-memory secrets', async () => {
+test('overlapping WASM operations wait their turn (2.32.6) and closing clears in-memory secrets', async () => {
   const f = fixture(); await open(f); let release;
   const pending = f.service.exclusive(() => new Promise(resolve => { release = resolve; }));
-  await assert.rejects(() => f.service.snapshot()); release(); await pending;
+  let ran = false;
+  const snap = f.service.snapshot().then(() => { ran = true; }, () => { ran = true; });
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(ran, false, 'waits for the operation running');
+  release(); await pending; await snap;
+  assert.equal(ran, true);
   await f.service.close(); assert.equal(f.service.mnemonic, ''); assert.equal(f.service.password, ''); assert.equal(f.service.wallet, null);
 });
 test('SDK string errors become readable messages', async () => {

@@ -69,6 +69,8 @@ export function fixesFor(method, text) {
 }
 
 export class ApprovalController {
+  /** How long an approval waits for its preparation (a sync, the RGB engine finishing another operation). */
+  static PREP_WAIT_MS = 120_000;
   /** @param {import('../app/MaskedApp.mjs').MaskedApp} app */
   constructor(app) {
     this.app = app;
@@ -460,6 +462,16 @@ export class ApprovalController {
     const app = this.app, state = this.state, a = this.active;
     state.busy = true; a.fixes = null; app.render();
     try {
+      // approved while still being prepared (the wallet syncing, the RGB engine busy): wait for it, instead of
+      // "Still preparing." and a Refresh button
+      if (NEEDS_PREP.includes(a.method) && !a.prep && !a.prepErr) {
+        state.status.approve = [/^rgb/.test(a.method) ? 'Waiting for your RGB wallet to finish updating…' : 'Preparing…', '']; app.render();
+        for (const until = Date.now() + ApprovalController.PREP_WAIT_MS; !a.prep && !a.prepErr && !a.gone && Date.now() < until;) {
+          await new Promise((ok) => setTimeout(ok, 250));
+          if (!a.prep && !a.prepBusy && !a.prepErr) this.prepare();
+        }
+        state.status.approve = ['', ''];
+      }
       try { this.finish({ result: await this.run(a) }); } catch (e) {
         // the wallet's view was behind (a move or purchase that confirmed since, a coin another transaction of yours
         // spent): nothing was sent. Catch up once and try again by itself, instead of sending the person to Settings
