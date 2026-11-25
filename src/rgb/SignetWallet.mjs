@@ -25,7 +25,9 @@ export class SignetWallet {
   async exclusive(fn) {
     if (this.busy) throw new Error('Wait for the current RGB operation.');
     this.busy = true;
-    try { return await fn(); } finally { this.busy = false; }
+    // the engine is mid-call (it holds its state across awaits): an NFT picture read meanwhile waits (nftImage)
+    if (this.wallet) this.wallet.engineBusy = true;
+    try { return await fn(); } finally { this.busy = false; if (this.wallet) this.wallet.engineBusy = false; }
   }
   /**
    * `replace`: load `backup` over this browser's RGB (the same keys: another copy of this wallet saved newer data).

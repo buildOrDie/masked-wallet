@@ -62,3 +62,16 @@ test('listed tokens: counted per token, so the wallet never offers them for send
   w._reserved = new Set();
   assert.deepEqual(w.listedByAsset(), {});
 });
+
+test('NFT pictures: the engine copy is not read while a refresh holds the engine', async () => {
+  const w = Object.create(LiteWallet.prototype);
+  let reads = 0;
+  const bytes = new Uint8Array([1, 2, 3]);
+  const digest = Buffer.from(await crypto.subtle.digest('SHA-256', bytes)).toString('hex');
+  w.w = { mediaFile: () => { reads++; return bytes; } };
+  w.engineBusy = true;
+  setTimeout(() => { w.engineBusy = false; }, 250);
+  const src = await w.nftImage({ digest, mime: 'image/png' }, async () => { throw new Error('no network'); });
+  assert.equal(reads, 1, 'read once the engine was free');
+  assert.match(String(src), /^data:image\/png;base64,/);
+});

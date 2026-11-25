@@ -392,9 +392,11 @@ export class LiteWallet {
     if (!media?.digest || !/^[0-9a-f]{64}$/.test(media.digest) || !IMAGE_MIME.test(media.mime)) return null;
     const timed = (ms) => (typeof AbortSignal?.timeout === 'function' ? AbortSignal.timeout(ms) : undefined);
     // the engine's own copy (2.32+): the picture came with the NFT, encrypted for this wallet, and was checked
-    // against the contract then; checked again here
+    // against the contract then; checked again here. Not while a refresh or send holds the engine: reading it then
+    // panicked ("already borrowed"), so the picture waits for it (a few seconds), then asks the servers.
+    for (let i = 0; this.engineBusy && i < 150; i++) await new Promise((r) => setTimeout(r, 100));
     try {
-      const own = typeof this.wallet?.mediaFile === 'function' ? this.wallet.mediaFile(media.digest) : null;
+      const own = !this.engineBusy && typeof this.wallet?.mediaFile === 'function' ? this.wallet.mediaFile(media.digest) : null;
       if (own?.length) {
         const bytes = own instanceof Uint8Array ? own : new Uint8Array(own);
         const sum = hex.encode(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)));
@@ -410,7 +412,7 @@ export class LiteWallet {
           const bytes = new Uint8Array(await r.arrayBuffer());
           const sum = hex.encode(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)));
           if (sum === media.digest) {
-            try { if (typeof this.w?.addMediaFile === 'function' && this.w.addMediaFile(bytes) === sum) { await this.media.put(sum, bytes); (this.mediaKept ??= new Set()).add(sum); } } catch { /* shown, not kept */ }
+            try { if (!this.engineBusy && typeof this.w?.addMediaFile === 'function' && this.w.addMediaFile(bytes) === sum) { await this.media.put(sum, bytes); (this.mediaKept ??= new Set()).add(sum); } } catch { /* shown, not kept */ }
             return `data:${media.mime};base64,${base64.encode(bytes)}`;
           }
         }
