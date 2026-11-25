@@ -43,6 +43,15 @@ const asset = (a) => ({
   precision: num(a?.precision), issuedSupply: num(a?.issuedSupply), balance: balance(a?.balance),
 });
 
+/**
+ * The engine's list of assets with each NFT's attachments (index → file) as a plain object. The engine hands that map
+ * over as a JS Map, which plain() turns into {}: up to 2.32.4 every NFT listing went out with its picture only, without
+ * its metadata.json, and every buyer's wallet refused the NFT for the missing file.
+ */
+export function assetsWithFiles(r) {
+  if (!r || !Array.isArray(r.uda)) return r;
+  return { ...r, uda: r.uda.map((a) => (a?.attachments instanceof Map ? { ...a, attachments: Object.fromEntries([...a.attachments.entries()].map(([k, v]) => [String(k), v])) } : a)) };
+}
 /** An NFT (RGB21 / UDA): one token; its image is the engine's own copy, or the transfer server's (see nftImage). */
 const nft = (a) => ({
   assetId: String(a?.assetId ?? ''), ticker: String(a?.ticker ?? '').slice(0, 12), name: String(a?.name ?? a?.ticker ?? ''),
@@ -299,7 +308,7 @@ export class LiteWallet {
   }
   async getBtcBalance() { const b = plain(this.wallet.getBtcBalance()); return { vanilla: balance(b?.vanilla), colored: balance(b?.colored) }; }
   async listAssets() {
-    const r = plain(this.wallet.listAssets([]) || {});
+    const r = plain(assetsWithFiles(this.wallet.listAssets([]) || {}));
     return { nia: (r.nia || []).map(asset), ifa: (r.ifa || []).map(asset), uda: (r.uda || []).map(nft) };
   }
   /** This engine build holds NFTs (RGB21 / UDA), and this network has them on (test networks for now). */
