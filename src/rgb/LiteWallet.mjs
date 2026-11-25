@@ -2759,6 +2759,42 @@ export class LiteWallet {
     const medias = (e.media || []).map((m) => ({ digest: String(m.digest), bytes: unb64(String(m.data)) }));
     await deliverConsignment({ invoice: q, picked, sender, key, kmid, medias, consignment: unb64(e.completed) });
   }
+  /**
+   * NFTs bought with MASKED up to 2.32.4 that this wallet refused: their listing went out with the NFT's picture only,
+   * without its metadata.json, so the wallet failed the receive though the purchase TX had paid and put the NFT on its
+   * output. Each one is rebuilt from the sold listing the market keeps (its transfer and every file of the NFT) and
+   * the purchase TX, and its receive opened again: the next refresh checks the transfer from scratch, as on its first
+   * arrival. Files are checked against their digests and the transfer against the chain, so the market is trusted
+   * with nothing. `soldUrl`: the market's sold listings (…/<offerId>). Returns how many were opened again.
+   * @param {{ all: () => Record<string, any>, get: (k: string) => any, set: (k: string, v: any) => void }} store
+   */
+  async recoverRefusedPurchases(store, soldUrl, fetchFn = fetch) {
+    if (!soldUrl || typeof this.wallet?.reopenPresignedReceive !== 'function' || typeof this.wallet?.addMediaFile !== 'function') return 0;
+    const buys = Object.entries(store.all() || {}).filter(([, e]) => e?.role === 'buyer' && !e.mint && !e.cosign && e.posted && !e.failed && e.recipientId && e.txid && Array.isArray(e.media) && !e.reopened);
+    if (!buys.length) return 0;
+    let refused;
+    try { refused = new Set((plain(this.engineTransfers(null)) || []).filter((t) => String(t?.status) === 'Failed' && t?.recipientId).map((t) => String(t.recipientId))); } catch { return 0; }
+    let n = 0;
+    for (const [offerId, e] of buys) {
+      if (!refused.has(String(e.recipientId))) continue;
+      try {
+        const r = await fetchFn(`${soldUrl}/${encodeURIComponent(offerId)}`);
+        if (!r.ok) continue;
+        const sold = await r.json();
+        if (String(sold?.txid || '').toLowerCase() !== String(e.txid).toLowerCase()) continue;
+        const media = listingMedia({ media: sold.media });
+        const full = (await (await this.esplora(`/tx/${e.txid}/hex`)).text()).trim();
+        const completed = this.lib.WasmWallet.completePresignedConsignment(unb64(String(sold.consignment)), String(sold.templateTxid), full);
+        for (const m of media) this.wallet.addMediaFile(unb64(m.data));
+        this.expectPurchases([...this.purchases, String(e.recipientId)]);
+        this.wallet.reopenPresignedReceive(String(e.recipientId), Uint8Array.from(completed));
+        store.set(offerId, { ...e, reopened: Date.now() });
+        n++;
+      } catch (err) { console.warn('[MASKED] A refused NFT purchase could not be opened again', offerId, err); }
+    }
+    if (n) { await this.keepMedia?.(); await this.save(); }
+    return n;
+  }
   /** @type {Set<string>} */
   get purchases() { return this._purchases || new Set(); }
   /** The invoices of this wallet's Instant purchases (see postOwnV1). */

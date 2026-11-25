@@ -11,7 +11,7 @@ index 884d686..e2896b5 100644
  rgb-strict-encoding = { version = "=1.0.5", default-features = false, features = [
      "bitcoin",
 diff --git a/bindings/wasm/src/lib.rs b/bindings/wasm/src/lib.rs
-index 51b6efd..01db1d8 100644
+index 51b6efd..309d4ac 100644
 --- a/bindings/wasm/src/lib.rs
 +++ b/bindings/wasm/src/lib.rs
 @@ -77,6 +77,27 @@ pub fn init() {
@@ -220,7 +220,7 @@ index 51b6efd..01db1d8 100644
      #[wasm_bindgen(js_name = "getAddress")]
      pub fn get_address(&self) -> Result<String, JsValue> {
          self.inner
-@@ -635,6 +820,396 @@ impl WasmWallet {
+@@ -635,6 +820,411 @@ impl WasmWallet {
          to_js(&result)
      }
  
@@ -307,6 +307,21 @@ index 51b6efd..01db1d8 100644
 +
 +    /// The witness invoices this wallet bought pre-signed listings to (`["recipientId"]`): their seal was made by
 +    /// the seller before the buyer was known, so it is matched without the derived blinding.
++    /// MASKED: take in again a pre-signed purchase this wallet refused (an NFT listed without all
++    /// its files by MASKED up to 2.32.4): `consignment` is the transfer it refused; the NFT's files
++    /// go in first (`addMediaFile`). The next `refresh` validates it from scratch.
++    #[wasm_bindgen(js_name = "reopenPresignedReceive")]
++    pub fn reopen_presigned_receive(
++        &self,
++        recipient_id: String,
++        consignment: Vec<u8>,
++    ) -> Result<(), JsValue> {
++        self.inner
++            .borrow_mut()
++            .reopen_presigned_receive(recipient_id, consignment)
++            .map_err(|e| JsValue::from_str(&e.to_string()))
++    }
++
 +    #[wasm_bindgen(js_name = "setPresignedReceives")]
 +    pub fn set_presigned_receives(&self, ids_js: JsValue) -> Result<(), JsValue> {
 +        let list: Vec<String> = serde_wasm_bindgen::from_value(ids_js).map_err(|e| JsValue::from_str(&format!("Invalid recipient IDs: {e}")))?;
@@ -617,7 +632,7 @@ index 51b6efd..01db1d8 100644
      /// Send RGB assets (end): broadcast a signed PSBT. Returns an OperationResult JS object.
      #[wasm_bindgen(js_name = "sendEnd")]
      pub async fn send_end(
-@@ -763,6 +1338,56 @@ impl WasmWallet {
+@@ -763,6 +1353,56 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -674,7 +689,7 @@ index 51b6efd..01db1d8 100644
      /// Drain all wallet funds (end): broadcast a signed PSBT. Returns the txid string.
      #[wasm_bindgen(js_name = "drainToEnd")]
      pub async fn drain_to_end(
-@@ -1074,6 +1699,22 @@ impl WasmWallet {
+@@ -1074,6 +1714,22 @@ impl WasmWallet {
              .map_err(|e| JsValue::from_str(&e.to_string()))
      }
  
@@ -697,7 +712,7 @@ index 51b6efd..01db1d8 100644
      /// Check if the wallet needs a backup. Returns true if modified since last backup.
      #[wasm_bindgen(js_name = "backupInfo")]
      pub fn backup_info(&self) -> Result<bool, JsValue> {
-@@ -1217,7 +1858,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
+@@ -1217,7 +1873,8 @@ pub async fn check_proxy_url(proxy_url: &str) -> Result<(), JsValue> {
  /// Works before the witness transaction is broadcast. Takes the raw consignment
  /// bytes (strict-encoded, not base64), the witness transaction ID, and the Bitcoin network.
  ///
@@ -707,7 +722,7 @@ index 51b6efd..01db1d8 100644
  #[wasm_bindgen(js_name = "validateConsignmentOffchain")]
  pub fn validate_consignment_offchain(
      consignment_bytes: &[u8],
-@@ -1235,3 +1877,43 @@ pub fn validate_consignment_offchain(
+@@ -1235,3 +1892,43 @@ pub fn validate_consignment_offchain(
      .map_err(|e| JsValue::from_str(&e.to_string()))?;
      to_js(&result)
  }
@@ -729,7 +744,7 @@ index 51b6efd..01db1d8 100644
 +/// MASKED: the features of this engine build.
 +#[wasm_bindgen(js_name = "engineFeatures")]
 +pub fn engine_features() -> Vec<String> {
-+    vec!["swap".into(), "presign".into(), "proxy-v1".into(), "p2p-swap".into(), "output-locks".into(), "uda".into(), "cosign".into(), "uda-claim".into(), "legacy-migration".into(), "legacy-consignments".into(), "legacy-backup".into()]
++    vec!["swap".into(), "presign".into(), "proxy-v1".into(), "p2p-swap".into(), "output-locks".into(), "uda".into(), "cosign".into(), "uda-claim".into(), "legacy-migration".into(), "legacy-consignments".into(), "legacy-backup".into(), "reopen-purchase".into()]
 +}
 +
 +#[wasm_bindgen(js_name = "inspectSwapConsignment")]
@@ -2670,7 +2685,7 @@ index a3a9f46..9cff31a 100644
  mod debug_tests {
      use super::*;
 diff --git a/src/wallet/online.rs b/src/wallet/online.rs
-index ca96b4a..a35891b 100644
+index ca96b4a..05ee256 100644
 --- a/src/wallet/online.rs
 +++ b/src/wallet/online.rs
 @@ -4,6 +4,12 @@
@@ -3136,7 +3151,22 @@ index ca96b4a..a35891b 100644
              AssetSchema::Nia => {
                  let contract_data = runtime.consignment_data(valid_contract)?;
                  let contract = NiaWrapper::with(contract_data);
-@@ -4412,26 +4634,27 @@ impl Wallet {
+@@ -4400,6 +4622,14 @@ impl Wallet {
+         };
+         for attachment in attachments {
+             let digest = hex::encode(attachment.digest);
++            // MASKED: a file this wallet already holds (a refused purchase taken in again, see
++            // `reopen_presigned_receive`) is used as it is, once it matches the digest in the contract
++            if let Some(bytes) = self.media_files.get(&digest)
++                && hex::encode(sha2::Sha256::digest(bytes)) == digest
++            {
++                files.push((digest, bytes.clone()));
++                continue;
++            }
+             // on wasm32, skip media file storage (no filesystem): the media is fetched
+             // and checked against the digest in the contract
+             let derived = derive_shared(&ed25519_from_seed(seed), sender_vk)?;
+@@ -4412,26 +4642,27 @@ impl Wallet {
                      self.logger,
                      "Cannot find the media file but the contract defines one"
                  );
@@ -3175,7 +3205,7 @@ index ca96b4a..a35891b 100644
      }
  
      /// Validate what a consignment pays and its history. `None` means refuse the consignment.
-@@ -4468,7 +4691,7 @@ impl Wallet {
+@@ -4468,7 +4699,7 @@ impl Wallet {
              AssetSchema::Bfa => BfaWrapper::with(runtime.consignment_data(&valid_consignment)?)
                  .reject_list()
                  .map(RejectListSource::from),
@@ -3184,7 +3214,7 @@ index ca96b4a..a35891b 100644
          };
          if let Some(source) = &reject_list_source {
              let (reject_opouts, allow_opouts) = self._get_reject_list_async(source).await?;
-@@ -4723,6 +4946,22 @@ impl Wallet {
+@@ -4723,6 +4954,22 @@ impl Wallet {
                  &data.consignment_hash,
              ) {
                  Ok(bytes) => {
@@ -3207,7 +3237,7 @@ index ca96b4a..a35891b 100644
                      self.received_consignments
                          .insert(recipient_id.clone(), bytes);
                  }
-@@ -4871,7 +5110,14 @@ impl Wallet {
+@@ -4871,7 +5118,14 @@ impl Wallet {
                  .await;
          };
          let blinding = derive_shared(&ed25519_from_seed(&seed), &sender_vk)?.seal_blinding;
@@ -3223,7 +3253,7 @@ index ca96b4a..a35891b 100644
          let spent = Self::known_spent_opouts(&consignment);
          let mut payments: Vec<_> = self.find_payments(&consignment, &matcher, &spent).collect();
          if payments.len() != 1 {
-@@ -4904,7 +5150,10 @@ impl Wallet {
+@@ -4904,7 +5158,10 @@ impl Wallet {
          let witness_id = paying_bundle.witness_id();
          let txid = witness_id.to_string();
  
@@ -3235,7 +3265,7 @@ index ca96b4a..a35891b 100644
              error!(
                  self.logger,
                  "Consignment pays this recipient {} allocations, refusing it",
-@@ -5150,7 +5399,8 @@ impl Wallet {
+@@ -5150,7 +5407,8 @@ impl Wallet {
                          // the proxy can delete the media before the mint settles: verify it now
                          if asset_transfer.asset_id.is_none()
                              && self.database.check_asset_exists(asset_id.clone()).is_err()
@@ -3245,7 +3275,7 @@ index ca96b4a..a35891b 100644
                                  ._contract_media_verified(
                                      &runtime,
                                      &valid_consignment.into_valid_contract(),
-@@ -5161,15 +5411,17 @@ impl Wallet {
+@@ -5161,15 +5419,17 @@ impl Wallet {
                                      &sender_vk,
                                  )
                                  .await?
@@ -3272,7 +3302,7 @@ index ca96b4a..a35891b 100644
                          }
                          self.received_mints.insert(recipient_id, mint.clone());
                      }
-@@ -5218,8 +5470,8 @@ impl Wallet {
+@@ -5218,8 +5478,8 @@ impl Wallet {
                  let valid_contract = valid_consignment.clone().into_valid_contract();
  
                  // a checked mint has its media verified by the check
@@ -3283,7 +3313,7 @@ index ca96b4a..a35891b 100644
                          ._contract_media_verified(
                              &runtime,
                              &valid_contract,
-@@ -5230,17 +5482,21 @@ impl Wallet {
+@@ -5230,17 +5490,21 @@ impl Wallet {
                              &sender_vk,
                          )
                          .await?
@@ -3314,7 +3344,7 @@ index ca96b4a..a35891b 100644
                  runtime
                      .import_contract(valid_contract.clone(), &chain_resolver)
                      .expect("failure importing received contract");
-@@ -5288,6 +5544,31 @@ impl Wallet {
+@@ -5288,6 +5552,31 @@ impl Wallet {
              retention_grace = Some(grace);
          }
  
@@ -3346,7 +3376,7 @@ index ca96b4a..a35891b 100644
          updated_batch_transfer.txid = ActiveValue::Set(Some(txid.clone()));
  
          let utxo_idx = match transfer.recipient_type {
-@@ -5805,17 +6086,23 @@ impl Wallet {
+@@ -5805,17 +6094,23 @@ impl Wallet {
                      details: s!("consignment not found in memory"),
                  })?
                  .clone();
@@ -3373,7 +3403,7 @@ index ca96b4a..a35891b 100644
                  let txo = self.database.get_txo(&outpoint)?.expect("txo must exist");
                  let mut txo: DbTxoActMod = txo.into();
                  txo.pending_witness = ActiveValue::Set(false);
-@@ -6446,7 +6733,7 @@ impl Wallet {
+@@ -6446,7 +6741,7 @@ impl Wallet {
          skip_sync: bool,
      ) -> Result<bool, Error> {
          if !skip_sync {
@@ -3382,7 +3412,7 @@ index ca96b4a..a35891b 100644
          }
  
          let mut db_data = self.database.get_db_data(false)?;
-@@ -6593,6 +6880,7 @@ impl Wallet {
+@@ -6593,6 +6888,7 @@ impl Wallet {
                  }
              }
              (Assignment::LinkRight, AssetSchema::Ifa | AssetSchema::Bfa) => {}
@@ -3390,7 +3420,7 @@ index ca96b4a..a35891b 100644
              _ => {
                  return Err(Error::InvalidAssignment);
              }
-@@ -7044,6 +7332,7 @@ impl Wallet {
+@@ -7044,6 +7340,7 @@ impl Wallet {
      #[allow(clippy::too_many_arguments)]
      async fn post_transfer_data(
          &self,
@@ -3398,7 +3428,7 @@ index ca96b4a..a35891b 100644
          recipients: &mut [LocalRecipient],
          consignment: &[u8],
          sender_sk: &SigningKey,
-@@ -7052,7 +7341,14 @@ impl Wallet {
+@@ -7052,7 +7349,14 @@ impl Wallet {
          consignment_hash: &str,
          batch: bool,
      ) -> Result<(), Error> {
@@ -3413,7 +3443,7 @@ index ca96b4a..a35891b 100644
              let recipient_id = &recipient.recipient_id;
              let recipient_vk = verifying_key_from_bytes(&recipient.public_key)?;
              let derived = derive_shared(sender_sk, &recipient_vk)?;
-@@ -7130,6 +7426,29 @@ impl Wallet {
+@@ -7130,6 +7434,29 @@ impl Wallet {
                      Err(_) => continue,
                  }
  
@@ -3443,7 +3473,7 @@ index ca96b4a..a35891b 100644
                  transport_endpoint.used = true;
                  found_valid = true;
                  break;
-@@ -7142,6 +7461,41 @@ impl Wallet {
+@@ -7142,6 +7469,41 @@ impl Wallet {
          Ok(())
      }
  
@@ -3485,7 +3515,7 @@ index ca96b4a..a35891b 100644
      /// Complete the send operation (wasm32 async).
      ///
      /// See native [`send_end`](Wallet::send_end) for full documentation.
-@@ -7321,6 +7675,7 @@ impl Wallet {
+@@ -7321,6 +7683,7 @@ impl Wallet {
              for (asset_id, info_contents_asset) in asset_infos.iter_mut() {
                  post_result = self
                      .post_transfer_data(
@@ -3493,7 +3523,7 @@ index ca96b4a..a35891b 100644
                          &mut info_contents_asset.recipients,
                          &consignment_bytes[asset_id],
                          &sender_sk,
-@@ -7590,35 +7945,275 @@ impl Wallet {
+@@ -7590,32 +7953,272 @@ impl Wallet {
          Ok(tx.compute_txid().to_string())
      }
  
@@ -3707,9 +3737,6 @@ index ca96b4a..a35891b 100644
 -        let known_circulating_supply = asset
 -            .known_circulating_supply
 -            .unwrap()
--            .parse::<u64>()
--            .unwrap();
--        let inflation =
 +        // the fee of one output first, then each extra output's share
 +        let build = |wallet: &mut Self, shares: &[(ScriptBuf, u64)], change: ScriptBuf| -> Result<Psbt, Error> {
 +            let mut tx_builder = wallet.bdk_wallet.build_tx();
@@ -3784,13 +3811,10 @@ index ca96b4a..a35891b 100644
 +        let known_circulating_supply = asset
 +            .known_circulating_supply
 +            .unwrap()
-+            .parse::<u64>()
-+            .unwrap();
-+        let inflation =
-             self.get_total_inflation_amount(&inflation_amounts, known_circulating_supply)?;
-         if inflation == 0 {
-             return Err(Error::NoInflationAmounts);
-@@ -7782,6 +8377,7 @@ impl Wallet {
+             .parse::<u64>()
+             .unwrap();
+         let inflation =
+@@ -7782,6 +8385,7 @@ impl Wallet {
              info_contents.extra_allocations,
              info_contents.change_utxo_idx,
              info_contents.btc_change,
@@ -3798,7 +3822,7 @@ index ca96b4a..a35891b 100644
              TransferStatus::WaitingConfirmations,
              info_contents.min_confirmations,
              info_contents.expiration_timestamp,
-@@ -8119,6 +8715,7 @@ impl Wallet {
+@@ -8119,6 +8723,7 @@ impl Wallet {
                  info_contents.extra_allocations,
                  info_contents.change_utxo_idx,
                  info_contents.btc_change,
@@ -3806,7 +3830,7 @@ index ca96b4a..a35891b 100644
                  TransferStatus::WaitingConfirmations,
                  info_contents.min_confirmations,
                  None,
-@@ -8605,6 +9202,7 @@ impl Wallet {
+@@ -8605,6 +9210,7 @@ impl Wallet {
          // follows, as the TX is signed only after the lock
          let post_result = self
              .post_transfer_data(
@@ -3814,7 +3838,7 @@ index ca96b4a..a35891b 100644
                  &mut asset_infos
                      .get_mut(&asset_id)
                      .expect("saved by _prepare_transfer_psbt_wasm")
-@@ -8838,7 +9436,7 @@ impl Wallet {
+@@ -8838,7 +9444,7 @@ impl Wallet {
          self.check_online(online)?;
  
          if !skip_sync {
@@ -3823,7 +3847,7 @@ index ca96b4a..a35891b 100644
              self.flush().await?;
          }
  
-@@ -9321,6 +9919,7 @@ mod send_end_tests {
+@@ -9321,6 +9927,7 @@ mod send_end_tests {
              entropy: 0,
              operation_secret_key: Some(OPERATION_SEED.to_vec()),
              sender_transport_endpoint: None,
@@ -3831,7 +3855,7 @@ index ca96b4a..a35891b 100644
          };
          let db = DbBatchTransfer {
              idx: 1,
-@@ -9427,6 +10026,7 @@ mod send_end_tests {
+@@ -9427,6 +10034,7 @@ mod send_end_tests {
              entropy: 0,
              operation_secret_key: Some(OPERATION_SEED.to_vec()),
              sender_transport_endpoint: Some(s!("rpc://127.0.0.1:1")),
@@ -3839,7 +3863,7 @@ index ca96b4a..a35891b 100644
          }
      }
  
-@@ -10024,6 +10624,272 @@ mod send_end_tests {
+@@ -10024,6 +10632,272 @@ mod send_end_tests {
          assert!(kept.signed_psbt.is_none());
      }
  
@@ -4112,7 +4136,7 @@ index ca96b4a..a35891b 100644
      #[test]
      fn update_or_save_transfers_updates_outgoing_batch() {
          let (wallet, _) = setup();
-@@ -10051,6 +10917,7 @@ mod send_end_tests {
+@@ -10051,6 +10925,7 @@ mod send_end_tests {
                  info.extra_allocations.clone(),
                  info.change_utxo_idx,
                  None,
@@ -4120,7 +4144,7 @@ index ca96b4a..a35891b 100644
                  TransferStatus::Initiated,
                  1,
                  None,
-@@ -12074,3 +12941,1370 @@ mod bfa_tests {
+@@ -12074,3 +12949,1453 @@ mod bfa_tests {
          assert!(options(&format!(r#","evm_chains":{{"mainnet":{chain}}}"#)).is_err());
      }
  }
@@ -5164,6 +5188,89 @@ index ca96b4a..a35891b 100644
 +    /// The list lives in memory; MASKED sets it every time it opens the wallet.
 +    pub fn set_presigned_receives(&mut self, recipient_ids: Vec<String>) {
 +        self.presigned_receives = recipient_ids.into_iter().collect();
++    }
++
++    /// MASKED: take in again a pre-signed purchase this wallet refused. MASKED up to 2.32.4 listed
++    /// an NFT with its picture only: the buyer's wallet refused the NFT for its missing
++    /// `metadata.json` and failed the receive, though the purchase TX had paid for it and put it on
++    /// the buyer's output. `consignment`: the transfer the wallet refused (the listing's, completed
++    /// with the purchase TX); the NFT's files go in first (`add_media_file`). Only a receive this
++    /// wallet failed, of a purchase it made (`set_presigned_receives`), is reopened. The receive waits for the counterparty again and the next
++    /// refresh validates the transfer from scratch, as on its first arrival.
++    pub fn reopen_presigned_receive(
++        &mut self,
++        recipient_id: String,
++        consignment: Vec<u8>,
++    ) -> Result<(), Error> {
++        let internal = |d: &str| Error::Internal { details: d.to_string() };
++        if !self.presigned_receives.contains(&recipient_id) {
++            return Err(internal("not a purchase of this wallet"));
++        }
++        let db_data = self.database.get_db_data(false)?;
++        let transfer = db_data
++            .transfers
++            .iter()
++            .find(|t| t.incoming && t.recipient_id.as_deref() == Some(recipient_id.as_str()))
++            .cloned()
++            .ok_or_else(|| internal("no receive for this purchase"))?;
++        let asset_transfer = db_data
++            .asset_transfers
++            .iter()
++            .find(|a| a.idx == transfer.asset_transfer_idx)
++            .cloned()
++            .ok_or_else(|| internal("no asset transfer for this purchase"))?;
++        let batch_transfer = db_data
++            .batch_transfers
++            .iter()
++            .find(|b| b.idx == asset_transfer.batch_transfer_idx)
++            .cloned()
++            .ok_or_else(|| internal("no batch transfer for this purchase"))?;
++        if batch_transfer.status != TransferStatus::Failed {
++            return Err(internal("this purchase was not refused"));
++        }
++        let (Some(transfer_id), Some(consignment_hash), Some(recipient_pk)) = (
++            transfer.proxy_transfer_id.clone(),
++            transfer.consignment_hash.clone(),
++            transfer.recipient_pubkey.clone(),
++        ) else {
++            return Err(internal("this purchase never received its transfer"));
++        };
++        // the transfer is validated from scratch on the next refresh (its history, that it pays this
++        // receive's seal): a consignment rebuilt byte for byte differently is checked all the same
++        let endpoints = self
++            .database
++            .get_transfer_transport_endpoints_data(transfer.idx)?;
++        let proxy_url = endpoints
++            .iter()
++            .find(|(tte, _)| tte.kind == TransportEndpointKind::RecipientProxy)
++            .map(|(_, te)| te.endpoint.clone())
++            .ok_or_else(|| internal("no transfer server for this purchase"))?;
++        let sender_proxy = endpoints
++            .iter()
++            .find(|(tte, _)| tte.kind == TransportEndpointKind::SenderProxy)
++            .map(|(_, te)| te.endpoint.clone())
++            .unwrap_or_else(|| proxy_url.clone());
++        self.received_consignments
++            .insert(recipient_id.clone(), consignment);
++        self.received_consignment_meta.insert(
++            recipient_id,
++            ReceivedConsignmentMeta {
++                proxy_url: Some(proxy_url),
++                transfer_id: Some(transfer_id),
++                sender_transport_endpoint: sender_proxy,
++                // the purchase's one-off sender key is gone: a pre-signed receive matches its seal
++                // without the blinding derived from it, and its files are already held here
++                sender_pubkey: hex::encode(recipient_pk),
++                consignment_hash,
++                batch: false,
++            },
++        );
++        let mut updated: DbBatchTransferActMod = batch_transfer.into();
++        updated.status = ActiveValue::Set(TransferStatus::WaitingCounterparty);
++        updated.expiration = ActiveValue::Set(Some(now().unix_timestamp() + 86_400));
++        updated.retention_deadline = ActiveValue::Set(None);
++        self.database.update_batch_transfer(&mut updated)?;
++        Ok(())
 +    }
 +}
 +

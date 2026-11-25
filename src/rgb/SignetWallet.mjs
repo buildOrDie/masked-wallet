@@ -153,6 +153,14 @@ export class SignetWallet {
       }
       took.sync = Date.now() - t0;
       const t1 = Date.now();
+      // NFTs bought before 2.32.5 that this wallet refused for a missing file: opened again (at most every 5 minutes)
+      if (typeof wallet.recoverRefusedPurchases === 'function' && this.profile?.nftSold && Date.now() - (this.reopenAt || 0) > 300_000) {
+        this.reopenAt = Date.now();
+        try {
+          const n = await wallet.recoverRefusedPurchases(this.instantStore(), this.profile.nftSold);
+          if (n) console.info('[MASKED] Refused NFT purchases opened again', n);
+        } catch (e) { console.warn('[MASKED] Refused NFT purchases', e); }
+      }
       const refreshed = await wallet.refreshWallet() || {};
       took.transfers = Date.now() - t1;
       const stranded = Object.entries(refreshed).filter(([, r]) => /signed PSBT not found/i.test(JSON.stringify(r?.failure ?? ''))).map(([idx]) => Number(idx));
