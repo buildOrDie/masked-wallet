@@ -268,7 +268,7 @@ export class RgbTokenView extends View {
     const r = this.app.rgb, a = r.find(r.asset);
     if (!r.ready || !a) { this.state.view = 'home'; return this.app.ui.view('home').render(); }
     if (r.isNft(a)) return this.nft(a);
-    const { settled: s, future: fut, spendable: sp, doubled } = r.bal(a);
+    const { settled: s, future: fut, spendable: sp, doubled, listed = 0 } = r.bal(a);
     const tab = this.f.rgbTab || 'history';
     return `
     <div class="tok-page">
@@ -283,6 +283,12 @@ export class RgbTokenView extends View {
           const open = r.invoices().filter((x) => !x.witness && r.invoiceStatus(x).key === 'waiting').length;
           const unsent = r.unsent(a.assetId).length;
           const stuck = r.unsent(a.assetId).filter((t) => r.stranded(t)).length;
+          // in listings: say so first (it's most of it, or all of it, when a token is on sale)
+          if (listed > 0) {
+            const rest = s - sp - listed;
+            return `<p class="info warn small">${r.amount(a, listed)} ${esc(a.ticker)} ${listed === 1 ? 'is' : 'are'} in your listings, so ${listed === 1 ? 'it' : 'they'} can't be sent. To send ${listed === 1 ? 'it' : 'them'}, cancel the listing first (on the market, My trades).${rest > 0 ? ` ${r.amount(a, rest)} more ${rest === 1 ? 'is' : 'are'} waiting for a block.` : ''}</p>
+              ${r.outputs ? RgbSettings.outputs(r, this.app) : `<button class="btn ghost wide" data-rgb="outputs" ${r.busy ? 'disabled' : ''}>See what holds them</button>`}`;
+          }
           const why = stuck
             ? `are held by a transfer that can't be finished or cancelled: the other wallet accepted it, but its signed transaction was lost when this wallet was restored, so it was never broadcast. The tokens never left, but this version of the RGB engine keeps them locked. The other wallet's incoming transfer never arrives and expires.`
             : unsent

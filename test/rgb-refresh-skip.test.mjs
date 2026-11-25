@@ -55,3 +55,10 @@ test('send: more than is free says where the rest is', () => {
   assert.match(m, /^Only 197\.7 MASKED can be sent right now\. 197\.7 is waiting for its block .*, and 102\.3 is in your listings\. Send 197\.7 or less/);
   assert.match(m, /Nothing was sent\.$/);
 });
+
+test('listed tokens: counted per token, so the wallet never offers them for sending', () => {
+  const { w } = wallet();
+  assert.deepEqual(w.listedByAsset(), { 'rgb:tok': '1023' });
+  w._reserved = new Set();
+  assert.deepEqual(w.listedByAsset(), {});
+});

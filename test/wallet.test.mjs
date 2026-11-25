@@ -990,7 +990,7 @@ test('RGB: a double count on a coin a pending send locks is taken off the total 
     { idx: 5, batchTransferIdx: 12, status: 'WaitingCounterparty', kind: 'Send', requestedAssignment: { Fungible: 555 } },
   ] };
   app.rgb.data.locked = ['back:0'];
-  assert.deepEqual(app.rgb.bal(MUSD), { settled: 100000000, future: 99998445, spendable: 99999000, doubled: 1000 });
+  assert.deepEqual(app.rgb.bal(MUSD), { settled: 100000000, future: 99998445, spendable: 99999000, doubled: 1000, listed: 0 });
   app.rgb.asset = 'rgb:musd'; app.state.view = 'rgbtok';
   const page = app.ui.views.rgbtok.render();
   assert.match(page, /Available to send<\/span><b>99,999,000/);
@@ -999,6 +999,28 @@ test('RGB: a double count on a coin a pending send locks is taken off the total 
   app.rgb.data.locked = [];
   MUSD.balance.spendable = 100001000;
   assert.equal(app.rgb.bal(MUSD).spendable, 100000000);
+  localStorage.removeItem('masked.rgb.mainnet-beta');
+});
+
+test('RGB: tokens in listings are not offered for sending, and the page says why', async () => {
+  const app = rgbApp('main');
+  localStorage.setItem('masked.rgb.mainnet-beta', '1');
+  rgbReady(app);
+  // the engine counts listed tokens as spendable
+  const MA = { assetId: 'rgb:ma', ticker: 'MASKED', name: 'MASKED', precision: 0, issuedSupply: 5000, balance: { settled: 1500, future: 1500, spendable: 1500 } };
+  app.rgb.data.groups = { nia: [MA] };
+  app.rgb.data.transfers = { 'rgb:ma': [] };
+  app.rgb.data.listed = { 'rgb:ma': '1500' };
+  assert.equal(app.rgb.bal(MA).spendable, 0);
+  app.rgb.asset = 'rgb:ma'; app.state.view = 'rgbtok';
+  let page = app.ui.views.rgbtok.render();
+  assert.match(page, /Available to send<\/span><b>0</);
+  assert.match(page, /1,500 MASKED are in your listings, so they can't be sent\. To send them, cancel the listing first/);
+  assert.match(page, /data-rgb="send"[^>]*disabled/);
+  app.rgb.data.listed = { 'rgb:ma': '1000' };
+  assert.equal(app.rgb.bal(MA).spendable, 500);
+  page = app.ui.views.rgbtok.render();
+  assert.match(page, /1,000 MASKED are in your listings/);
   localStorage.removeItem('masked.rgb.mainnet-beta');
 });
 

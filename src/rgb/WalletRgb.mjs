@@ -497,7 +497,9 @@ export class WalletRgb {
     const visible = (this.data?.transfers?.[a.assetId] || []).filter((t) => String(t?.kind || '').startsWith('Receive') && ['WaitingCounterparty', 'WaitingConfirmations'].includes(String(t.status)) && !this.isDropped(t))
       .reduce((n, t) => n + sum(t), 0);
     const settled = cut(b.settled, d);
-    return { settled, future: Math.min(cut(b.future, d + gone), settled + visible), spendable: cut(b.spendable, free), doubled: d };
+    // tokens promised to Instant listings: the engine counts them as spendable, but a send can't use them
+    const listed = Math.min(Number(this.data?.listed?.[a.assetId] || 0), settled);
+    return { settled, future: Math.min(cut(b.future, d + gone), settled + visible), spendable: cut(cut(b.spendable, free), listed), doubled: d, listed };
   }
   /** The note about a doubled payment was read (for this amount: a new doubling shows it again). */
   doubledSeen(id, amount) { try { return localStorage.getItem(`${this.profile.vaultKey}.doubled-ok.${id}`) === String(amount); } catch { return false; } }
@@ -1176,7 +1178,13 @@ export class WalletRgb {
           if (this.isNft(a)) this.fields.sendAmt = '1';
           const amount = this.isNft(a) ? 1 : d.amount || toBase(this.fields.sendAmt, a.precision);
           if (d.amount) this.fields.sendAmt = this.amount(a, d.amount).replace(/,/g, '');
-          if (amount > this.bal(a).spendable) throw new Error(`You can send up to ${this.amount(a, this.bal(a).spendable)} ${a.ticker}.`);
+          if (amount > this.bal(a).spendable) {
+            const { spendable: sp, listed } = this.bal(a);
+            if (listed > 0) throw new Error(sp > 0
+              ? `Only ${this.amount(a, sp)} ${a.ticker} can be sent: ${this.amount(a, listed)} is in your listings. Send less, or cancel a listing first (on the market, My trades).`
+              : `All your ${a.ticker} is in your listings, so none can be sent. Cancel a listing first (on the market, My trades).`);
+            throw new Error(`You can send up to ${this.amount(a, sp)} ${a.ticker}.`);
+          }
           const endpoints = d.transportEndpoints?.length ? d.transportEndpoints : [this.profile.sdk.transportEndpoint];
           if (endpoints.some((e) => {
             try { return !['http:', 'https:'].includes(new URL(proxyUrl(e)).protocol); } catch { return true; }

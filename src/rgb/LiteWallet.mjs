@@ -362,6 +362,18 @@ export class LiteWallet {
     return list.filter((u) => Number(u?.pendingBlinded) > 0 || (u?.rgbAllocations || []).some((a) => a && a.settled === false))
       .map((u) => `${u?.utxo?.outpoint?.txid}:${u?.utxo?.outpoint?.vout}`);
   }
+  /** Base units of each token on outputs promised to this wallet's Instant listings: { assetId: n }. */
+  listedByAsset() {
+    const out = {};
+    if (!this.reserved.size || typeof this.wallet?.listUnspents !== 'function') return out;
+    try {
+      for (const u of plain(this.wallet.listUnspents(false)) || []) {
+        const o = u.utxo?.outpoint; if (!o || !this.reserved.has(`${String(o.txid).toLowerCase()}:${o.vout}`)) continue;
+        for (const a of u.rgbAllocations || []) { const v = unitsOf(a.assignment); if (a.assetId && v != null) out[a.assetId] = String(BigInt(out[a.assetId] || 0) + v); }
+      }
+    } catch { /* none known */ }
+    return out;
+  }
   async getBtcBalance() { const b = plain(this.wallet.getBtcBalance()); return { vanilla: balance(b?.vanilla), colored: balance(b?.colored) }; }
   async listAssets() {
     const r = plain(assetsWithFiles(this.wallet.listAssets([]) || {}));

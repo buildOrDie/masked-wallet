@@ -175,7 +175,9 @@ export class SignetWallet {
       const transfers = {};
       for (const a of Object.values(groups || {}).flat()) if (a?.assetId) transfers[a.assetId] = await wallet.listTransfers(a.assetId);
       const locked = typeof wallet.lockedCoins === 'function' ? await wallet.lockedCoins() : [];
-      const snapshot = { address, btc, groups, transfers, stranded, locked };
+      // tokens in this wallet's listings: they can't be sent (the engine counts them as spendable)
+      const listed = typeof wallet.listedByAsset === 'function' ? wallet.listedByAsset() : {};
+      const snapshot = { address, btc, groups, transfers, stranded, locked, listed };
       took.total = Date.now() - t0;
       // where an RGB refresh spends its time (the block server, the transfer server, this browser): in the console
       this.lastTimings = { ...took, full, at: Date.now() };
