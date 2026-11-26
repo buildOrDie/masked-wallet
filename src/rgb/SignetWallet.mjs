@@ -20,6 +20,9 @@ export class SignetWallet {
   get dirtyKey() { return dirtyKey(this.profile); }
   get exists() { return !!this.storage.getItem(this.vaultKey); }
   get backupRequired() { return this.storage.getItem(this.dirtyKey) === '1'; }
+  /** Something changed that the backup doesn't have yet. dirtyGen counts the changes, so a backup that was being
+   *  saved while another change happened doesn't mark that change as backed up. */
+  markDirty() { this.dirtyGen = (this.dirtyGen || 0) + 1; this.storage.setItem(this.dirtyKey, '1'); }
   /** A backup file has been saved at least once (it holds the RGB keys; later backups add the latest tokens). */
   get everBackedUp() { return this.storage.getItem(`${this.vaultKey}.backed-up`) === '1'; }
   /**
@@ -59,7 +62,7 @@ export class SignetWallet {
       // Persist encrypted keys before the SDK creates state. An init failure must never lose the seed.
       if (!saved) {
         this.storage.setItem(this.vaultKey, JSON.stringify(await encryptRgb(payload, password, net)));
-        this.storage.setItem(this.dirtyKey, '1');
+        this.markDirty();
       }
       try { this.trimBeforeLoads(); } catch { /* storage unreadable: nothing to trim */ }
       const sdk = await this.loadSdk();
@@ -201,7 +204,7 @@ export class SignetWallet {
       const encoded = new TextEncoder().encode(JSON.stringify(snapshot, (_, value) => typeof value === 'bigint' ? value.toString() : value));
       const revision = b64(new Uint8Array(await crypto.subtle.digest('SHA-256', encoded)));
       const key = `${this.vaultKey}.sync-revision`;
-      if (this.storage.getItem(key) !== revision) this.storage.setItem(this.dirtyKey, '1');
+      if (this.storage.getItem(key) !== revision) this.markDirty();
       this.storage.setItem(key, revision);
       return snapshot;
     });
@@ -211,7 +214,7 @@ export class SignetWallet {
     return this.exclusive(async () => {
       const wallet = this.requireWallet();
       // Mark before execution: even an interrupted operation may have changed RGB state.
-      this.storage.setItem(this.dirtyKey, '1');
+      this.markDirty();
       return fn(wallet);
     });
   }
@@ -421,17 +424,26 @@ export class SignetWallet {
   async backup() {
     return this.exclusive(async () => {
       const wallet = this.requireWallet();
+      this.backupGen = this.dirtyGen || 0;
+      const t0 = Date.now();
       await wallet.createBackup({ backupPath: '', password: this.password });
       const bytes = wallet.getLastBackupBytes();
       if (!(bytes instanceof Uint8Array) || !bytes.length) throw new Error('The SDK did not return backup data.');
+      const t1 = Date.now();
       // Instant listings and purchases go with it, so another copy that loads it can finish, see and cancel them
-      return encryptRgb({ mnemonic: this.mnemonic, rgbBackup: b64(bytes), instant: this.instantForBackup() }, this.password, this.profile.id);
+      const out = await encryptRgb({ mnemonic: this.mnemonic, rgbBackup: b64(bytes), instant: this.instantForBackup() }, this.password, this.profile.id, this.encCache ||= {});
+      this.lastBackupTimings = { engine: t1 - t0, encrypt: Date.now() - t1, mb: +(bytes.length / 1048576).toFixed(2) };
+      return out;
     });
   }
-  backupSaved() { this.storage.setItem(this.dirtyKey, '0'); this.storage.setItem(`${this.vaultKey}.backed-up`, '1'); }
+  /** @param {number} [gen] the backup's dirtyGen: a change made after it keeps the wallet marked as not backed up */
+  backupSaved(gen) {
+    if (gen == null || gen === (this.dirtyGen || 0)) this.storage.setItem(this.dirtyKey, '0');
+    this.storage.setItem(`${this.vaultKey}.backed-up`, '1');
+  }
   async close() {
     const wallet = this.wallet;
-    this.wallet = null; this.mnemonic = ''; this.password = '';
+    this.wallet = null; this.mnemonic = ''; this.password = ''; this.encCache = null;
     if (wallet) await wallet.dispose();
   }
 }

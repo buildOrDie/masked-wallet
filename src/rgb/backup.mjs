@@ -2,11 +2,17 @@ import { Vault, PBKDF2_ITER } from '../wallet/Vault.mjs';
 import { enc, dec } from '../core/bytes.mjs';
 import { b64, unb64 } from './bytes.mjs';
 const FORMAT = 'masked-rgb-signet';
-/** @param {object} payload @param {string} password @param {string} [network] RGB profile id */
-export async function encryptRgb(payload, password, network = 'utexo') {
+/**
+ * @param {object} payload @param {string} password @param {string} [network] RGB profile id
+ * @param {{ salt?: Uint8Array, key?: CryptoKey }} [cache] the open wallet's: its first backup derives the key (600,000
+ *   rounds, about a second), the next ones reuse it with a fresh IV each time
+ */
+export async function encryptRgb(payload, password, network = 'utexo', cache = undefined) {
   if (password.length < 12) throw new Error('Use at least 12 characters for the test-wallet password.');
-  const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
-  const key = await Vault.deriveKey(password, salt);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const salt = cache?.key && cache.salt ? cache.salt : crypto.getRandomValues(new Uint8Array(16));
+  const key = cache?.key && cache.salt ? cache.key : await Vault.deriveKey(password, salt);
+  if (cache && !cache.key) Object.assign(cache, { salt, key });
   const data = enc.encode(JSON.stringify({ ...payload, network }));
   const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, data);
   return { format: FORMAT, version: 1, iterations: PBKDF2_ITER, salt: b64(salt), iv: b64(iv), ciphertext: b64(new Uint8Array(ciphertext)) };

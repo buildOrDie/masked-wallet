@@ -215,9 +215,9 @@ export class WalletRgb {
       return !!this.service && !this.service.backupRequired && localStorage.getItem(`${this.profile.vaultKey}.confirmed-backup`) === '1';
     } catch { return false; }
   }
-  confirmBackup() {
+  confirmBackup(gen) {
     localStorage.setItem(`${this.profile.vaultKey}.confirmed-backup`, '1');
-    this.service.backupSaved();
+    this.service.backupSaved(gen);
   }
   /** When the last cloud backup was saved (ms), 0 if never from this browser. */
   get cloudAt() { try { return Number(localStorage.getItem(`${this.profile.vaultKey}.cloud-at`)) || 0; } catch { return 0; } }
@@ -236,8 +236,8 @@ export class WalletRgb {
     this.cloudTimer = setTimeout(() => {
       this.cloudTimer = null;
       if (!this.ready || !this.service?.backupRequired) return;
-      if (this.busy) return this.scheduleCloud(ms);
-      this.run(() => this.cloudSave(), { quiet: true });
+      // in the background: the wallet stays usable while it uploads (the RGB engine part waits its turn)
+      this.cloudSave().then(() => this.app.render()).catch(() => {});
     }, ms);
   }
   /**
@@ -245,19 +245,28 @@ export class WalletRgb {
    * @param {{ replace?: boolean }} [o] replace: overwrite a newer backup another browser saved
    * @returns {Promise<boolean>} saved
    */
-  async cloudSave({ replace = false } = {}) {
+  cloudSave(o = {}) {
+    // one upload at a time, in order: two at once would number the same version and look like another browser's
+    const run = (this.cloudChain || Promise.resolve()).then(() => this.cloudSaveNow(o));
+    this.cloudChain = run.catch(() => {});
+    return run;
+  }
+  async cloudSaveNow({ replace = false } = {}) {
     if (!this.cloudOn || !this.service) return false;
     this.cloud.saving = true; this.cloud.last = Date.now();
     try {
+      const t0 = Date.now();
       const keys = await this.cloudKeysNow();
       const envelope = await this.service.backup();
+      const gen = this.service.backupGen, t1 = Date.now();
       // replace (this browser's RGB becomes the backup: after loading an earlier version, an undo, a repair, or the
       // person's choice): numbered above the server's latest, which is newer than the version just loaded. Numbered
       // from the loaded version, the server refused it as older, and the "newer backup" it then offered to load was
       // the very state the person was moving away from.
       let latest = replace ? Math.max(this.cloud.conflict, await this.serverVersion(keys.id)) : 0;
       let version = Math.max(this.cloudVersion, latest) + 1;
-      try { await this.cloudApi.put(keys.id, await seal(keys, envelope, version)); } catch (e) {
+      const body = await seal(keys, envelope, version), t2 = Date.now();
+      try { await this.cloudApi.put(keys.id, body); } catch (e) {
         // saved meanwhile by the other copy: once more above it, only when replacing on purpose
         if (!replace || /** @type {any} */ (e)?.status !== 409) throw e;
         latest = Math.max(latest, Number(/** @type {any} */ (e).latest) || 0, await this.serverVersion(keys.id));
@@ -265,8 +274,10 @@ export class WalletRgb {
         await this.cloudApi.put(keys.id, await seal(keys, envelope, version));
       }
       this.cloudMark(version);
-      this.confirmBackup();
+      this.confirmBackup(gen);
       this.cloud.error = ''; this.cloud.conflict = 0;
+      // where a backup spends its time, in the console (engine = the RGB engine making it)
+      try { console.info('[MASKED] RGB cloud backup', JSON.stringify({ ...this.service.lastBackupTimings, total: Date.now() - t0, backup: t1 - t0, seal: t2 - t1, upload: Date.now() - t2, uploadMb: +(String(body.data).length / 1048576).toFixed(2) })); } catch { /* no console */ }
       return true;
     } catch (e) {
       if (e?.status === 409) { this.cloud.conflict = Math.max(1, e.latest || 0); this.cloud.error = 'A newer RGB cloud backup was saved from another browser. Use RGB in one browser at a time.'; }
@@ -878,7 +889,7 @@ export class WalletRgb {
   async forget() { /* nothing kept outside the vault any more */ }
 
   /** Run an RGB step: one at a time, errors shown as a message and a toast. */
-  async run(fn, { quiet = false } = {}) {
+  async run(fn, { quiet = false, backupNow = false } = {}) {
     // a tap while RGB is working: say so, instead of doing nothing
     if (this.busy) { if (!quiet) this.app.toast('RGB is still updating. One moment…', 2500); return; }
     this.busy = true; this.busySince = Date.now();
@@ -890,9 +901,11 @@ export class WalletRgb {
       await fn();
       // Try to save user changes immediately. Receive keeps invoice sharing locked until a backup succeeds.
       // Background refreshes can save a bit later.
+      // Saved straight after, in the background: the step is done for the person at once. A new invoice waits for
+      // it (backupNow): an invoice must not be shared before the backup has what it needs to receive the tokens.
       if (this.service?.backupRequired && this.cloudOn && this.ready) {
-        if (quiet) this.scheduleCloud();
-        else { this.message = 'Backing up…'; this.app.render(); await this.cloudSave(); this.message = ''; }
+        if (backupNow && !quiet) { this.message = 'Backing up…'; this.app.render(); await this.cloudSave(); this.message = ''; }
+        else this.scheduleCloud(quiet ? 4000 : 500);
       }
       if (this.phase !== 'legacy' && this.phase !== 'allow') this.phase = '';
       if (!quiet) this.message = '';
@@ -1161,7 +1174,7 @@ export class WalletRgb {
           this.invoice = r.invoice;
           this.invoiceInfo = { witness, amount: amount ? this.amount(a, amount) : '', ticker: a?.ticker || '', expiry: Number(this.fields.recvExpiry) || 86400 };
           this.logInvoice({ invoice: r.invoice, recipientId: r.recipientId, at: Date.now(), expiresAt: Number(r.expirationTimestamp) || Math.floor(Date.now() / 1000) + this.invoiceInfo.expiry, ...this.invoiceInfo });
-        });
+        }, { backupNow: true });
       }
       case 'review': {
         const a = this.find(this.asset);

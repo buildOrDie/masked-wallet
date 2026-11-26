@@ -83,6 +83,16 @@ test('snapshot is sequential, supports bigint and notices newly received state',
   assert.deepEqual(f.calls.slice(-2).map(c => c[0]), ['sync', 'refresh']); assert.equal(f.service.backupRequired, true);
   f.service.backupSaved(); await f.service.snapshot(); assert.equal(f.service.backupRequired, false);
 });
+test('a backup saved while another change happened leaves the wallet marked as not backed up', async () => {
+  const f = fixture(); await open(f); f.service.backupSaved();
+  await f.service.createUtxos('2');
+  const gen = f.service.dirtyGen;           // what a backup taken now holds
+  await f.service.createUtxos('2');         // changed again while it uploads
+  f.service.backupSaved(gen);
+  assert.equal(f.service.backupRequired, true, 'the later change still needs a backup');
+  f.service.backupSaved(f.service.dirtyGen);
+  assert.equal(f.service.backupRequired, false);
+});
 test('valid test send uses the reviewed exact asset and amount', async () => {
   const f = fixture(); await open(f); f.service.backupSaved();
   await f.service.send({ invoice: 'rgb:test', assetId: 'asset', amount: '100', fee: '2' });
