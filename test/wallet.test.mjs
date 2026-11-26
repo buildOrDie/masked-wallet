@@ -1169,3 +1169,18 @@ test('RGB cloud client: the latest version cheaply, the list of versions, one ea
   const old = new RgbCloud({ base: 'https://vault.test/', fetchFn: async (url) => new Response(JSON.stringify(/\?/.test(String(url)) ? {} : { v: 1, version: 42 }), { status: /\?/.test(String(url)) ? 404 : 200 }) });
   assert.equal(await old.version('ab'), 42);
 });
+
+test('RGB cloud: a backup over the old 16 MB is gzipped and opens again; a small one keeps the old format', async () => {
+  const c = await import('../src/rgb/cloud.mjs');
+  const keys = await c.cloudKeysFrom('11'.repeat(32));
+  const small = { format: 'x', ciphertext: 'a'.repeat(5000) };
+  const s1 = await c.seal(keys, small, 1);
+  assert.deepEqual(await c.open(keys, s1), small);
+  assert.equal((await c.packPlain(JSON.stringify(small)))[0], 0x7b, 'plain JSON, as older versions expect');
+  const rnd = new Uint8Array(13 * 1024 * 1024);
+  for (let i = 0; i < rnd.length; i += 65536) crypto.getRandomValues(rnd.subarray(i, i + 65536));
+  const big = { format: 'x', ciphertext: Buffer.from(rnd).toString('base64') };
+  const s2 = await c.seal(keys, big, 2);
+  assert.ok(JSON.stringify(s2).length < 24 * 1024 * 1024, 'fits what the server took before');
+  assert.deepEqual(await c.open(keys, s2), big);
+});

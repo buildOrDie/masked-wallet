@@ -23,8 +23,24 @@ export const CLOUD_KEY = 'masked.rgb.cloud'; // '0' = switched off; anything els
 const DOMAIN = 'MASKED rgb cloud v1';
 const te = new TextEncoder(), td = new TextDecoder();
 /** Padded sizes: the server learns only roughly how big a backup is. */
-const BUCKETS = [64, 256, 1024, 2048, 4096, 8192, 16384].map((k) => k * 1024);
+const BUCKETS = [64, 256, 1024, 2048, 4096, 8192, 16384, 24576, 32768].map((k) => k * 1024);
 export const CLOUD_MAX = BUCKETS[BUCKETS.length - 1] - 4;
+/**
+ * Up to 2.32.8 the biggest backup was 16 MB, not compressed. A backup that no longer fits that is gzipped (and may use
+ * the 24 and 32 MB sizes); smaller ones stay exactly as before, so an older MASKED still opens them. Opening tells
+ * them apart by the gzip header (a plain backup is JSON: it starts with "{").
+ */
+const PLAIN_MAX = 16384 * 1024 - 4;
+const GZ = (a) => a.length > 2 && a[0] === 0x1f && a[1] === 0x8b;
+async function gz(bytes, kind) {
+  const S = kind === 'gzip' ? CompressionStream : DecompressionStream;
+  return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new S('gzip'))).arrayBuffer());
+}
+export async function packPlain(json) {
+  const raw = te.encode(json);
+  return raw.length <= PLAIN_MAX ? raw : gz(raw, 'gzip');
+}
+export async function unpackPlain(bytes) { return td.decode(GZ(bytes) ? await gz(bytes, 'gunzip') : bytes); }
 
 /**
  * The cloud key material (32 bytes, hex) from the recovery phrase. It opens only the RGB cloud backup of one network:
@@ -72,7 +88,7 @@ export function unpad(bytes) {
 export async function seal(keys, envelope, version) {
   if (!Number.isSafeInteger(version) || version < 1) throw new Error('Bad cloud backup version.');
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const data = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: aad(keys.id, version) }, keys.encKey, pad(te.encode(JSON.stringify(envelope)))));
+  const data = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: aad(keys.id, version) }, keys.encKey, pad(await packPlain(JSON.stringify(envelope)))));
   const sig = schnorr.sign(putMessage(keys.id, version, iv, data), keys.signKey);
   return { v: 1, version, iv: b64(iv), data: b64(data), sig: bytesToHex(sig) };
 }
@@ -85,7 +101,7 @@ export async function open(keys, body, minVersion = 0) {
   if (!schnorr.verify(body.sig, putMessage(keys.id, body.version, iv, data), keys.id)) throw new Error('The cloud backup signature does not match this wallet. Not restored.');
   let plain;
   try { plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv, additionalData: aad(keys.id, body.version) }, keys.encKey, data); } catch { throw new Error('The cloud backup could not be decrypted with this wallet.'); }
-  return JSON.parse(td.decode(unpad(new Uint8Array(plain))));
+  return JSON.parse(await unpackPlain(unpad(new Uint8Array(plain))));
 }
 
 export class CloudError extends Error {
