@@ -34,7 +34,7 @@ async function showApproval(id) {
       throw new Error('popup did not open');
     } catch { await chrome.action.setPopup({ popup: POPUP }).catch(() => {}); }
   }
-  const win = await chrome.windows.create({ url: chrome.runtime.getURL(url), type: 'popup', width: 380, height: 660, focused: true });
+  const win = await chrome.windows.create({ url: chrome.runtime.getURL(url), type: 'popup', width: 420, height: 660, focused: true });
   return { mode: 'window', windowId: win.id };
 }
 function openApproval(origin, method, params) {

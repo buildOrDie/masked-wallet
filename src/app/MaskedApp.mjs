@@ -228,9 +228,9 @@ export class MaskedApp {
     window.addEventListener('offline', () => this.render());
     setInterval(() => { if (this.state.lockState === 'open') this.offline.flush(); }, 20000);
     if (platform.isApp || (!platform.hasExt && matchMedia('(max-width: 560px)').matches)) document.documentElement.classList.add('app');
-    // a MASKED window, the side panel or a tab: use its whole width (the toolbar popup keeps its 360 px)
+    // a MASKED window, the side panel or a tab: use its whole width (the toolbar popup keeps its 400 px)
     if (platform.hasExt && !platform.isApp) {
-      const wide = () => document.documentElement.classList.toggle('wide', !platform.inToolbarPopup && window.innerWidth >= 400);
+      const wide = () => document.documentElement.classList.toggle('wide', !platform.inToolbarPopup && window.innerWidth >= 440);
       wide(); window.addEventListener('resize', wide);
     }
     // Android back button: go back to the wallet home, and leave the app from there

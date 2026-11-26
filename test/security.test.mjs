@@ -101,16 +101,16 @@ test('an ALL signature cannot hide exposure on a separate SINGLE|ANYONECANPAY in
 
 test('RGB permission window: placed inside the browser window, fitted to it, Chrome places it when bounds are unusable', async () => {
   const { rgbWindowBounds } = await import('../src/app/Platform.mjs');
-  assert.deepEqual(rgbWindowBounds({ left: 0, top: 25, width: 1440, height: 875, state: 'normal' }), { width: 380, height: 660, left: 1048, top: 97 });
+  assert.deepEqual(rgbWindowBounds({ left: 0, top: 25, width: 1440, height: 875, state: 'normal' }), { width: 420, height: 660, left: 1008, top: 97 });
   // a second display to the left (negative coordinates)
-  assert.deepEqual(rgbWindowBounds({ left: -1920, top: 0, width: 1920, height: 1080, state: 'maximized' }), { width: 380, height: 660, left: -392, top: 72 });
+  assert.deepEqual(rgbWindowBounds({ left: -1920, top: 0, width: 1920, height: 1080, state: 'maximized' }), { width: 420, height: 660, left: -432, top: 72 });
   // a short window: the popup fits inside it instead of hanging off the bottom
   const short = rgbWindowBounds({ left: 100, top: 100, width: 900, height: 560, state: 'normal' });
   assert.equal(short.height, 480); assert.ok(short.top + short.height <= 100 + 560);
   // a narrow window: never wider than it, never left of it
   const narrow = rgbWindowBounds({ left: 50, top: 0, width: 300, height: 800, state: 'normal' });
   assert.equal(narrow.width, 300); assert.equal(narrow.left, 50);
-  for (const b of [null, { state: 'minimized', left: -32000, top: -32000, width: 160, height: 28 }, { left: 0, top: 0 }]) assert.deepEqual(rgbWindowBounds(b), { width: 380, height: 660 });
+  for (const b of [null, { state: 'minimized', left: -32000, top: -32000, width: 160, height: 28 }, { left: 0, top: 0 }]) assert.deepEqual(rgbWindowBounds(b), { width: 420, height: 660 });
 });
 
 test('RGB permission from the popup: the step is saved before Chrome asks, and cleared if the popup stays open', async () => {

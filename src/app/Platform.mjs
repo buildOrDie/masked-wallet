@@ -9,7 +9,7 @@
 /** The resume the background should reopen MASKED at once Chrome allows the servers. */
 export const RGB_PENDING = 'masked.rgb.permission.pending';
 
-export function rgbWindowBounds(b, width = 380, height = 660) {
+export function rgbWindowBounds(b, width = 420, height = 660) {
   const ok = (n) => Number.isFinite(n);
   if (!b || b.state === 'minimized' || ![b.left, b.top, b.width, b.height].every(ok) || b.width < 200 || b.height < 300) return { width, height };
   const w = Math.min(width, b.width), h = Math.max(420, Math.min(height, b.height - 80));
