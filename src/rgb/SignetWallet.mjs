@@ -105,6 +105,10 @@ export class SignetWallet {
         } catch { /* no console */ }
         if (backup) this.storage.setItem(this.vaultKey, JSON.stringify(await encryptRgb({ mnemonic: payload.mnemonic }, password, net)));
         this.mnemonic = payload.mnemonic; this.password = password;
+        // the first refresh after opening shows the wallet: the slow chores (receives waiting for data for over a day,
+        // purchases refused before 2.32.5) wait for a refresh two minutes later instead of holding up the first one
+        this.staleAt = Date.now() - 3600_000 + 120_000;
+        this.reopenAt = Date.now() - 300_000 + 120_000;
         // transfers that never went out a day ago (a market trade left halfway): their outputs freed, after the open
         setTimeout(() => { this.autoReleaseLocks?.().catch(() => {}); }, 8000);
       } catch (e) { await this.close(); throw e; }
@@ -203,9 +207,11 @@ export class SignetWallet {
       took.transfers = Date.now() - t1;
       const stranded = Object.entries(refreshed).filter(([, r]) => /signed PSBT not found/i.test(JSON.stringify(r?.failure ?? ''))).map(([idx]) => Number(idx));
       // Sequential: the WASM wallet has a shared RefCell and does not support overlapping calls.
+      const tl = Date.now();
       const address = await wallet.getAddress();
       const btc = await wallet.getBtcBalance();
       const groups = await wallet.listAssets();
+      took.lists = Date.now() - tl;
       // history per asset (rgb-lib lists transfers by asset, and each call reads the whole RGB database: with many
       // NFTs that's most of a refresh). Listed again only for an asset whose balance changed, after a refresh that
       // changed a transfer, on a full refresh, or every 10 minutes; the others keep the last list.
@@ -223,9 +229,11 @@ export class SignetWallet {
         cache.set(a.assetId, { sig, list: transfers[a.assetId] });
       }
       took.history = Date.now() - t2; took.assets = Object.keys(transfers).length; took.listed = listedN;
+      const tk = Date.now();
       const locked = typeof wallet.lockedCoins === 'function' ? await wallet.lockedCoins() : [];
       // tokens in this wallet's listings: they can't be sent (the engine counts them as spendable)
       const listed = typeof wallet.listedByAsset === 'function' ? wallet.listedByAsset() : {};
+      took.locked = Date.now() - tk; took.allReceives = all;
       const snapshot = { address, btc, groups, transfers, stranded, locked, listed };
       took.total = Date.now() - t0;
       // where an RGB refresh spends its time (the block server, the transfer server, this browser): in the console
