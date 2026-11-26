@@ -185,7 +185,11 @@ export class LiteWallet {
     if (typeof this.w?.addMediaFile !== 'function') return;
     this.mediaKept = new Set();
     try {
-      for (const d of await this.media.keys()) {
+      // all at once when the store can (one read instead of one per file: an NFT wallet holds hundreds)
+      const all = typeof this.media.all === 'function' ? await this.media.all() : null;
+      if (all) {
+        for (const [d, bytes] of all) if (bytes?.length && this.w.addMediaFile(bytes) === d) this.mediaKept.add(d);
+      } else for (const d of await this.media.keys()) {
         const bytes = await this.media.get(d);
         if (bytes?.length && this.w.addMediaFile(bytes) === d) this.mediaKept.add(d);
       }
@@ -294,9 +298,12 @@ export class LiteWallet {
    */
   async syncWallet({ full = false } = {}) {
     const online = this.requireOnline();
+    const t0 = Date.now();
     if (full) await this.wallet.fullScan(online);
     await this.wallet.sync(online);
+    const t1 = Date.now();
     await this.save();
+    this.lastSyncTook = { engine: t1 - t0, save: Date.now() - t1 };
   }
   /**
    * Ask the transfer servers about waiting transfers. Each waiting receive costs a call on every refresh, and a wallet

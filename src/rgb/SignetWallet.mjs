@@ -174,13 +174,17 @@ export class SignetWallet {
         if (!/invalid indexer|esplora|failed to fetch|network|429|too many|timed? ?out|50[234]/i.test(String(e?.message || e)) || !(await wallet.switchIndexer?.())) throw e;
         await wallet.syncWallet({ full });
       }
+      took.blocks = Date.now() - t0;
+      if (sync && wallet.lastSyncTook) { took.blocksEngine = wallet.lastSyncTook.engine; took.blocksSave = wallet.lastSyncTook.save; }
       // A send signed before a restore can't be broadcast: the engine keeps the signed transaction in this
       // browser only, never in backups. Once the other wallet accepts, refresh reports it missing.
       // invoices no transaction pays, made over an hour ago (moves that never went out): every refresh asks the
       // transfer server about each one, so they go (at most once in 10 minutes; nothing pays them, nothing is lost)
       if (typeof wallet.cancelUnpaidReceives === 'function' && Date.now() - (this.unpaidAt || 0) > 600_000) {
         this.unpaidAt = Date.now();
-        try { await wallet.cancelUnpaidReceives(); } catch { /* next time */ }
+        const tu = Date.now();
+        try { took.unpaidCancelled = await wallet.cancelUnpaidReceives(); } catch { /* next time */ }
+        took.unpaid = Date.now() - tu;
       }
       took.sync = Date.now() - t0;
       const t1 = Date.now();

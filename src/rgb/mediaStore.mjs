@@ -12,6 +12,7 @@ export function memoryMediaStore() {
   const m = new Map();
   return {
     async keys() { return [...m.keys()]; },
+    async all() { return [...m.entries()].map(([k, v]) => [k, new Uint8Array(v)]); },
     async get(d) { return m.get(d) || null; },
     async put(d, b) { m.set(d, new Uint8Array(b)); },
   };
@@ -41,6 +42,16 @@ export function mediaStore() {
   };
   return {
     async keys() { return ((await run('readonly', (s) => s.getAllKeys())) || []).map(String); },
+    /** Every file in one read: [digest, bytes] pairs. */
+    async all() {
+      const db = await open();
+      return new Promise((ok, no) => {
+        const st = db.transaction(STORE, 'readonly').objectStore(STORE);
+        const k = st.getAllKeys(), v = st.getAll();
+        v.onsuccess = () => ok((k.result || []).map((key, i) => [String(key), new Uint8Array(v.result[i])]));
+        v.onerror = () => no(v.error); k.onerror = () => no(k.error);
+      });
+    },
     async get(d) { const v = await run('readonly', (s) => s.get(d)); return v ? new Uint8Array(v) : null; },
     async put(d, b) { await run('readwrite', (s) => { s.put(new Uint8Array(b), d); }); },
   };
