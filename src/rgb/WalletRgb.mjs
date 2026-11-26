@@ -850,7 +850,7 @@ export class WalletRgb {
   startTimer() {
     clearInterval(this.timer);
     this.timer = setInterval(() => {
-      if (!this.ready || this.busy || document.visibilityState !== 'visible') return;
+      if (!this.ready || this.busy || this.quietRun || document.visibilityState !== 'visible') return;
       // every minute only while something is under way (a transfer, a listing going live, a purchase); otherwise every
       // 5 minutes. A refresh by another MASKED window counts. (Mainnet block servers: no needless requests.)
       const since = Date.now() - this.sharedRefreshAt();
@@ -862,7 +862,7 @@ export class WalletRgb {
 
   /** Open RGB by itself when the wallet is open on Signet and a test wallet exists. Called from render. */
   ensure() {
-    if (this.app.platform.rgbResumeId || !this.available || this.ready || this.busy || !this.exists || this.tried === this.profile.id) return;
+    if (this.app.platform.rgbResumeId || !this.available || this.ready || this.busy || this.quietRun || !this.exists || this.tried === this.profile.id) return;
     // let the wallet's own sync finish first: both use the same block servers
     // (at most 30 s: a long history rescan should not keep RGB closed)
     // (at most 30 s, or 5 s when the last balances are saved: they show at once and the refresh runs after)
@@ -889,18 +889,40 @@ export class WalletRgb {
   async forget() { /* nothing kept outside the vault any more */ }
 
   /** Run an RGB step: one at a time, errors shown as a message and a toast. */
-  async run(fn, { quiet = false, backupNow = false } = {}) {
-    // a tap while RGB is working: say so, instead of doing nothing
-    if (this.busy) { if (!quiet) this.app.toast('RGB is still updating. One moment…', 2500); return; }
+  /**
+   * Run an RGB step. A quiet one (opening, the minute refresh, a report) runs underneath: the wallet stays usable
+   * and shows the last balances meanwhile. A step the person taps waits for it ("Waiting for the update…"), then
+   * runs; the engine takes one operation at a time anyway. `wait`: a quiet step that waits for one already running
+   * instead of being skipped (one the person asked for, like the outputs report).
+   */
+  async run(fn, { quiet = false, backupNow = false, wait = false } = {}) {
+    if (quiet) {
+      if (this.busy) return;
+      if (this.quietRun) { if (!wait) return; await this.quietRun.catch(() => {}); if (this.busy || this.quietRun) return; }
+      const p = this.steps(fn, { quiet, backupNow });
+      this.quietRun = p;
+      try { await p; } finally { this.quietRun = null; this.app.render(); }
+      return;
+    }
+    // a tap while RGB is working on another tapped step: say so, instead of doing nothing
+    if (this.busy) { this.app.toast('RGB is still updating. One moment…', 2500); return; }
     this.busy = true; this.busySince = Date.now();
     // show "Updating…" at once (the button is disabled until it's done), then how long it has been working
-    if (!quiet) this.app.render();
+    this.app.render();
     const tick = setInterval(() => { if (Date.now() - this.busySince >= 10_000) this.app.render(); }, 5000);
     /** @type {any} */ (tick).unref?.(); // Node (tests): a step left waiting must not keep the process alive
     try {
+      if (this.quietRun) {
+        this.waitingForUpdate = true; this.app.render();
+        try { await this.quietRun; } catch { /* its own message */ } finally { this.waitingForUpdate = false; }
+        this.app.render();
+      }
+      await this.steps(fn, { quiet, backupNow });
+    } finally { clearInterval(tick); this.busy = false; this.busySince = 0; this.app.render(); }
+  }
+  async steps(fn, { quiet, backupNow }) {
+    try {
       await fn();
-      // Try to save user changes immediately. Receive keeps invoice sharing locked until a backup succeeds.
-      // Background refreshes can save a bit later.
       // Saved straight after, in the background: the step is done for the person at once. A new invoice waits for
       // it (backupNow): an invoice must not be shared before the backup has what it needs to receive the tokens.
       if (this.service?.backupRequired && this.cloudOn && this.ready) {
@@ -913,10 +935,13 @@ export class WalletRgb {
       this.message = rgbError(error, this.profile);
       if (!this.ready && this.phase === 'opening') this.phase = 'error';
       if (!quiet) this.app.toast(this.message, 6000);
-    } finally { clearInterval(tick); this.busy = false; this.busySince = 0; this.app.render(); }
+    }
   }
+  /** Something is running underneath (opening or a refresh): the wallet stays usable. */
+  get updating() { return !!this.quietRun || this.busy; }
   /** The refresh link's words: "Updating… 0:45" once it has been working a while. */
   get busyLabel() {
+    if (this.waitingForUpdate) return 'Waiting for the update…';
     const s = Math.floor((Date.now() - (this.busySince || Date.now())) / 1000);
     return s < 10 ? 'Updating…' : `Updating… ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   }
@@ -1382,7 +1407,7 @@ export class WalletRgb {
       });
       case 'repairCancel': this.repair = null; return app.render();
       // What's in this wallet: every output and coin, what it's doing
-      case 'outputs': return this.run(async () => { this.outputs = this.withoutDropped(await this.service.outputsReport()); }, { quiet: true });
+      case 'outputs': return this.run(async () => { this.outputs = this.withoutDropped(await this.service.outputsReport()); }, { quiet: true, wait: true });
       case 'outputsClose': this.outputs = null; return app.render();
       // a transfer that never went out (a market trade left halfway, an invoice nobody paid): give it up, freeing its outputs
       case 'releaseLock': return this.run(async () => {
@@ -1398,7 +1423,7 @@ export class WalletRgb {
       case 'homeTab': state.f.rgbHome = arg === 'nft' ? 'nft' : 'tok'; this.homeTab = state.f.rgbHome; return app.render();
       case 'hubTab':
         state.f.rgbHub = ['activity', 'locked', 'backup'].includes(arg) ? arg : 'activity';
-        if (state.f.rgbHub === 'locked' && !this.outputs && !this.busy) return this.run(async () => { this.outputs = this.withoutDropped(await this.service.outputsReport()); }, { quiet: true });
+        if (state.f.rgbHub === 'locked' && !this.outputs && !this.busy) return this.run(async () => { this.outputs = this.withoutDropped(await this.service.outputsReport()); }, { quiet: true, wait: true });
         return app.render();
       case 'listTab': state.f.listTab = arg === 'done' ? 'done' : 'open'; this.cancelAsk = null; return app.render();
       case 'instantCancelAsk': this.cancelAsk = arg; return app.render();

@@ -1184,3 +1184,22 @@ test('RGB cloud: a backup over the old 16 MB is gzipped and opens again; a small
   assert.ok(JSON.stringify(s2).length < 24 * 1024 * 1024, 'fits what the server took before');
   assert.deepEqual(await c.open(keys, s2), big);
 });
+
+test('RGB: a refresh runs underneath; a step tapped meanwhile waits for it, then runs', async () => {
+  const app = rgbApp(); rgbReady(app);
+  const order = [];
+  let finish;
+  const refresh = app.rgb.run(async () => { order.push('refresh start'); await new Promise((r) => { finish = r; }); order.push('refresh end'); }, { quiet: true });
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(app.rgb.busy, false, 'the wallet stays usable during the refresh');
+  assert.ok(app.rgb.updating);
+  // another background refresh meanwhile: skipped
+  await app.rgb.run(async () => order.push('second refresh'), { quiet: true });
+  const tap = app.rgb.run(async () => order.push('send'));
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(app.rgb.busyLabel, 'Waiting for the update…');
+  finish();
+  await refresh; await tap;
+  assert.deepEqual(order, ['refresh start', 'refresh end', 'send']);
+  assert.equal(app.rgb.updating, false);
+});

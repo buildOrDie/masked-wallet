@@ -244,7 +244,7 @@ export class ApprovalController {
   async rgbBusy(fn) {
     const r = this.app.rgb;
     // a refresh is running (slow on a busy block server): wait for it instead of failing straight away
-    for (const until = Date.now() + 90000; r.busy && Date.now() < until;) await new Promise((ok) => setTimeout(ok, 250));
+    for (const until = Date.now() + 90000; (r.busy || r.quietRun) && Date.now() < until;) await new Promise((ok) => setTimeout(ok, 250));
     if (r.busy) throw new Error('RGB is busy. Try again in a moment.');
     r.busy = true;
     try { return await fn(); } finally { r.busy = false; }
@@ -518,7 +518,7 @@ export class ApprovalController {
       if (id === 'cloudLoad') {
         state.status.approve = ['Loading the latest RGB from the cloud backup…', '']; app.render();
         // RGB's own step (it takes RGB's busy flag itself): wait for a refresh in progress first
-        for (const until = Date.now() + 90000; r.busy && Date.now() < until;) await new Promise((ok) => setTimeout(ok, 250));
+        for (const until = Date.now() + 90000; (r.busy || r.quietRun) && Date.now() < until;) await new Promise((ok) => setTimeout(ok, 250));
         await r.action('cloudLoad');
         if (r.cloud?.conflict || !r.ready) throw new Error(r.message || 'The newer RGB backup couldn\'t be loaded. Open Settings → RGB → cloud backup.');
         state.status.approve = ['Loaded. This copy is up to date. Trying again…', '']; app.render();

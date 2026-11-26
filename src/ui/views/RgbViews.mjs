@@ -201,7 +201,7 @@ export class RgbHome {
         <button role="radio" aria-checked="${tab === 'tok'}" data-rgb="homeTab" data-rgb-arg="tok">Tokens <span class="muted">${list.length}</span></button>
         <button role="radio" aria-checked="${tab === 'nft'}" data-rgb="homeTab" data-rgb-arg="nft">NFTs <span class="muted">${nftCount}</span></button></div>` : '<div class="rgb-sub">Tokens</div>';
     return `${backupDue}${fund}<section class="rgb-mod">
-      <div class="list-h"><b>RGB${r.isMain ? ' <span class="badge">beta</span>' : ''}</b><span class="rgb-h-act"><button class="link small" data-rgb="refresh" ${r.busy ? 'disabled' : ''}>${r.busy ? r.busyLabel : r.data.cached ? 'Last saved · Refresh' : 'Refresh'}</button><button class="link small rgb-manage" data-rgb="hub">Activity & tools ›</button></span></div>
+      <div class="list-h"><b>RGB${r.isMain ? ' <span class="badge">beta</span>' : ''}</b><span class="rgb-h-act"><button class="link small" data-rgb="refresh" ${r.busy ? 'disabled' : ''}>${r.busy ? r.busyLabel : r.quietRun ? 'Updating…' : r.data.cached ? 'Last saved · Refresh' : 'Refresh'}</button><button class="link small rgb-manage" data-rgb="hub">Activity & tools ›</button></span></div>
       <div class="rgb-top">${feeRow}${listingsRow(r)}</div>
       ${tabs}
       <div class="rgb-rows">${tab === 'nft' ? nftRows(r, cols) : tokRows}</div>
