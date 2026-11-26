@@ -58,7 +58,10 @@ export class SignetWallet {
       if (this.wallet) throw new Error('Lock and reload before opening a wallet again.');
       if (backup && this.exists && !replace) throw new Error('Restore in a clean browser profile; do not overwrite an existing RGB wallet.');
       const saved = backup || (this.exists ? JSON.parse(this.storage.getItem(this.vaultKey)) : null);
+      // where opening RGB spends its time, in the console with the refresh and backup lines
+      const t = [Date.now()], mark = () => t.push(Date.now());
       const payload = saved ? await decryptRgb(saved, password, net) : { mnemonic: generateMnemonic() };
+      mark();
       // Persist encrypted keys before the SDK creates state. An init failure must never lose the seed.
       if (!saved) {
         this.storage.setItem(this.vaultKey, JSON.stringify(await encryptRgb(payload, password, net)));
@@ -66,10 +69,12 @@ export class SignetWallet {
       }
       try { this.trimBeforeLoads(); } catch { /* storage unreadable: nothing to trim */ }
       const sdk = await this.loadSdk();
+      mark();
       const wallet = new sdk.UTEXOWallet({ ...this.profile.sdk, mnemonic: payload.mnemonic, password });
       this.wallet = wallet;
       try {
         await wallet.init();
+        mark();
         // outputs promised to Instant listings: before anything else can spend them
         wallet.reserve?.(this.instantReserved());
         // sales pay the Public address, when it's on this network
@@ -88,9 +93,16 @@ export class SignetWallet {
           // Instant listings and purchases this wallet made in another copy: kept with the backup
           this.mergeInstant(payload.instant);
         }
+        mark();
         await wallet.unlock();
+        mark();
         // unlock can return offline. Explicit sync must fail visibly instead of showing a zero balance.
         if (!wallet.isOnline()) await wallet.goOnline();
+        mark();
+        try {
+          const d = (i) => t[i + 1] - t[i];
+          console.info('[MASKED] RGB open', JSON.stringify({ keys: d(0), engineLoad: d(1), engineInit: d(2), restore: d(3), unlock: d(4), online: d(5), total: t[6] - t[0] }));
+        } catch { /* no console */ }
         if (backup) this.storage.setItem(this.vaultKey, JSON.stringify(await encryptRgb({ mnemonic: payload.mnemonic }, password, net)));
         this.mnemonic = payload.mnemonic; this.password = password;
         // transfers that never went out a day ago (a market trade left halfway): their outputs freed, after the open
