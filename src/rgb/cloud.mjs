@@ -23,7 +23,8 @@ export const CLOUD_KEY = 'masked.rgb.cloud'; // '0' = switched off; anything els
 const DOMAIN = 'MASKED rgb cloud v1';
 const te = new TextEncoder(), td = new TextDecoder();
 /** Padded sizes: the server learns only roughly how big a backup is. */
-const BUCKETS = [64, 256, 1024, 2048, 4096, 8192, 16384, 24576, 32768].map((k) => k * 1024);
+// above 8 MB in 2 MB steps (it was 8 then 16): a 13 MB backup uploads 14 MB, not 16. Any size opens in any version.
+const BUCKETS = [64, 256, 1024, 2048, 4096, 8192, 10240, 12288, 14336, 16384, 20480, 24576, 28672, 32768].map((k) => k * 1024);
 export const CLOUD_MAX = BUCKETS[BUCKETS.length - 1] - 4;
 /**
  * Up to 2.32.8 the biggest backup was 16 MB, not compressed. A backup that no longer fits that is gzipped (and may use

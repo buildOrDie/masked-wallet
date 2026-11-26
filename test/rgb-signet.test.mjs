@@ -334,3 +334,23 @@ test('undo copies of loads stay small, and give their room to listings before an
   assert.ok(store.get('lot1').psbt && store.get('lot2').psbt, 'both signed lots kept');
   assert.equal(s2.beforeLoads().length, 0, 'the undo copy made room');
 });
+
+test('a refresh lists a token\'s history again only when something about it changed', async () => {
+  const f = fixture(); await open(f);
+  const w = f.service.requireWallet();
+  let bal = 5, changed = {};
+  const listed = [];
+  w.listAssets = async () => ({ nia: [{ assetId: 'rgb:A', balance: { settled: 5, future: 5 } }], uda: [{ assetId: 'rgb:N', balance: { settled: bal, future: bal } }] });
+  w.listTransfers = async (id) => { listed.push(id); return [{ idx: listed.length }]; };
+  w.refreshWallet = async () => changed;
+  await f.service.snapshot(); assert.deepEqual(listed.sort(), ['rgb:A', 'rgb:N'], 'first time: every token');
+  listed.length = 0; const s2 = await f.service.snapshot();
+  assert.deepEqual(listed, [], 'nothing changed: none listed');
+  assert.equal(s2.transfers['rgb:A'].length, 1, 'the last list is kept');
+  bal = 6; listed.length = 0; await f.service.snapshot();
+  assert.deepEqual(listed, ['rgb:N'], 'a balance change: that token only');
+  changed = { 3: { updatedStatus: 'Settled' } }; listed.length = 0; await f.service.snapshot();
+  assert.equal(listed.length, 2, 'a transfer changed: every token');
+  changed = {}; listed.length = 0; await f.service.createUtxos('2'); await f.service.snapshot();
+  assert.equal(listed.length, 2, 'after this wallet did something: every token');
+});

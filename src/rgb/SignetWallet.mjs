@@ -190,9 +190,23 @@ export class SignetWallet {
       const address = await wallet.getAddress();
       const btc = await wallet.getBtcBalance();
       const groups = await wallet.listAssets();
-      // history per asset (rgb-lib lists transfers by asset)
-      const transfers = {};
-      for (const a of Object.values(groups || {}).flat()) if (a?.assetId) transfers[a.assetId] = await wallet.listTransfers(a.assetId);
+      // history per asset (rgb-lib lists transfers by asset, and each call reads the whole RGB database: with many
+      // NFTs that's most of a refresh). Listed again only for an asset whose balance changed, after a refresh that
+      // changed a transfer, on a full refresh, or every 10 minutes; the others keep the last list.
+      const t2 = Date.now();
+      const transfers = {}, cache = this.transferCache ||= new Map();
+      const every = full || Object.keys(refreshed).length > 0 || Date.now() - (this.transfersAt || 0) > 600_000;
+      if (every) this.transfersAt = Date.now();
+      let listedN = 0;
+      for (const a of Object.values(groups || {}).flat()) {
+        if (!a?.assetId) continue;
+        const sig = JSON.stringify(a.balance ?? null);
+        const hit = cache.get(a.assetId);
+        if (!every && hit && hit.sig === sig) { transfers[a.assetId] = hit.list; continue; }
+        transfers[a.assetId] = await wallet.listTransfers(a.assetId); listedN++;
+        cache.set(a.assetId, { sig, list: transfers[a.assetId] });
+      }
+      took.history = Date.now() - t2; took.assets = Object.keys(transfers).length; took.listed = listedN;
       const locked = typeof wallet.lockedCoins === 'function' ? await wallet.lockedCoins() : [];
       // tokens in this wallet's listings: they can't be sent (the engine counts them as spendable)
       const listed = typeof wallet.listedByAsset === 'function' ? wallet.listedByAsset() : {};
@@ -215,6 +229,7 @@ export class SignetWallet {
       const wallet = this.requireWallet();
       // Mark before execution: even an interrupted operation may have changed RGB state.
       this.markDirty();
+      this.transfersAt = 0; // the next refresh lists every token's history again
       return fn(wallet);
     });
   }
@@ -443,7 +458,7 @@ export class SignetWallet {
   }
   async close() {
     const wallet = this.wallet;
-    this.wallet = null; this.mnemonic = ''; this.password = ''; this.encCache = null;
+    this.wallet = null; this.mnemonic = ''; this.password = ''; this.encCache = null; this.transferCache = null;
     if (wallet) await wallet.dispose();
   }
 }
