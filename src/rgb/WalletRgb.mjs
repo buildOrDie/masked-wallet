@@ -205,6 +205,9 @@ export class WalletRgb {
   }
   get cloudVersion() { try { return Number(localStorage.getItem(`${this.profile.vaultKey}.cloud-version`)) || 0; } catch { return 0; } }
   /** When a backup file was last written from this browser (ms), 0 if never. */
+  /** Home → RGB: Tokens or NFTs, as last picked in this browser. */
+  get homeTab() { try { return localStorage.getItem('masked.rgb.homeTab') || ''; } catch { return ''; } }
+  set homeTab(v) { try { localStorage.setItem('masked.rgb.homeTab', v); } catch { /* private window: this session only */ } }
   get fileAt() { try { return Number(localStorage.getItem(`${this.profile.vaultKey}.file-at`)) || 0; } catch { return 0; } }
   get canShareInvoice() {
     if (!this.isMain) return true;
@@ -1379,6 +1382,7 @@ export class WalletRgb {
       // Settings → RGB → Instant listings: cancel one here, also one the market doesn't show (asks once first)
       case 'listings': this.cancelAsk = null; state.view = 'rgblist'; return app.render();
       case 'hub': state.view = 'rgbwallet'; return app.render();
+      case 'homeTab': state.f.rgbHome = arg === 'nft' ? 'nft' : 'tok'; this.homeTab = state.f.rgbHome; return app.render();
       case 'hubTab':
         state.f.rgbHub = ['activity', 'locked', 'backup'].includes(arg) ? arg : 'activity';
         if (state.f.rgbHub === 'locked' && !this.outputs && !this.busy) return this.run(async () => { this.outputs = this.withoutDropped(await this.service.outputsReport()); }, { quiet: true });

@@ -188,7 +188,9 @@ export class RgbHome {
     // one module, like a wallet card: the header, the RGB balance, then Tokens | NFTs
     const cols = r.collections?.() || [];
     const nftCount = cols.reduce((n, c) => n + c.list.length, 0);
-    const tab = cols.length && (app.state.f.rgbHome === 'nft' || (!list.length && app.state.f.rgbHome !== 'tok')) ? 'nft' : 'tok';
+    // the side you picked last stays picked (this browser); NFTs first only when there are no tokens and no pick yet
+    const pick = app.state.f.rgbHome || r.homeTab;
+    const tab = cols.length && (pick === 'nft' || (!list.length && pick !== 'tok')) ? 'nft' : 'tok';
     const tokRows = list.map((a) => {
       const { settled: s, future: fut } = r.bal(a);
       return `<button class="tok-line" data-rgb="token" data-rgb-arg="${esc(a.assetId)}">${rgbIcon(a.ticker)}
@@ -196,8 +198,8 @@ export class RgbHome {
         <span class="bal-amt"><b>${r.amount(a, s)}</b><span translate="no">${esc(a.ticker)}</span></span><span class="chev">›</span></button>`;
     }).join('') || `<div class="rgb-empty"><p class="muted small">No RGB tokens yet.</p>${r.isMain ? `<button class="btn ghost sm" data-rgb="receive">${I.recv}<span>Receive an RGB token</span></button>` : `<button class="btn ghost sm" data-rgb="mint">${I.mint}<span>Create an RGB token</span></button>`}</div>`;
     const tabs = cols.length ? `<div class="seg rgb-tabs" role="radiogroup">
-        <button role="radio" aria-checked="${tab === 'tok'}" data-set="rgbHome" data-val="tok">Tokens <span class="muted">${list.length}</span></button>
-        <button role="radio" aria-checked="${tab === 'nft'}" data-set="rgbHome" data-val="nft">NFTs <span class="muted">${nftCount}</span></button></div>` : '<div class="rgb-sub">Tokens</div>';
+        <button role="radio" aria-checked="${tab === 'tok'}" data-rgb="homeTab" data-rgb-arg="tok">Tokens <span class="muted">${list.length}</span></button>
+        <button role="radio" aria-checked="${tab === 'nft'}" data-rgb="homeTab" data-rgb-arg="nft">NFTs <span class="muted">${nftCount}</span></button></div>` : '<div class="rgb-sub">Tokens</div>';
     return `${backupDue}${fund}<section class="rgb-mod">
       <div class="list-h"><b>RGB${r.isMain ? ' <span class="badge">beta</span>' : ''}</b><span class="rgb-h-act"><button class="link small" data-rgb="refresh" ${r.busy ? 'disabled' : ''}>${r.busy ? r.busyLabel : r.data.cached ? 'Last saved · Refresh' : 'Refresh'}</button><button class="link small rgb-manage" data-rgb="hub">Activity & tools ›</button></span></div>
       <div class="rgb-top">${feeRow}${listingsRow(r)}</div>
