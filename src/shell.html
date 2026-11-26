@@ -395,6 +395,27 @@ select#obBday { width: 100%; }
 .chip b { font-size: 13px; letter-spacing: .04em; }
 .chip span { font-size: 11px; color: var(--muted); }
 .chip.on { border-color: var(--btc); background: var(--btc-soft); }
+/* RGB wallet (2.32.8): one place for RGB activity, locked tokens and backups */
+.rgb-h-act { display: inline-flex; gap: 12px; align-items: baseline; }
+.rgb-manage { color: var(--sh); font-weight: 700; }
+.rgbw-sum { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin: 4px 0 12px; }
+.rgbw-sum > div, .rgbw-stat { display: grid; gap: 2px; align-content: start; padding: 10px 12px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; text-align: left; color: inherit; }
+.rgbw-sum b { font-size: 16px; font-variant-numeric: tabular-nums; }
+.rgbw-sum b small { font-size: 11px; color: var(--muted); font-weight: 600; }
+.rgbw-stat .small:last-child { color: var(--sh); font-weight: 700; }
+.rgbw-sum .rgbw-refresh { grid-column: 1 / -1; padding: 0; background: none; border: 0; display: flex; justify-content: flex-end; }
+.rgbw-tabs { margin-bottom: 10px; }
+.rgbw-chips { margin-bottom: 4px; }
+.rgbw-chips .chip { display: inline-flex; gap: 6px; align-items: baseline; padding: 7px 11px; font-size: 12.5px; font-weight: 700; }
+.rgbw-row { grid-template-columns: 1fr auto; padding: 0; }
+.rgbw-open { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; padding: 10px 2px; text-align: left; color: inherit; min-width: 0; }
+.rgbw-open:hover { background: rgba(255,255,255,.03); }
+.rgbw-open .bal-txt { min-width: 0; }
+.rgbw-open .bal-txt > span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 12px; }
+.rgbw-tk { color: var(--muted); font-weight: 600; font-size: 12px; margin-left: 4px; }
+.h-tx { padding: 8px; color: var(--muted); display: grid; place-items: center; }
+.h-tx svg { width: 14px; height: 14px; }
+html.wide .rgbw-open .bal-txt > span { white-space: normal; }
 .list-h { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 10px 4px; }
 .coin.ext { background: var(--card-2); color: var(--muted); }
 .coin.ext svg { width: 16px; height: 16px; }
@@ -493,6 +514,15 @@ html.app .top { padding-top: calc(12px + env(safe-area-inset-top)); }
 html.app #nav { width: 100%; max-width: 640px; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
 html.app main { padding-bottom: calc(96px + env(safe-area-inset-bottom)); }
 html.app #toast { bottom: calc(90px + env(safe-area-inset-bottom)); }
+/* a MASKED window, the side panel or a tab (not the toolbar popup): the whole width, like other wallets' windows, with
+   a thin scrollbar so it's clear the page scrolls */
+html.wide body { width: 100%; max-width: 760px; min-height: 100vh; }
+html.wide #nav { width: 100%; max-width: 760px; }
+html.wide main { padding-left: 20px; padding-right: 20px; }
+html.wide { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.18) transparent; }
+html.wide ::-webkit-scrollbar { display: block; width: 8px; }
+html.wide ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.16); border-radius: 8px; }
+html.wide ::-webkit-scrollbar-track { background: transparent; }
 /* the phone app's Market tab: MASKED's market and Launchpad in a frame, between the top of the screen and the tab bar */
 #nav.four { grid-template-columns: repeat(4, 1fr); }
 .market { position: fixed; top: 0; left: 50%; transform: translateX(-50%); width: 100%; max-width: 640px; bottom: 64px; z-index: 9; display: flex; flex-direction: column; background: var(--bg); }

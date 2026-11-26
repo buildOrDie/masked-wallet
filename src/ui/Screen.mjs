@@ -9,7 +9,7 @@ import { RelayView } from './views/RelayView.mjs';
 import { SendView } from './views/SendView.mjs';
 import { MintView } from './views/MintView.mjs';
 import { TokenView } from './views/TokenView.mjs';
-import { RgbCollectionView, RgbListingsView, RgbSendView, RgbTokenView } from './views/RgbViews.mjs';
+import { RgbCollectionView, RgbListingsView, RgbSendView, RgbTokenView, RgbWalletView } from './views/RgbViews.mjs';
 import { ActivityView } from './views/ActivityView.mjs';
 import { AccountsView } from './views/AccountsView.mjs';
 import { LeafView } from './views/LeafView.mjs';
@@ -36,7 +36,7 @@ export class Screen {
     this.views = {
       approve: new ApproveView(app), home: new HomeView(app), token: new TokenView(app), receive: new ReceiveView(app), relay: new RelayView(app),
       send: new SendView(app, 'send'), shield: new SendView(app, 'shield'), activity: new ActivityView(app), mint: new MintView(app), settings: new SettingsView(app), accounts: new AccountsView(app), leaf: new LeafView(app), ecash: new EcashView(app), ordinals: new OrdinalsView(app),
-      rgbtok: new RgbTokenView(app), rgbcoll: new RgbCollectionView(app), rgbsend: new RgbSendView(app), rgblist: new RgbListingsView(app), market: new MarketView(),
+      rgbtok: new RgbTokenView(app), rgbcoll: new RgbCollectionView(app), rgbsend: new RgbSendView(app), rgblist: new RgbListingsView(app), rgbwallet: new RgbWalletView(app), market: new MarketView(),
     };
     // screens in front of the wallet, by lock state
     this.gates = { locked: new LockView(app), onboard: new OnboardView(app), 'onboard-cancel': new OnboardView(app), migrate: new SetPasswordView(app), backup: new BackupView(app) };
@@ -49,7 +49,7 @@ export class Screen {
   /** Which nav tab a view belongs to. */
   navOf(v) {
     const { state } = this.app;
-    const n = ['receive', 'send', 'shield', 'relay', 'accounts', 'leaf', 'ecash', 'ordinals', 'rgbtok', 'rgbcoll', 'rgbsend', 'rgblist'].includes(v) ? 'home'
+    const n = ['receive', 'send', 'shield', 'relay', 'accounts', 'leaf', 'ecash', 'ordinals', 'rgbtok', 'rgbcoll', 'rgbsend', 'rgblist', 'rgbwallet'].includes(v) ? 'home'
       : v === 'token' || (v === 'mint' && (state.f.mintMode === 'send' || state.f.mintMode === 'transfer')) ? (state.tokFrom || 'home') : v;
     return n === 'activity' ? 'settings' : n;
   }

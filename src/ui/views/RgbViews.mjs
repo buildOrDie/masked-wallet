@@ -186,7 +186,7 @@ export class RgbHome {
         <span class="bal-amt"><b>${fmtBtc(settled)}</b><span>${pending ? `<span class="pend-t" title="Waiting for a block">+${fmtBtc(pending)} pending</span>` : unit}</span></span></div>
       <div class="rgb-bal-act"><button class="btn ghost sm" data-rgb="fund">${I.plus}<span>Add from Bitcoin</span></button><button class="btn ghost sm" data-rgb="${r.withdraw ? 'withdrawClose' : 'withdraw'}" ${settled + pending ? '' : 'disabled'}>${I.send}<span>Move to Bitcoin</span></button></div>${wd}`;
     return `<section class="home-toks">
-      <div class="list-h"><b>RGB tokens${r.isMain ? ' <span class="badge">beta</span>' : ''}</b><button class="link small" data-rgb="refresh" ${r.busy ? 'disabled' : ''}>${r.busy ? r.busyLabel : r.data.cached ? 'Last saved · Refresh' : 'Refresh'}</button></div>
+      <div class="list-h"><b>RGB tokens${r.isMain ? ' <span class="badge">beta</span>' : ''}</b><span class="rgb-h-act"><button class="link small" data-rgb="refresh" ${r.busy ? 'disabled' : ''}>${r.busy ? r.busyLabel : r.data.cached ? 'Last saved · Refresh' : 'Refresh'}</button><button class="link small rgb-manage" data-rgb="hub">Activity & tools ›</button></span></div>
       ${backupDue}${fund}
       <div class="tok-list">${feeRow}${listingsRow(r)}${list.map((a) => {
         const { settled: s, future: fut } = r.bal(a);
@@ -553,6 +553,7 @@ export class RgbSettings {
       <div class="det-body">
         ${nets ? `<div class="field"><span class="lbl">Test network</span>${nets}</div>${RgbSettings.cloud(r)}` : `<p class="info warn">Beta on Bitcoin mainnet. RGB tokens can only be restored from an RGB backup, not from the recovery phrase alone. Keep amounts small.</p>${RgbSettings.cloud(r)}`}
         ${r.ready ? `
+        <button class="link-row" data-rgb="hub"><span><b>RGB wallet</b><span class="muted small"> · activity, locked tokens, outputs, backup</span></span><span class="chev">›</span></button>
         ${rowKV('RGB balance', `${fmtBtc(settled)} ${r.isMain ? 'BTC' : 'tBTC'}${pending ? ` <span class="muted">+${fmtBtc(pending)} pending</span>` : ''}`)}
         <p class="muted small">Its own address, for support. To add to it, use Add from Bitcoin on Home.</p>
         <p class="addr mono small">${addrChunks(r.data?.address || '')}</p>
@@ -753,5 +754,101 @@ export class RgbListingsView extends View {
       ${tab === 'open' && open.length ? `<p class="lst-sum"><b>${live}</b> on sale${open.length > live ? ` · <b>${open.length - live}</b> other open` : ''}</p>` : ''}
       ${shown.length ? [...tokens].map(([id, list]) => `<section class="lst-tok"><h3 class="lst-tokh">${rgbIcon(name(id))}<span translate="no">${esc(name(id))}</span><span class="muted small">${list.length}</span></h3>${list.map(card).join('')}</section>`).join('')
         : `<div class="lst-empty"><p>${tab === 'open' ? 'No open listings.' : 'Nothing finished yet.'}</p>${tab === 'open' ? '<p class="muted small">List a token on the RGB market: it shows up here.</p>' : ''}</div>`}`;
+  }
+}
+
+/**
+ * Every RGB transaction of this wallet in one list, newest first, each named with its token: what happened, how much,
+ * and its state. `kind` sorts them for the filters: trade (bought, sold, listed, cancelled), move (in your wallet),
+ * sent, received, created.
+ */
+export function rgbActivity(r) {
+  const out = [];
+  const every = Object.values(r.data?.groups || {}).flatMap((v) => v || []).filter((a) => a && typeof a === 'object' && a.assetId);
+  for (const a of every) {
+    for (const h of tradeHistory(r, a)) {
+      const kind = /^(Bought|Sold|Listed|Listing cancelled)$/.test(h.label) ? 'trade' : h.icon === 'move' ? 'move' : h.label === 'Created' ? 'created' : h.sign === '−' ? 'sent' : h.sign === '+' ? 'received' : 'other';
+      out.push({ ...h, a, kind });
+    }
+  }
+  return out.sort((x, y) => (Number(y.pending) - Number(x.pending)) || (y.at - x.at));
+}
+
+const ACT_FILTERS = [['all', 'All'], ['pending', 'Pending'], ['trade', 'Trades'], ['transfer', 'Sent & received'], ['move', 'Moves']];
+
+/**
+ * The RGB wallet: everything about RGB in one place, from Home (before: a long section in Settings → RGB).
+ * Activity (every token, filterable), what's locked and how to free it, backups.
+ */
+export class RgbWalletView extends View {
+  render() {
+    const r = this.app.rgb;
+    if (!r.ready || !r.data) { this.state.view = 'home'; return this.app.ui.view('home').render(); }
+    const tab = ['activity', 'locked', 'backup'].includes(this.f.rgbHub) ? this.f.rgbHub : 'activity';
+    const all = rgbActivity(r);
+    const pending = all.filter((h) => h.pending).length;
+    let open = 0;
+    try { open = (r.service?.instantListings?.() || []).filter((e) => listingState(e).open).length; } catch { open = 0; }
+    const { settled, pending: btcPend } = r.btc();
+    const unit = r.isMain ? 'BTC' : 'tBTC';
+    const toks = Object.values(r.data?.groups || {}).reduce((n, v) => n + (v || []).length, 0);
+    const tabs = [['activity', `Activity${pending ? ` · ${pending}` : ''}`], ['locked', 'Locked & free'], ['backup', 'Backup']];
+    return `${head('RGB wallet')}
+      <section class="rgbw-sum">
+        <div><span class="muted small">Balance</span><b>${fmtBtc(settled)} <small>${unit}</small></b>${btcPend ? `<span class="pend-t small">+${fmtBtc(btcPend)} pending</span>` : ''}</div>
+        <div><span class="muted small">Assets</span><b>${toks}</b></div>
+        <button class="rgbw-stat" data-rgb="listings"><span class="muted small">Listings</span><b>${open}</b><span class="small">open ›</span></button>
+        <div class="rgbw-refresh"><button class="btn ghost sm" data-rgb="refresh" ${r.busy ? 'disabled' : ''}>${r.busy ? esc(r.busyLabel || 'Updating…') : 'Refresh'}</button></div>
+      </section>
+      <div class="seg rgbw-tabs" role="radiogroup">${tabs.map(([k, l]) => `<button role="radio" aria-checked="${tab === k}" data-rgb="hubTab" data-rgb-arg="${k}">${l}</button>`).join('')}</div>
+      ${tab === 'activity' ? this.activity(all) : tab === 'locked' ? this.locked() : this.backup()}
+      ${msg(r)}`;
+  }
+
+  activity(all) {
+    const r = this.app.rgb, explorer = this.account.explorer, onChain = r.profile.id === 'public' || r.isMain;
+    const f = ACT_FILTERS.some(([k]) => k === this.f.rgbAct) ? this.f.rgbAct : 'all';
+    const pick = (h) => f === 'all' || (f === 'pending' ? h.pending : f === 'transfer' ? h.kind === 'sent' || h.kind === 'received' : h.kind === f);
+    const rows = all.filter(pick);
+    const count = (k) => all.filter((h) => k === 'all' || (k === 'pending' ? h.pending : k === 'transfer' ? h.kind === 'sent' || h.kind === 'received' : h.kind === k)).length;
+    const chips = `<div class="chips rgbw-chips">${ACT_FILTERS.map(([k, l]) => `<button class="chip ${f === k ? 'on' : ''}" data-set="rgbAct" data-val="${k}">${l}<span class="muted">${count(k)}</span></button>`).join('')}</div>`;
+    if (!rows.length) return `${chips}<p class="muted small center">${all.length ? 'Nothing here with this filter.' : 'No RGB activity yet.'}</p>`;
+    let day = '';
+    return chips + `<section class="hist rgbw-hist">${rows.slice(0, 200).map((h) => {
+      const label = h.pending ? 'Pending' : dayLabel(h.at);
+      const sep = label !== day ? `<p class="h-day">${esc(label)}</p>` : '';
+      day = label;
+      const cls = h.sign === '−' ? 'out' : h.sign === '+' ? 'in' : 'mv';
+      const icon = h.icon === 'sold' ? I.send : h.icon === 'move' ? I.list : h.sign === '−' ? I.send : h.label === 'Created' ? I.mint : I.recv;
+      const link = h.txid && onChain ? `<a class="h-tx small" href="${explorer.tx(h.txid)}" target="_blank" rel="noopener" title="View transaction">${I.ext}</a>` : '';
+      const cancel = Number.isFinite(h.cancel) ? `<button class="btn ghost sm h-cancel" data-rgb="cancelSend" data-rgb-arg="${h.cancel}" ${r.busy ? 'disabled' : ''}>Cancel transfer</button>` : '';
+      return `${sep}<div class="h-row rgbw-row"><button class="rgbw-open" data-rgb="token" data-rgb-arg="${esc(h.a.assetId)}"><span class="h-ic ${cls}">${icon}</span>
+        <span class="bal-txt"><b>${esc(h.label)} <span class="rgbw-tk" translate="no">${esc(h.a.ticker)}</span></b><span>${esc(h.note || 'Confirmed')}</span></span>
+        <span class="h-amt ${cls}">${h.sign}${h.amount}</span></button>${link}</div>${cancel}`;
+    }).join('')}</section>${rows.length > 200 ? '<p class="muted small center">Showing the latest 200. Open a token for all of its history.</p>' : ''}`;
+  }
+
+  locked() {
+    const r = this.app.rgb;
+    return `<p class="muted small">What each token holds (free to send or list, in listings, arriving), every RGB output and what keeps it busy, and how to free it.</p>
+      ${RgbSettings.outputs(r, this.app)}
+      ${RgbSettings.repair(r)}
+      ${RgbSettings.instant(r)}`;
+  }
+
+  backup() {
+    const r = this.app.rgb;
+    return `<section class="card form">
+      ${RgbSettings.cloud(r)}
+      <button class="btn ghost wide" data-rgb="backup" ${r.busy ? 'disabled' : ''}>${I.check}<span>Save RGB backup file</span></button>
+      <p class="muted small">${r.fileAt ? `Last file: ${ago(r.fileAt)}. ` : 'No backup file saved from this browser yet. '}Restoring needs this same MASKED wallet.</p>
+      <details><summary>Restore an RGB backup</summary><input id="rgbRestore" type="file" accept=".json,application/json"><button class="btn ghost wide" data-rgb="restore" ${r.busy ? 'disabled' : ''}>Restore</button></details>
+    </section>
+    <section class="card">
+      <div class="list-h"><b>RGB balance address</b></div>
+      <p class="muted small">Its own address, for support. To add to it, use Add from Bitcoin on Home.</p>
+      <p class="addr mono small">${addrChunks(r.data?.address || '')}</p>
+      <button class="btn ghost sm" data-copy="${esc(r.data?.address || '')}">${I.copy}<span>Copy</span></button>
+    </section>`;
   }
 }

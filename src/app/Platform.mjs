@@ -33,6 +33,11 @@ export class Platform {
 
   /** The side panel is offered in the popup (not in the panel itself, nor in an approval window). */
   /** The side panel opens panel.html (the same page: Chrome wants the panel's file to exist without a ?query). */
+  /** Opened from the toolbar button (the popup Chrome sizes to the page), also when it shows an approval. */
+  get inToolbarPopup() {
+    try { if (chrome.extension?.getViews) return chrome.extension.getViews({ type: 'popup' }).includes(window); } catch { /* not told */ }
+    return this.isPopup;
+  }
   get isPanel() { return /\/panel\.html$/.test(location.pathname) || new URLSearchParams(location.search).has('panel'); }
   get canOpenSidePanel() { return this.hasExt && !!chrome.sidePanel?.open && !this.isPanel && !this.requestId; }
 

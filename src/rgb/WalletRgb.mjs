@@ -1378,6 +1378,11 @@ export class WalletRgb {
       });
       // Settings → RGB → Instant listings: cancel one here, also one the market doesn't show (asks once first)
       case 'listings': this.cancelAsk = null; state.view = 'rgblist'; return app.render();
+      case 'hub': state.view = 'rgbwallet'; return app.render();
+      case 'hubTab':
+        state.f.rgbHub = ['activity', 'locked', 'backup'].includes(arg) ? arg : 'activity';
+        if (state.f.rgbHub === 'locked' && !this.outputs && !this.busy) return this.run(async () => { this.outputs = this.withoutDropped(await this.service.outputsReport()); }, { quiet: true });
+        return app.render();
       case 'listTab': state.f.listTab = arg === 'done' ? 'done' : 'open'; this.cancelAsk = null; return app.render();
       case 'instantCancelAsk': this.cancelAsk = arg; return app.render();
       case 'instantCancelNo': this.cancelAsk = null; return app.render();
