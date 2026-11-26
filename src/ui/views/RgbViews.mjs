@@ -185,16 +185,24 @@ export class RgbHome {
         <span class="bal-txt"><b class="tk">RGB balance</b><span>For buying RGB tokens and network fees</span></span>
         <span class="bal-amt"><b>${fmtBtc(settled)}</b><span>${pending ? `<span class="pend-t" title="Waiting for a block">+${fmtBtc(pending)} pending</span>` : unit}</span></span></div>
       <div class="rgb-bal-act"><button class="btn ghost sm" data-rgb="fund">${I.plus}<span>Add from Bitcoin</span></button><button class="btn ghost sm" data-rgb="${r.withdraw ? 'withdrawClose' : 'withdraw'}" ${settled + pending ? '' : 'disabled'}>${I.send}<span>Move to Bitcoin</span></button></div>${wd}`;
-    return `<section class="home-toks">
-      <div class="list-h"><b>RGB tokens${r.isMain ? ' <span class="badge">beta</span>' : ''}</b><span class="rgb-h-act"><button class="link small" data-rgb="refresh" ${r.busy ? 'disabled' : ''}>${r.busy ? r.busyLabel : r.data.cached ? 'Last saved · Refresh' : 'Refresh'}</button><button class="link small rgb-manage" data-rgb="hub">Activity & tools ›</button></span></div>
-      ${backupDue}${fund}
-      <div class="tok-list">${feeRow}${listingsRow(r)}${list.map((a) => {
-        const { settled: s, future: fut } = r.bal(a);
-        return `<button class="tok-line" data-rgb="token" data-rgb-arg="${esc(a.assetId)}">${rgbIcon(a.ticker)}
-        <span class="bal-txt"><b class="tk">${esc(a.ticker)}</b><span>RGB${fut > s ? ' · <span class="pend-t">incoming</span>' : ''}</span></span>
-        <span class="bal-amt"><b>${r.amount(a, s)}</b><span>${esc(a.name)}</span></span><span class="chev">›</span></button>`;
-      }).join('') || (r.isMain ? `<p class="muted small center">No RGB tokens yet.</p><button class="btn ghost wide" data-rgb="receive">${I.recv}<span>Receive an RGB token</span></button>` : `<p class="muted small center">No RGB tokens yet.</p><button class="btn ghost wide" data-rgb="mint">${I.mint}<span>Create an RGB token</span></button>`)}</div>
-      ${nftGrid(r)}
+    // one module, like a wallet card: the header, the RGB balance, then Tokens | NFTs
+    const cols = r.collections?.() || [];
+    const nftCount = cols.reduce((n, c) => n + c.list.length, 0);
+    const tab = cols.length && (app.state.f.rgbHome === 'nft' || (!list.length && app.state.f.rgbHome !== 'tok')) ? 'nft' : 'tok';
+    const tokRows = list.map((a) => {
+      const { settled: s, future: fut } = r.bal(a);
+      return `<button class="tok-line" data-rgb="token" data-rgb-arg="${esc(a.assetId)}">${rgbIcon(a.ticker)}
+        <span class="bal-txt"><b class="tk">${esc(a.ticker)}</b><span>${esc(a.name)}${fut > s ? ' · <span class="pend-t">incoming</span>' : ''}</span></span>
+        <span class="bal-amt"><b>${r.amount(a, s)}</b><span translate="no">${esc(a.ticker)}</span></span><span class="chev">›</span></button>`;
+    }).join('') || `<div class="rgb-empty"><p class="muted small">No RGB tokens yet.</p>${r.isMain ? `<button class="btn ghost sm" data-rgb="receive">${I.recv}<span>Receive an RGB token</span></button>` : `<button class="btn ghost sm" data-rgb="mint">${I.mint}<span>Create an RGB token</span></button>`}</div>`;
+    const tabs = cols.length ? `<div class="seg rgb-tabs" role="radiogroup">
+        <button role="radio" aria-checked="${tab === 'tok'}" data-set="rgbHome" data-val="tok">Tokens <span class="muted">${list.length}</span></button>
+        <button role="radio" aria-checked="${tab === 'nft'}" data-set="rgbHome" data-val="nft">NFTs <span class="muted">${nftCount}</span></button></div>` : '<div class="rgb-sub">Tokens</div>';
+    return `${backupDue}${fund}<section class="rgb-mod">
+      <div class="list-h"><b>RGB${r.isMain ? ' <span class="badge">beta</span>' : ''}</b><span class="rgb-h-act"><button class="link small" data-rgb="refresh" ${r.busy ? 'disabled' : ''}>${r.busy ? r.busyLabel : r.data.cached ? 'Last saved · Refresh' : 'Refresh'}</button><button class="link small rgb-manage" data-rgb="hub">Activity & tools ›</button></span></div>
+      <div class="rgb-top">${feeRow}${listingsRow(r)}</div>
+      ${tabs}
+      <div class="rgb-rows">${tab === 'nft' ? nftRows(r, cols) : tokRows}</div>
     </section>`;
   }
 }
@@ -232,13 +240,18 @@ export function nftGrid(r) {
   const cols = r.collections?.() || [];
   if (!cols.length) return '';
   return `<div class="list-h nft-h"><b>NFT collections</b><span class="muted small">${cols.length}</span></div>
-    <div class="tok-list">${cols.map((c) => {
+    <div class="tok-list">${nftRows(r, cols)}</div>`;
+}
+
+/** One row per NFT collection: its first pictures, verified or not, how many this wallet holds. */
+export function nftRows(r, cols) {
+  return `${cols.map((c) => {
       const incoming = c.list.filter((a) => { const { settled: s, future: f } = r.bal(a); return f > s; }).length;
       return `<button class="tok-line coll-line" data-rgb="coll" data-rgb-arg="${esc(c.key)}">
         <span class="coll-pics" aria-hidden="true">${c.list.slice(0, 3).map((a) => nftPic(r, a)).join('')}</span>
         <span class="bal-txt"><b class="tk" translate="no">${esc(c.name)}</b><span>${c.verified ? '<span class="ok-t">Verified</span>' : '<span class="warn">Unverified</span>'}${incoming ? ` · <span class="pend-t">${incoming} incoming</span>` : ''}</span></span>
         <span class="bal-amt"><b>${c.list.length}</b><span>NFT${c.list.length === 1 ? '' : 's'}</span></span><span class="chev">›</span></button>`;
-    }).join('')}</div>`;
+    }).join('')}`;
 }
 
 /** One NFT collection of this wallet: its NFTs as a grid. */

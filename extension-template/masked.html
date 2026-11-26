@@ -395,6 +395,23 @@ select#obBday { width: 100%; }
 .chip b { font-size: 13px; letter-spacing: .04em; }
 .chip span { font-size: 11px; color: var(--muted); }
 .chip.on { border-color: var(--btc); background: var(--btc-soft); }
+/* Home → RGB: one module (header, RGB balance, Tokens | NFTs), rows inside one card */
+.rgb-mod { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 4px 0 6px; margin-bottom: 12px; overflow: hidden; }
+.rgb-mod .list-h { padding: 10px 14px 6px; }
+.rgb-mod .tok-line { background: none; border: 0; border-radius: 0; padding: 12px 14px; }
+.rgb-mod .tok-line:hover, .rgb-mod button.tok-line:focus-visible { background: rgba(255,255,255,.04); }
+.rgb-mod .rgb-top { display: grid; gap: 6px; padding: 0 0 10px; border-bottom: 1px solid var(--line); }
+.rgb-mod .rgb-top .rgb-bal-act { padding: 0 14px; }
+.rgb-mod .rgb-bal-act { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.rgb-mod .rgb-bal-act .btn { white-space: nowrap; font-size: 12px; padding: 0 6px; gap: 5px; min-width: 0; overflow: hidden; }
+.rgb-mod .rgb-bal-act .btn svg { width: 14px; height: 14px; flex: none; }
+.rgb-mod .rgb-top .rgb-wd { margin: 0 14px; }
+.rgb-mod .rgb-tabs { margin: 10px 14px 4px; background: var(--card-2); border: 0; }
+.rgb-mod .rgb-tabs .muted { font-weight: 600; }
+.rgb-mod .rgb-sub { padding: 12px 14px 2px; color: var(--muted); font-size: 12px; font-weight: 700; }
+.rgb-mod .rgb-rows > .tok-line + .tok-line { border-top: 1px solid var(--line); }
+.rgb-mod .rgb-empty { display: grid; justify-items: center; gap: 8px; padding: 14px; }
+.rgb-mod .coll-line .coll-pics .nft-img { border-color: var(--card); }
 /* RGB wallet (2.32.8): one place for RGB activity, locked tokens and backups */
 .rgb-h-act { display: inline-flex; gap: 12px; align-items: baseline; }
 .rgb-manage { color: var(--sh); font-weight: 700; }
