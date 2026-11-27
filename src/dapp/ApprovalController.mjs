@@ -277,8 +277,8 @@ export class ApprovalController {
         const coins = (rep.coins || []).filter((c) => !c.justSpent);
         return { keep, freed: freed.length, sats: freed.reduce((n, o) => n + o.sats, 0), coinSats: coins.reduce((n, c) => n + c.sats, 0), unpaid: rep.unpaidReceives || 0, rate: rgbRate(P, r) };
       }
-      if (m === 'rgbOutputs') return { list: r.assets().map((x) => ({ ticker: x.ticker, assetId: x.assetId })) };
-      if (m === 'rgbListAssets') { if (a.remember == null) a.remember = isMaskedSite(a.origin); return { list: r.assets().map((x) => ({ ticker: x.ticker, assetId: x.assetId })) }; }
+      if (m === 'rgbOutputs') return { list: r.assets().filter((x) => !x.pinned).map((x) => ({ ticker: x.ticker, assetId: x.assetId })) };
+      if (m === 'rgbListAssets') { if (a.remember == null) a.remember = isMaskedSite(a.origin); return { list: r.assets().filter((x) => !x.pinned).map((x) => ({ ticker: x.ticker, assetId: x.assetId })) }; }
       if (!r.service?.canSwap) throw new Error('This MASKED version can\'t swap RGB tokens yet. Update MASKED.');
       if (MOVES_TOKENS.includes(m)) { if (r.requireLatest) await r.requireLatest(); else if (r.cloud?.conflict) throw new Error(RGB_CONFLICT_MSG); }
       if (m === 'rgbSwapAvailable') {

@@ -190,7 +190,7 @@ export class RgbHome {
     const nftCount = cols.reduce((n, c) => n + c.list.length, 0);
     // the side you picked last stays picked (this browser); NFTs first only when there are no tokens and no pick yet
     const pick = app.state.f.rgbHome || r.homeTab;
-    const tab = cols.length && (pick === 'nft' || (!list.length && pick !== 'tok')) ? 'nft' : 'tok';
+    const tab = cols.length && (pick === 'nft' || (!list.some((a) => !a.pinned) && pick !== 'tok')) ? 'nft' : 'tok';
     const tokRows = list.map((a) => {
       const { settled: s, future: fut } = r.bal(a);
       return `<button class="tok-line" data-rgb="token" data-rgb-arg="${esc(a.assetId)}">${rgbIcon(a.ticker)}

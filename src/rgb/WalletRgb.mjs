@@ -368,8 +368,18 @@ export class WalletRgb {
   }
 
   // ---- what the screens read ----
-  /** Fungible tokens (NIA, IFA, BFA). NFTs are listed apart: nfts(). */
-  assets() { return Object.entries(this.data?.groups || {}).filter(([k]) => k !== 'uda').flatMap(([, v]) => v || []).filter((a) => a && typeof a === 'object' && a.assetId); }
+  /**
+   * Fungible tokens (NIA, IFA, BFA). NFTs are listed apart: nfts(). The network's pinned tokens (the signet test USDT)
+   * come first, at 0 until held (`pinned: true` then: nothing to send, nothing to offer a site).
+   */
+  assets() {
+    const held = Object.entries(this.data?.groups || {}).filter(([k]) => k !== 'uda').flatMap(([, v]) => v || []).filter((a) => a && typeof a === 'object' && a.assetId);
+    const pins = this.profile?.pinned || [];
+    if (!pins.length) return held;
+    const ids = pins.map((p) => p.assetId);
+    const top = pins.map((p) => held.find((a) => a.assetId === p.assetId) || { ...p, issuedSupply: 0, bridged: true, pinned: true, balance: { settled: 0, future: 0, spendable: 0 } });
+    return [...top, ...held.filter((a) => !ids.includes(a.assetId))];
+  }
   /** NFTs (RGB21 / UDA) held or on their way in. */
   nfts() { return (this.data?.groups?.uda || []).filter((a) => a?.assetId && (Number(a.balance?.future) > 0 || Number(a.balance?.settled) > 0)).map((a) => ({ ...a, nft: true, precision: 0 })); }
   isNft(a) { return !!a?.nft; }
