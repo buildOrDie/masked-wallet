@@ -18,7 +18,17 @@ const HELD_WHY = {
   unconfirmed: 'waiting for a block',
 };
 export const rgbBadge = '<span class="badge rgb">RGB</span>';
-const rgbIcon = (ticker, big = false) => tokIcon(ticker || 'RG', big).replace('class="tok-ic', 'class="tok-ic rgb');
+/**
+ * A token's round icon. Each token has its own colour, from its asset ID, so two tokens never look alike; a bridged
+ * token (BFA, the signet test USDT) is a filled green coin with "$", like other wallets show it.
+ * @param {string} ticker @param {boolean} [big] @param {{ assetId?: string, bridged?: boolean }} [a]
+ */
+const rgbIcon = (ticker, big = false, a = {}) => {
+  if (a.bridged) return `<span class="tok-ic rgb bridged ${big ? 'big' : ''}">$</span>`;
+  if (!a.assetId) return tokIcon(ticker || 'RG', big).replace('class="tok-ic', 'class="tok-ic rgb');
+  let h = 0; for (const c of String(a.assetId)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return tokIcon(ticker || 'RG', big).replace('class="tok-ic', `style="--tc:hsl(${h % 360} 70% 62%)" class="tok-ic rgb own`);
+};
 const input = (r, key, label, extra = '', right = '') => `<label class="field"><span class="lbl">${label}${right ? ` <span class="lbl-r">${right}</span>` : ''}</span><input data-rgb-field="${key}" value="${esc(r.fields[key])}" autocomplete="off" spellcheck="false" ${extra}></label>`;
 const msg = (r) => (r.message ? `<p class="msg" role="status">${esc(r.message)}</p>` : '')
   + (r.needBackup && r.isMain ? `<button class="btn ghost wide" data-rgb="backup" ${r.busy ? 'disabled' : ''}>${I.check}<span>Save RGB backup</span></button>` : '');
@@ -149,7 +159,7 @@ export class RgbHome {
       // chain: read only, nothing to tap until RGB is open
       const last = r.phase === 'error' ? null : r.peek?.();
       if (last) {
-        const rows = r.assets().map((a) => { const { settled: s } = r.bal(a); return `<div class="tok-line">${rgbIcon(a.ticker)}<span class="bal-txt"><b class="tk">${esc(a.ticker)}</b><span>RGB</span></span><span class="bal-amt"><b>${r.amount(a, s)}</b><span>${esc(a.name)}</span></span></div>`; }).join('');
+        const rows = r.assets().map((a) => { const { settled: s } = r.bal(a); return `<div class="tok-line">${rgbIcon(a.ticker, false, a)}<span class="bal-txt"><b class="tk">${esc(a.ticker)}</b><span>RGB</span></span><span class="bal-amt"><b>${r.amount(a, s)}</b><span>${esc(a.name)}</span></span></div>`; }).join('');
         return `<section class="home-toks"><div class="list-h"><b>RGB tokens${r.isMain ? ' <span class="badge">beta</span>' : ''}</b><span class="muted small">Last saved · opening…</span></div>
         <div class="tok-list">${rows || '<p class="muted small center">No RGB tokens yet.</p>'}</div></section>`;
       }
@@ -193,7 +203,7 @@ export class RgbHome {
     const tab = cols.length && (pick === 'nft' || (!list.some((a) => !a.pinned) && pick !== 'tok')) ? 'nft' : 'tok';
     const tokRows = list.map((a) => {
       const { settled: s, future: fut } = r.bal(a);
-      return `<button class="tok-line" data-rgb="token" data-rgb-arg="${esc(a.assetId)}">${rgbIcon(a.ticker)}
+      return `<button class="tok-line" data-rgb="token" data-rgb-arg="${esc(a.assetId)}">${rgbIcon(a.ticker, false, a)}
         <span class="bal-txt"><b class="tk">${esc(a.ticker)}</b><span>${esc(a.name)}${fut > s ? ' · <span class="pend-t">incoming</span>' : ''}</span></span>
         <span class="bal-amt"><b>${r.amount(a, s)}</b><span translate="no">${esc(a.ticker)}</span></span><span class="chev">›</span></button>`;
     }).join('') || `<div class="rgb-empty"><p class="muted small">No RGB tokens yet.</p>${r.isMain ? `<button class="btn ghost sm" data-rgb="receive">${I.recv}<span>Receive an RGB token</span></button>` : `<button class="btn ghost sm" data-rgb="mint">${I.mint}<span>Create an RGB token</span></button>`}</div>`;
@@ -288,7 +298,7 @@ export class RgbTokenView extends View {
     return `
     <div class="tok-page">
       <div class="view-head"><button class="icon-btn" data-go="home" aria-label="Back">${I.back}</button><span class="head-sp"></span></div>
-      <div class="tok-hero">${rgbIcon(a.ticker, true)}<p class="tok-name">${esc(a.ticker)} ${rgbBadge}</p><p class="tok-big">${r.amount(a, s)}</p>
+      <div class="tok-hero">${rgbIcon(a.ticker, true, a)}<p class="tok-name">${esc(a.ticker)} ${rgbBadge}</p><p class="tok-big">${r.amount(a, s)}</p>
         ${fut > s ? `<p class="pend-t small">+${r.amount(a, fut - s)} incoming · waiting for a block</p>` : ''}</div>
       <section class="card tok-box">
         <div class="d-row"><span>Available to send</span><b>${r.amount(a, sp)}</b></div>
@@ -767,7 +777,7 @@ export class RgbListingsView extends View {
         <button role="tab" aria-selected="${tab === 'done'}" data-rgb="listTab" data-rgb-arg="done">Finished · ${done.length}</button>
       </div>
       ${tab === 'open' && open.length ? `<p class="lst-sum"><b>${live}</b> on sale${open.length > live ? ` · <b>${open.length - live}</b> other open` : ''}</p>` : ''}
-      ${shown.length ? [...tokens].map(([id, list]) => `<section class="lst-tok"><h3 class="lst-tokh">${rgbIcon(name(id))}<span translate="no">${esc(name(id))}</span><span class="muted small">${list.length}</span></h3>${list.map(card).join('')}</section>`).join('')
+      ${shown.length ? [...tokens].map(([id, list]) => `<section class="lst-tok"><h3 class="lst-tokh">${rgbIcon(name(id), false, r.find(id) || { assetId: id })}<span translate="no">${esc(name(id))}</span><span class="muted small">${list.length}</span></h3>${list.map(card).join('')}</section>`).join('')
         : `<div class="lst-empty"><p>${tab === 'open' ? 'No open listings.' : 'Nothing finished yet.'}</p>${tab === 'open' ? '<p class="muted small">List a token on the RGB market: it shows up here.</p>' : ''}</div>`}`;
   }
 }
