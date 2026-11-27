@@ -314,9 +314,9 @@ test('NFTs (RGB21 / UDA): only with an engine that has them; listed with their i
   await w.onchainSend({ invoice: 'rgb:any', assetId: 'rgb:N1', amount: 1, feeRate: 2, nft: true });
   const [, map] = f.calls.find((c) => c[0] === 'sendBegin');
   assert.equal(map['rgb:N1'][0].assignment, 'NonFungible');
-  // mainnet: no NFTs yet, even with the engine
+  // mainnet: NFTs too since 2.32.12, with the engine
   const m = new LiteWallet(f.lib, { ...RGB_MAINNET.sdk, mnemonic, password: '' });
-  assert.equal(m.canNft, false);
+  assert.equal(m.canNft, true);
 });
 
 test('NFT files (pictures, metadata.json): kept apart from the engine state, given back on open, traits read and checked', async () => {
@@ -388,4 +388,14 @@ test('bridged tokens (BFA, a test USDT): test networks only, listed with the tok
   const mw = new LiteWallet(m.lib, { ...RGB_MAINNET.sdk, mnemonic, password: '' });
   await mw.init();
   assert.deepEqual(m.calls.find((c) => c[0] === 'create')[1].supportedSchemas, ['Nia']); // the engine refuses BFA on mainnet
+});
+
+test('mainnet NFTs (2.32.12): with an engine that has them, a mainnet wallet names NFTs too, never IFA or BFA', async () => {
+  const f = fakeLib();
+  f.lib.engineFeatures = () => ['swap', 'presign', 'uda'];
+  const w = new LiteWallet(f.lib, { ...RGB_MAINNET.sdk, mnemonic, password: '' });
+  await w.init();
+  assert.deepEqual(f.calls.find((c) => c[0] === 'create')[1].supportedSchemas, ['Nia', 'Uda']);
+  assert.equal(w.canNft, true);
+  assert.ok(RGB_MAINNET.nftVerified.endsWith('/mainnet.json') && RGB_MAINNET.nftMedia.endsWith('/mainnet'));
 });

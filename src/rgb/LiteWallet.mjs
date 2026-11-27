@@ -166,10 +166,11 @@ export class LiteWallet {
       dataDir, bitcoinNetwork: this.net, databaseType: 'Sqlite', maxAllocationsPerUtxo: 5,
       accountXpubVanilla: k.accountXpubVanilla, accountXpubColored: k.accountXpubColored,
       mnemonic, masterFingerprint: k.masterFingerprint, vanillaKeychain: null,
-      // mainnet: NIA (standard RGB tokens) only; IFA and BFA (bridged tokens, like a test USDT) are test-network only:
-      // the engine refuses them on mainnet. NFTs (UDA) need MASKED's own engine build (engine/masked-uda.patch): an
-      // engine without them refuses a wallet that names the schema
-      supportedSchemas: this.net === 'Mainnet' ? ['Nia'] : ['Nia', 'Ifa', ...(this.canBfa ? ['Bfa'] : []), ...(this.canNft ? ['Uda'] : [])], reuseAddresses: true, // one stable funding address
+      // mainnet: NIA (standard RGB tokens) and NFTs (UDA); IFA and BFA (bridged tokens, like a test USDT) are
+      // test-network only: the engine refuses them on mainnet. NFTs need MASKED's own engine build
+      // (engine/masked-uda.patch): an engine without them refuses a wallet that names the schema. A wallet made before
+      // takes the new schema in when it opens
+      supportedSchemas: this.net === 'Mainnet' ? ['Nia', ...(this.canNft ? ['Uda'] : [])] : ['Nia', 'Ifa', ...(this.canBfa ? ['Bfa'] : []), ...(this.canNft ? ['Uda'] : [])], reuseAddresses: true, // one stable funding address
     };
     // a wallet the previous engine (RGB 0.11.1) saved is upgraded in place first: same keys, tokens and history;
     // the old copy is kept. Old history that names a transaction only by its id gets it from the block server
@@ -406,8 +407,8 @@ export class LiteWallet {
     const r = plain(assetsWithFiles(this.wallet.listAssets([]) || {}));
     return { nia: (r.nia || []).map(asset), ifa: (r.ifa || []).map(asset), bfa: (r.bfa || []).map((x) => ({ ...asset(x), bridged: true })), uda: (r.uda || []).map(nft) };
   }
-  /** This engine build holds NFTs (RGB21 / UDA), and this network has them on (test networks for now). */
-  get canNft() { try { return this.net !== 'Mainnet' && typeof this.lib.engineFeatures === 'function' && [...this.lib.engineFeatures()].includes('uda'); } catch { return false; } }
+  /** This engine build holds NFTs (RGB21 / UDA): on every network (mainnet since 2.32.12). */
+  get canNft() { try { return typeof this.lib.engineFeatures === 'function' && [...this.lib.engineFeatures()].includes('uda'); } catch { return false; } }
   /** NFTs held (or arriving): asset ID, name, ticker, details, balance, image digest + mime. */
   async nfts() { return this.canNft ? (await this.listAssets()).uda.filter((a) => a.balance.future > 0 || a.balance.settled > 0) : []; }
   /**

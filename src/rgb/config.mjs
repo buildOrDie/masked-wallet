@@ -68,6 +68,10 @@ export const RGB_MAINNET = Object.freeze({
   }),
   invoiceNets: Object.freeze(['mainnet', 'bitcoin', 'bc']),
   vaultKey: 'masked.rgb.mainnet.v1',
+  // the mainnet launchpad's verified collections, their pictures, and sold listings (the mainnet escrow's)
+  nftVerified: 'https://scan.maskedwallet.com/nft-verified/mainnet.json',
+  nftMedia: 'https://scan.maskedwallet.com/nft-media/mainnet',
+  nftSold: 'https://scan.maskedwallet.com/nft-sold/mainnet',
   funding: 'Send a little BTC here for RGB network fees, for example from your Public balance.',
   main: true,
 });
