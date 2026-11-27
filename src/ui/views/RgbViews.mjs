@@ -379,7 +379,7 @@ export class RgbTokenView extends View {
     return `<section class="card"><div class="kv">
       ${rowKV('Name', esc(a.name))}
       ${rowKV('Ticker', esc(a.ticker))}
-      ${rowKV('Supply', r.amount(a, a.issuedSupply))}
+      ${a.bridged ? rowKV('Supply', 'Bridged: made when locked on the other chain') : rowKV('Supply', r.amount(a, a.issuedSupply))}
       ${rowKV('Decimals', String(a.precision))}
       ${rowKV('Network', r.isMain ? 'Bitcoin mainnet · beta' : `${esc(r.profile.label)} · test`)}
       ${rowKV('Asset ID', `<span class="mono small">${esc(short(a.assetId, 10))}</span>`)}

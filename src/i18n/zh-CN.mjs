@@ -715,6 +715,7 @@ export const ZH_CN = {
   "the 6-letter ticker you reserved": "你预留的 6 位代号",
   "the ticker (kept secret), wait {0} blocks, then": "代号（保密），等待 {0} 个区块，然后",
   "Ticker": "代号",
+  "Bridged: made when locked on the other chain": "跨链资产：在另一条链上锁定后生成",
   "Two steps:": "两个步骤：",
   "View {0}": "查看 {0}",
   "View reservation": "查看预留",

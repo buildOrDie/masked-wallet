@@ -40,7 +40,7 @@ export function plain(x) {
 const balance = (b) => ({ settled: num(b?.settled), future: num(b?.future), spendable: num(b?.spendable) });
 const asset = (a) => ({
   assetId: String(a?.assetId ?? ''), ticker: String(a?.ticker ?? a?.name ?? '').slice(0, 12), name: String(a?.name ?? a?.ticker ?? ''),
-  precision: num(a?.precision), issuedSupply: num(a?.issuedSupply), balance: balance(a?.balance),
+  precision: num(a?.precision), issuedSupply: num(a?.issuedSupply ?? a?.initialSupply), balance: balance(a?.balance),
 });
 
 /**
@@ -166,9 +166,10 @@ export class LiteWallet {
       dataDir, bitcoinNetwork: this.net, databaseType: 'Sqlite', maxAllocationsPerUtxo: 5,
       accountXpubVanilla: k.accountXpubVanilla, accountXpubColored: k.accountXpubColored,
       mnemonic, masterFingerprint: k.masterFingerprint, vanillaKeychain: null,
-      // mainnet: NIA (standard RGB tokens) only; IFA is test-network only for now. NFTs (UDA) need MASKED's own engine
-      // build (engine/masked-uda.patch): an engine without them refuses a wallet that names the schema
-      supportedSchemas: this.net === 'Mainnet' ? ['Nia'] : ['Nia', 'Ifa', ...(this.canNft ? ['Uda'] : [])], reuseAddresses: true, // one stable funding address
+      // mainnet: NIA (standard RGB tokens) only; IFA and BFA (bridged tokens, like a test USDT) are test-network only:
+      // the engine refuses them on mainnet. NFTs (UDA) need MASKED's own engine build (engine/masked-uda.patch): an
+      // engine without them refuses a wallet that names the schema
+      supportedSchemas: this.net === 'Mainnet' ? ['Nia'] : ['Nia', 'Ifa', ...(this.canBfa ? ['Bfa'] : []), ...(this.canNft ? ['Uda'] : [])], reuseAddresses: true, // one stable funding address
     };
     // a wallet the previous engine (RGB 0.11.1) saved is upgraded in place first: same keys, tokens and history;
     // the old copy is kept. Old history that names a transaction only by its id gets it from the block server
@@ -255,6 +256,25 @@ export class LiteWallet {
       ? this.wallet.goOnline({ indexerConfig: { Esplora: { url } }, skipConsistencyCheck: true, proxyAuthKeys: {} })
       : this.wallet.goOnline(false, url);
   }
+  /**
+   * EVM chains bridged tokens (BFA) are checked on: where each mint was locked, and the token's reject list. Without
+   * them a bridged token received stays waiting. Arbitrum One is where the test USDT on signet is bridged from.
+   */
+  static EVM_CHAINS = { 42161: { rpcUrl: 'https://arb1.arbitrum.io/rpc', minMintLockBlocks: 2, maxMintLockBlocks: 1_000_000 } };
+  /** This engine has bridged tokens (BFA), and this network allows them (test networks only). */
+  get canBfa() { try { return this.net !== 'Mainnet' && this.engineV1 && typeof this.lib.WasmWallet?.prototype?.issueAssetBfa === 'function'; } catch { return false; } }
+  /**
+   * Add the EVM chains once RGB is open (never before: opening stays as fast, and an EVM server that is down never
+   * stops RGB opening). Going online again on the same block server only sets them. Tried again every 10 minutes
+   * if it fails, and after a block server change (that clears them).
+   */
+  async bridgeChains() {
+    if (!this.canBfa || !this.online || !this.indexer || this.evmOn === this.indexer || Date.now() < (this.evmRetryAt || 0)) return;
+    try {
+      this.online = await this.wallet.goOnline({ indexerConfig: { Esplora: { url: this.indexer } }, skipConsistencyCheck: true, proxyAuthKeys: {}, evmChains: LiteWallet.EVM_CHAINS });
+      this.evmOn = this.indexer;
+    } catch (e) { this.evmRetryAt = Date.now() + 600_000; console.warn('[RGB] EVM chains for bridged tokens not set:', e?.message || e); }
+  }
   /** Settings changed the block servers (the person's own server comes first): use the new list from the next sync. */
   setIndexers(list) { this.params = { ...this.params, indexerUrls: list }; this.retryFirstAt = 0; }
   /**
@@ -331,7 +351,7 @@ export class LiteWallet {
     const want = BigInt(amount || 0), free = BigInt(h.free);
     if (want <= free) return '';
     let a = null;
-    try { const r = plain(this.wallet.listAssets([]) || {}) || {}; a = [...(r.nia || []), ...(r.ifa || [])].find((x) => x?.assetId === assetId) || null; } catch { a = null; }
+    try { const r = plain(this.wallet.listAssets([]) || {}) || {}; a = [...(r.nia || []), ...(r.ifa || []), ...(r.bfa || [])].find((x) => x?.assetId === assetId) || null; } catch { a = null; }
     const p = Number(a?.precision || 0), tick = a?.ticker || 'tokens';
     const show = (v) => { const n = BigInt(v), d = 10n ** BigInt(p); const w = (n / d).toLocaleString('en-US'); const f = p ? String(n % d).padStart(p, '0').replace(/0+$/, '') : ''; return f ? `${w}.${f}` : w; };
     const parts = [];
@@ -348,7 +368,7 @@ export class LiteWallet {
   /** Batch indexes of receives waiting for transfer data since before STALE_RECEIVE_MS ago. */
   staleReceives(now = Date.now()) {
     const ids = [null];
-    try { const r = plain(this.wallet.listAssets([]) || {}) || {}; for (const k of ['nia', 'ifa', 'uda', 'cfa']) for (const x of r[k] || []) if (x?.assetId) ids.push(String(x.assetId)); } catch { /* the receives with no asset yet */ }
+    try { const r = plain(this.wallet.listAssets([]) || {}) || {}; for (const k of ['nia', 'ifa', 'bfa', 'uda', 'cfa']) for (const x of r[k] || []) if (x?.assetId) ids.push(String(x.assetId)); } catch { /* the receives with no asset yet */ }
     const sec = (v) => Number(v || 0) * (Number(v) < 1e12 ? 1000 : 1);
     const out = new Set();
     for (const id of ids) {
@@ -384,7 +404,7 @@ export class LiteWallet {
   async getBtcBalance() { const b = plain(this.wallet.getBtcBalance()); return { vanilla: balance(b?.vanilla), colored: balance(b?.colored) }; }
   async listAssets() {
     const r = plain(assetsWithFiles(this.wallet.listAssets([]) || {}));
-    return { nia: (r.nia || []).map(asset), ifa: (r.ifa || []).map(asset), uda: (r.uda || []).map(nft) };
+    return { nia: (r.nia || []).map(asset), ifa: (r.ifa || []).map(asset), bfa: (r.bfa || []).map((x) => ({ ...asset(x), bridged: true })), uda: (r.uda || []).map(nft) };
   }
   /** This engine build holds NFTs (RGB21 / UDA), and this network has them on (test networks for now). */
   get canNft() { try { return this.net !== 'Mainnet' && typeof this.lib.engineFeatures === 'function' && [...this.lib.engineFeatures()].includes('uda'); } catch { return false; } }
@@ -590,7 +610,7 @@ export class LiteWallet {
   /** Every recipient ID this wallet has ever had a transfer for (all assets, and receives not tied to one). */
   usedRecipients() {
     const r = plain(this.wallet.listAssets([]) || {});
-    const ids = [null, ...[...(r.nia || []), ...(r.ifa || []), ...(r.uda || [])].map((a) => a?.assetId).filter(Boolean)];
+    const ids = [null, ...[...(r.nia || []), ...(r.ifa || []), ...(r.bfa || []), ...(r.uda || [])].map((a) => a?.assetId).filter(Boolean)];
     const out = new Set();
     for (const id of ids) for (const t of plain(this.engineTransfers(id)) || []) if (t?.recipientId) out.add(String(t.recipientId));
     return out;
@@ -873,10 +893,10 @@ export class LiteWallet {
     // (tokens left on this wallet's own unconfirmed moves count as free: listings can use them, see `listable`)
     const everything = this.listable(plain(this.wallet.listUnspents(false)) || []);
     const unspents = everything.filter((u) => { const o = u.utxo?.outpoint; return !o || !this.reserved.has(`${String(o.txid).toLowerCase()}:${o.vout}`); });
-    const { nia, ifa } = await this.listAssets();
+    const { nia, ifa, bfa = [] } = await this.listAssets();
     // instant: amounts that sit alone on an output, so an Instant listing of exactly that is live at once (no move);
     // held: where the balance is (free, in listings, waiting for a block, unusable)
-    const tokens = [...nia, ...ifa].map((a) => ({ assetId: a.assetId, ticker: a.ticker, name: a.name, precision: a.precision, spendable: String(a.balance.spendable), max: offerable(unspents, a.assetId).max, maxInstant: offerable(unspents, a.assetId).total, instant: instantAmounts(unspents, a.assetId), held: heldBreakdown(everything, a.assetId, this.reserved) }))
+    const tokens = [...nia, ...ifa, ...bfa].map((a) => ({ assetId: a.assetId, ticker: a.ticker, name: a.name, precision: a.precision, spendable: String(a.balance.spendable), max: offerable(unspents, a.assetId).max, maxInstant: offerable(unspents, a.assetId).total, instant: instantAmounts(unspents, a.assetId), held: heldBreakdown(everything, a.assetId, this.reserved) }))
       .filter((a) => BigInt(a.spendable) > 0n || BigInt(a.max) > 0n);
     // NFTs (2.32): one of one, marked nft; listed: already promised to an Instant listing of this wallet; alone: on an
     // output of its own (its listing is live at once, no move)
@@ -898,11 +918,11 @@ export class LiteWallet {
     try { await this.wallet.sync(online); } catch { /* last known */ }
     if (store) this.syncOwnUnconfirmed(store);
     const all = this.listable(plain(this.wallet.listUnspents(false)) || []);
-    const { nia, ifa, uda = [] } = await this.listAssets();
+    const { nia, ifa, bfa = [], uda = [] } = await this.listAssets();
     // (an NFT shows by its name: RATS #5)
     /** @type {Map<string, { ticker: string, precision: number }>} */
     const meta = new Map();
-    for (const a of [...nia, ...ifa]) meta.set(a.assetId, { ticker: a.ticker, precision: a.precision });
+    for (const a of [...nia, ...ifa, ...bfa]) meta.set(a.assetId, { ticker: a.ticker, precision: a.precision });
     for (const a of uda) meta.set(a.assetId, { ticker: a.name || a.ticker, precision: 0 });
     // what each promised output is for
     const promised = new Map();
@@ -1532,7 +1552,7 @@ export class LiteWallet {
     const own = new Set((extra || []).filter(Boolean).map((t) => String(t).toLowerCase()));
     try {
       const r = plain(this.wallet.listAssets([]) || {});
-      for (const a of [...(r.nia || []), ...(r.ifa || []), ...(r.uda || [])]) for (const t of plain(this.engineTransfers(a.assetId)) || []) if (t?.txid) own.add(String(t.txid).toLowerCase());
+      for (const a of [...(r.nia || []), ...(r.ifa || []), ...(r.bfa || []), ...(r.uda || [])]) for (const t of plain(this.engineTransfers(a.assetId)) || []) if (t?.txid) own.add(String(t.txid).toLowerCase());
     } catch { /* no list: every spend counts as another copy's */ }
     return own;
   }

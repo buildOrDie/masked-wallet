@@ -368,7 +368,7 @@ export class WalletRgb {
   }
 
   // ---- what the screens read ----
-  /** Fungible tokens (NIA, IFA). NFTs are listed apart: nfts(). */
+  /** Fungible tokens (NIA, IFA, BFA). NFTs are listed apart: nfts(). */
   assets() { return Object.entries(this.data?.groups || {}).filter(([k]) => k !== 'uda').flatMap(([, v]) => v || []).filter((a) => a && typeof a === 'object' && a.assetId); }
   /** NFTs (RGB21 / UDA) held or on their way in. */
   nfts() { return (this.data?.groups?.uda || []).filter((a) => a?.assetId && (Number(a.balance?.future) > 0 || Number(a.balance?.settled) > 0)).map((a) => ({ ...a, nft: true, precision: 0 })); }

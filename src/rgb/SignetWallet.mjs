@@ -173,6 +173,7 @@ export class SignetWallet {
       const wallet = this.requireWallet();
       const t0 = Date.now(), took = {};
       await wallet.preferFirst?.();
+      await wallet.bridgeChains?.(); // bridged tokens (BFA): their EVM chain, once open
       // the block server in use is busy or gone: try the next one once before giving up
       if (sync) try { await wallet.syncWallet({ full }); } catch (e) {
         if (!/invalid indexer|esplora|failed to fetch|network|429|too many|timed? ?out|50[234]/i.test(String(e?.message || e)) || !(await wallet.switchIndexer?.())) throw e;

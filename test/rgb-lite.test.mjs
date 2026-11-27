@@ -360,3 +360,32 @@ test('NFT files (pictures, metadata.json): kept apart from the engine state, giv
   assert.equal(nftTraits({}), null);
   P.flush = flush;
 });
+
+test('bridged tokens (BFA, a test USDT): test networks only, listed with the tokens, EVM chains added after opening', async () => {
+  const f = fakeLib();
+  const online = [];
+  // the new engine: goOnline takes one options object, and it has BFA
+  f.lib.WasmWallet.prototype.goOnline = async function (o) { online.push(o); if (o.evmChains && f.evmDown) throw new Error('InvalidEvmRpcUrl'); return { id: 1, indexerUrl: o.indexerConfig.Esplora.url }; };
+  f.lib.WasmWallet.prototype.issueAssetBfa = function () {};
+  f.lib.migrateLegacyWallet = async () => 'none';
+  const base = f.lib.WasmWallet.prototype.listAssets;
+  f.lib.WasmWallet.prototype.listAssets = function (x) { return { ...base.call(this, x), bfa: [{ assetId: 'rgb:U', ticker: 'USDT', name: 'Test USDT', precision: 6, initialSupply: 0, balance: { settled: 5000000, future: 5000000, spendable: 5000000 } }] }; };
+  const w = new LiteWallet(f.lib, { ...RGB_PROFILES.public.sdk, mnemonic, password: '' });
+  await w.init(); await w.unlock();
+  assert.ok(f.calls.find((c) => c[0] === 'create')[1].supportedSchemas.includes('Bfa'));
+  assert.ok(!online[0].evmChains); // opening never waits on the EVM server
+  const { bfa } = await w.listAssets();
+  assert.equal(bfa[0].ticker, 'USDT'); assert.equal(bfa[0].bridged, true);
+  f.evmDown = true; await w.bridgeChains();
+  assert.ok(w.online && !w.evmOn); // a down EVM server leaves RGB online
+  await w.bridgeChains(); assert.equal(online.length, 2); // and waits 10 minutes before trying again
+  f.evmDown = false; w.evmRetryAt = 0; await w.bridgeChains();
+  assert.deepEqual(Object.keys(online.at(-1).evmChains), ['42161']); assert.equal(w.evmOn, w.indexer);
+  await w.bridgeChains(); assert.equal(online.length, 3); // once per block server
+
+  const m = fakeLib();
+  m.lib.WasmWallet.prototype.goOnline = f.lib.WasmWallet.prototype.goOnline; m.lib.WasmWallet.prototype.issueAssetBfa = () => {}; m.lib.migrateLegacyWallet = async () => 'none';
+  const mw = new LiteWallet(m.lib, { ...RGB_MAINNET.sdk, mnemonic, password: '' });
+  await mw.init();
+  assert.deepEqual(m.calls.find((c) => c[0] === 'create')[1].supportedSchemas, ['Nia']); // the engine refuses BFA on mainnet
+});
