@@ -378,7 +378,7 @@ export class WalletRgb {
     if (!pins.length) return held;
     const ids = pins.map((p) => p.assetId);
     // held: shown under the pinned name (the contract calls the test USDT "BUSDT"; UniSat shows it as USDT too), the
-    // contract's own ticker kept for the details
+    // contract's own ticker kept (not shown)
     const named = (p, a) => ({ ...a, ticker: p.ticker, name: p.name, contractTicker: a.ticker, bridged: true });
     const top = pins.map((p) => (held.find((a) => a.assetId === p.assetId) && named(p, held.find((a) => a.assetId === p.assetId))) || { ...p, issuedSupply: 0, bridged: true, pinned: true, balance: { settled: 0, future: 0, spendable: 0 } });
     return [...top, ...held.filter((a) => !ids.includes(a.assetId))];

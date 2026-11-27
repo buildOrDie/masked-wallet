@@ -405,7 +405,7 @@ export class LiteWallet {
   async getBtcBalance() { const b = plain(this.wallet.getBtcBalance()); return { vanilla: balance(b?.vanilla), colored: balance(b?.colored) }; }
   async listAssets() {
     const r = plain(assetsWithFiles(this.wallet.listAssets([]) || {}));
-    return { nia: (r.nia || []).map(asset), ifa: (r.ifa || []).map(asset), bfa: (r.bfa || []).map((x) => ({ ...asset(x), bridged: true })), uda: (r.uda || []).map(nft) };
+    return { nia: (r.nia || []).map((x) => ({ ...asset(x), schema: 'NIA' })), ifa: (r.ifa || []).map((x) => ({ ...asset(x), schema: 'IFA' })), bfa: (r.bfa || []).map((x) => ({ ...asset(x), bridged: true, schema: 'BFA' })), uda: (r.uda || []).map(nft) };
   }
   /** This engine build holds NFTs (RGB21 / UDA): on every network (mainnet since 2.32.12). */
   get canNft() { try { return typeof this.lib.engineFeatures === 'function' && [...this.lib.engineFeatures()].includes('uda'); } catch { return false; } }

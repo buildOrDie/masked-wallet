@@ -33,7 +33,7 @@ export const RGB_PROFILES = Object.freeze({
     nftSold: NFT_SOLD_URL,
     // always listed, at 0 until held (like UniSat's): the test USDT bridged to signet (a BFA token). Shown from its
     // own contract once it arrives; this is only its place in the list
-    pinned: Object.freeze([Object.freeze({ assetId: 'rgb:uVMNCuVU-U00Y_wv-6~7ZbW7-tEuUMcE-pB0wDzC-nt7Qsdc', ticker: 'USDT', name: 'USDT (signet test)', precision: 6 })]),
+    pinned: Object.freeze([Object.freeze({ assetId: 'rgb:uVMNCuVU-U00Y_wv-6~7ZbW7-tEuUMcE-pB0wDzC-nt7Qsdc', ticker: 'USDT', name: 'USDT', precision: 6, schema: 'BFA' })]),
     funding: 'Send Signet coins here, for example from your MASKED Signet Public balance.',
   }),
   utexo: Object.freeze({
