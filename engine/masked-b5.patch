@@ -11,7 +11,7 @@ index 884d686..e2896b5 100644
  rgb-strict-encoding = { version = "=1.0.5", default-features = false, features = [
      "bitcoin",
 diff --git a/bindings/wasm/src/lib.rs b/bindings/wasm/src/lib.rs
-index 51b6efd..3d3e932 100644
+index 51b6efd..495e8bd 100644
 --- a/bindings/wasm/src/lib.rs
 +++ b/bindings/wasm/src/lib.rs
 @@ -77,6 +77,27 @@ pub fn init() {
@@ -733,7 +733,7 @@ index 51b6efd..3d3e932 100644
  #[wasm_bindgen(js_name = "validateConsignmentOffchain")]
  pub fn validate_consignment_offchain(
      consignment_bytes: &[u8],
-@@ -1235,3 +1903,43 @@ pub fn validate_consignment_offchain(
+@@ -1235,3 +1903,52 @@ pub fn validate_consignment_offchain(
      .map_err(|e| JsValue::from_str(&e.to_string()))?;
      to_js(&result)
  }
@@ -752,10 +752,19 @@ index 51b6efd..3d3e932 100644
 +        .map_err(|e| JsValue::from_str(&e.to_string()))
 +}
 +
++/// MASKED: an asset's history from a consignment (raw strict-encoded bytes): `{ contractId, assetSchema?,
++/// genesisTimestamp, witnesses: [txid…], transitions }`. Lists what the consignment holds; validates nothing.
++#[wasm_bindgen(js_name = "consignmentHistory")]
++pub fn consignment_history(consignment_bytes: &[u8]) -> Result<JsValue, JsValue> {
++    let result = rgb_lib_wasm::wallet::rust_only::consignment_history(consignment_bytes)
++        .map_err(|e| JsValue::from_str(&e.to_string()))?;
++    to_js(&result)
++}
++
 +/// MASKED: the features of this engine build.
 +#[wasm_bindgen(js_name = "engineFeatures")]
 +pub fn engine_features() -> Vec<String> {
-+    vec!["swap".into(), "presign".into(), "proxy-v1".into(), "p2p-swap".into(), "output-locks".into(), "uda".into(), "cosign".into(), "uda-claim".into(), "legacy-migration".into(), "legacy-consignments".into(), "legacy-backup".into(), "reopen-purchase".into(), "refresh-skip".into()]
++    vec!["swap".into(), "presign".into(), "proxy-v1".into(), "p2p-swap".into(), "output-locks".into(), "uda".into(), "cosign".into(), "uda-claim".into(), "legacy-migration".into(), "legacy-consignments".into(), "legacy-backup".into(), "reopen-purchase".into(), "refresh-skip".into(), "history".into()]
 +}
 +
 +#[wasm_bindgen(js_name = "inspectSwapConsignment")]
@@ -5630,7 +5639,7 @@ index ca96b4a..9e0115d 100644
 +    }
 +}
 diff --git a/src/wallet/rust_only.rs b/src/wallet/rust_only.rs
-index 4e07a9c..cf52acc 100644
+index 4e07a9c..852f4f6 100644
 --- a/src/wallet/rust_only.rs
 +++ b/src/wallet/rust_only.rs
 @@ -3,6 +3,7 @@
@@ -5641,7 +5650,58 @@ index 4e07a9c..cf52acc 100644
  
  /// RGB asset-specific information to color a transaction
  #[derive(Clone, Debug)]
-@@ -52,6 +53,15 @@ pub struct ValidateConsignmentResult {
+@@ -40,6 +41,50 @@ impl fmt::Display for IndexerProtocol {
+     }
+ }
+ 
++/// MASKED: an asset's history as a consignment carries it (its provenance): every Bitcoin transaction a transfer of it
++/// was anchored in, from the oldest the consignment holds, and when its contract was made. Read only, nothing checked:
++/// a wallet validates a consignment before accepting it; this only lists what is inside.
++#[derive(Debug, Clone, Serialize, Deserialize)]
++pub struct ConsignmentHistory {
++    /// The asset (contract) the consignment is for.
++    #[serde(rename = "contractId")]
++    pub contract_id: String,
++    /// The asset's schema ("Nia", "Uda" for an NFT…), when known.
++    #[serde(default, skip_serializing_if = "Option::is_none", rename = "assetSchema")]
++    pub asset_schema: Option<String>,
++    /// When the contract (genesis) was made, Unix seconds, as its issuer wrote it.
++    #[serde(rename = "genesisTimestamp")]
++    pub genesis_timestamp: i64,
++    /// The witness transactions of its transfers, each once, in the consignment's order.
++    pub witnesses: Vec<String>,
++    /// How many state transitions (transfers) the consignment holds.
++    pub transitions: usize,
++}
++
++/// MASKED: read an asset's history from a consignment (strict-encoded bytes, any version this engine loads).
++pub fn consignment_history(consignment_bytes: &[u8]) -> Result<ConsignmentHistory, Error> {
++    let consignment = RgbTransfer::load(consignment_bytes).map_err(|e| Error::Internal {
++        details: format!("Failed to load consignment: {e}"),
++    })?;
++    let mut witnesses: Vec<String> = vec![];
++    let mut transitions = 0usize;
++    for bw in consignment.bundled_witnesses() {
++        let id = bw.witness_id().to_string();
++        if !witnesses.contains(&id) {
++            witnesses.push(id);
++        }
++        transitions += bw.bundle.known_transitions.len();
++    }
++    let asset_schema: Option<AssetSchema> = consignment.schema_id().try_into().ok();
++    Ok(ConsignmentHistory {
++        contract_id: consignment.contract_id().to_string(),
++        asset_schema: asset_schema.map(|s| format!("{s:?}")),
++        genesis_timestamp: consignment.genesis.timestamp,
++        witnesses,
++        transitions,
++    })
++}
++
+ /// Result of consignment validation (offchain or indexer-based).
+ #[cfg(feature = "esplora")]
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+@@ -52,6 +97,15 @@ pub struct ValidateConsignmentResult {
      pub error: Option<String>,
      /// Detailed error/failure description (when invalid).
      pub details: Option<String>,
@@ -5657,7 +5717,7 @@ index 4e07a9c..cf52acc 100644
  }
  
  impl Wallet {
-@@ -157,6 +167,8 @@ impl Wallet {
+@@ -157,6 +211,8 @@ impl Wallet {
                  beneficiaries.push(seal);
  
                  match schema {
@@ -5666,7 +5726,7 @@ index 4e07a9c..cf52acc 100644
                      AssetSchema::Nia | AssetSchema::Ifa | AssetSchema::Bfa => {
                          asset_transition_builder = asset_transition_builder.add_fungible_state(
                              assignment_name.clone(),
-@@ -370,6 +382,32 @@ impl Wallet {
+@@ -370,6 +426,32 @@ impl Wallet {
                      linked_from_contract: None,
                  }
              }
@@ -5699,7 +5759,7 @@ index 4e07a9c..cf52acc 100644
              AssetSchema::Ifa => {
                  let contract = runtime.contract_wrapper::<InflatableFungibleAsset>(contract_id)?;
                  let spec = contract.spec();
-@@ -554,6 +592,18 @@ pub fn validate_consignment_offchain(
+@@ -554,6 +636,18 @@ pub fn validate_consignment_offchain(
      consignment_bytes: &[u8],
      txid: &str,
      bitcoin_network: BitcoinNetwork,
@@ -5718,7 +5778,7 @@ index 4e07a9c..cf52acc 100644
  ) -> Result<ValidateConsignmentResult, Error> {
      let consignment = RgbTransfer::load(consignment_bytes).map_err(|e| Error::Internal {
          details: format!("Failed to load consignment: {e}"),
-@@ -589,6 +639,34 @@ pub fn validate_consignment_offchain(
+@@ -589,6 +683,34 @@ pub fn validate_consignment_offchain(
      {
          Ok(valid_consignment) => {
              let status = valid_consignment.validation_status();
@@ -5753,7 +5813,7 @@ index 4e07a9c..cf52acc 100644
              Ok(ValidateConsignmentResult {
                  valid: true,
                  warnings: Some(
-@@ -600,6 +678,9 @@ pub fn validate_consignment_offchain(
+@@ -600,6 +722,9 @@ pub fn validate_consignment_offchain(
                  ),
                  error: None,
                  details: None,
@@ -5763,7 +5823,7 @@ index 4e07a9c..cf52acc 100644
              })
          }
          Err(ValidationError::InvalidConsignment(failure)) => Ok(ValidateConsignmentResult {
-@@ -607,24 +688,36 @@ pub fn validate_consignment_offchain(
+@@ -607,24 +732,36 @@ pub fn validate_consignment_offchain(
              warnings: None,
              error: Some("invalid".to_string()),
              details: Some(failure.to_string()),
@@ -5800,7 +5860,7 @@ index 4e07a9c..cf52acc 100644
          }),
      }
  }
-@@ -633,6 +726,55 @@ pub fn validate_consignment_offchain(
+@@ -633,6 +770,55 @@ pub fn validate_consignment_offchain(
  mod tests {
      use super::*;
  
@@ -5856,7 +5916,7 @@ index 4e07a9c..cf52acc 100644
      #[test]
      fn validate_consignment_offchain_invalid_bytes() {
          let result = validate_consignment_offchain(
-@@ -666,9 +808,13 @@ mod tests {
+@@ -666,9 +852,13 @@ mod tests {
              warnings: Some(vec!["warn1".to_string()]),
              error: None,
              details: None,
@@ -5870,7 +5930,7 @@ index 4e07a9c..cf52acc 100644
          assert!(deserialized.valid);
          assert_eq!(deserialized.warnings.unwrap(), vec!["warn1".to_string()]);
          assert!(deserialized.error.is_none());
-@@ -678,6 +824,9 @@ mod tests {
+@@ -678,6 +868,9 @@ mod tests {
              warnings: None,
              error: Some("invalid".to_string()),
              details: Some("schema mismatch".to_string()),
@@ -5880,7 +5940,7 @@ index 4e07a9c..cf52acc 100644
          };
          let json = serde_json::to_string(&result_invalid).unwrap();
          let deserialized: ValidateConsignmentResult = serde_json::from_str(&json).unwrap();
-@@ -719,3 +868,1246 @@ mod tests {
+@@ -719,3 +912,1258 @@ mod tests {
          assert_eq!(IndexerProtocol::Esplora.to_string(), "Esplora");
      }
  }
@@ -6983,6 +7043,18 @@ index 4e07a9c..cf52acc 100644
 +        }
 +        let hex = bdk_wallet::bitcoin::consensus::encode::serialize_hex(&tx);
 +        (tx, hex)
++    }
++
++    #[test]
++    fn consignment_history_lists_its_witnesses() {
++        let ls = combined::listings(&[700], 0xa0, 20000);
++        let info = presigned_listing_info(&ls[0].template).unwrap();
++        let h = consignment_history(&ls[0].consignment).unwrap();
++        assert!(h.witnesses.contains(&info.template_txid), "the listing's move is in its history: {:?}", h.witnesses);
++        assert!(h.transitions >= 1);
++        assert_eq!(h.witnesses.len(), h.witnesses.iter().collect::<std::collections::HashSet<_>>().len(), "each witness once");
++        assert!(h.contract_id.starts_with("rgb:"), "{}", h.contract_id);
++        assert!(consignment_history(&[1, 2, 3]).is_err(), "not a consignment");
 +    }
 +
 +    #[test]

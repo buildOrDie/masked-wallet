@@ -10,7 +10,8 @@
 # (migrateLegacyWallet), NFTs (RGB21 / UDA: issueAssetUda, listed, received and sent with their picture), and
 # co-signed claims (the seller signs last: cosignedListingInfo, checkCosignedPartial, psbtExtractHexCosigned,
 # cosignPresigned, presignedStripSeller; coloredAddress), and NFTs minted by their claimer (udaGenesisFor,
-# checkUdaGenesis, adoptUdaGenesis). Output: vendor/rgb-lib-wasm/, which `npm run build` uses instead of the npm package.
+# checkUdaGenesis, adoptUdaGenesis), and an asset's history read from a consignment for NFT provenance
+# (consignmentHistory). Output: vendor/rgb-lib-wasm/, which `npm run build` uses instead of the npm package.
 #
 # Needs: git, Rust (rustup) with the wasm32 target, wasm-pack 0.14, and a C compiler that targets WebAssembly
 # (on a Mac: `brew install llvm`; Apple's own clang can't). 10–20 minutes the first time.
